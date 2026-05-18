@@ -179,6 +179,16 @@ flowchart TD
 | `msspack busco --config my_submission.toml --genome` | CDS inputs plus genome FASTA before and after processing | Additional BUSCO summaries and comparison plots under `busco/genome/` |
 | `msspack report --config my_submission.toml` | Final MSS files, logs, metrics, manifest, validation outputs, plots, and BUSCO outputs | `report/index.html` |
 
+## Example outputs
+
+`msspack plot` renders a stage-wise Sankey diagram that summarizes how gene models move through the packaging pipeline. This example was generated from synthetic stage metrics so no unpublished submission data are exposed.
+
+<img src="docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram" width="900">
+
+`msspack busco` can also render a compact BUSCO comparison for GFF-derived CDS FASTA sets. The example below uses synthetic BUSCO summary values so no unpublished assembly metrics are exposed.
+
+<img src="docs/assets/sample-busco-cds-comparison.svg" alt="Example msspack BUSCO CDS comparison plot" width="700">
+
 ## Config
 
 See [`examples/msspack.example.toml`](examples/msspack.example.toml) for the current schema.

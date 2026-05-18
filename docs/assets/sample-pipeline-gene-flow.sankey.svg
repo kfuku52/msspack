@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1720" height="680" viewBox="0 0 1720 680">
+<style>text{font-family:Helvetica,Arial,sans-serif;fill:#111827} .title{font-size:22px;font-weight:700} .subtitle{font-size:12px;fill:#4b5563} .stage{font-size:12px;font-weight:700;fill:#334155} .label{font-size:12px} .count{font-size:11px;fill:#475569}</style>
+<rect width="100%" height="100%" fill="white"/>
+<text x="40" y="40" class="title">Stage-wise pipeline gene flow</text>
+<text x="40" y="62" class="subtitle">Branches show step-specific categories. Merge nodes reset totals between independent pipeline stages, so the ribbons summarize stage counts without implying per-gene overlap across steps.</text>
+<text x="94.00" y="104" text-anchor="middle" class="stage">Input</text>
+<text x="285.50" y="104" text-anchor="middle" class="stage">Duplicate removal</text>
+<text x="477.00" y="104" text-anchor="middle" class="stage">Transcript choice</text>
+<text x="668.50" y="104" text-anchor="middle" class="stage">After transcript choice</text>
+<text x="860.00" y="104" text-anchor="middle" class="stage">Frame correction</text>
+<text x="1051.50" y="104" text-anchor="middle" class="stage">After frame correction</text>
+<text x="1243.00" y="104" text-anchor="middle" class="stage">Padding analysis</text>
+<text x="1434.50" y="104" text-anchor="middle" class="stage">After padding</text>
+<text x="1626.00" y="104" text-anchor="middle" class="stage">Final feature fate</text>
+<path d="M 108.00 160.00 C 165.22 160.00, 214.28 149.00, 271.50 149.00 L 271.50 576.50 C 214.28 576.50, 165.22 587.50, 108.00 587.50 Z" fill="#64748b" fill-opacity="0.55" stroke="none"/>
+<path d="M 108.00 587.50 C 165.22 587.50, 214.28 598.50, 271.50 598.50 L 271.50 621.00 C 214.28 621.00, 165.22 610.00, 108.00 610.00 Z" fill="#dc2626" fill-opacity="0.55" stroke="none"/>
+<path d="M 299.50 149.00 C 356.73 149.00, 405.77 160.25, 463.00 160.25 L 463.00 497.75 C 405.77 497.75, 356.73 486.50, 299.50 486.50 Z" fill="#94a3b8" fill-opacity="0.55" stroke="none"/>
+<path d="M 299.50 486.50 C 356.73 486.50, 405.77 519.75, 463.00 519.75 L 463.00 609.75 C 405.77 609.75, 356.73 576.50, 299.50 576.50 Z" fill="#2563eb" fill-opacity="0.55" stroke="none"/>
+<path d="M 491.00 160.25 C 548.23 160.25, 597.27 171.25, 654.50 171.25 L 654.50 508.75 C 597.27 508.75, 548.23 497.75, 491.00 497.75 Z" fill="#94a3b8" fill-opacity="0.55" stroke="none"/>
+<path d="M 491.00 519.75 C 548.23 519.75, 597.27 508.75, 654.50 508.75 L 654.50 598.75 C 597.27 598.75, 548.23 609.75, 491.00 609.75 Z" fill="#2563eb" fill-opacity="0.55" stroke="none"/>
+<path d="M 682.50 171.25 C 739.73 171.25, 788.77 158.00, 846.00 158.00 L 846.00 572.00 C 788.77 572.00, 739.73 585.25, 682.50 585.25 Z" fill="#cbd5e1" fill-opacity="0.55" stroke="none"/>
+<path d="M 682.50 585.25 C 739.73 585.25, 788.77 594.00, 846.00 594.00 L 846.00 607.50 C 788.77 607.50, 739.73 598.75, 682.50 598.75 Z" fill="#d97706" fill-opacity="0.55" stroke="none"/>
+<path d="M 874.00 158.00 C 931.23 158.00, 980.27 169.50, 1037.50 169.50 L 1037.50 583.50 C 980.27 583.50, 931.23 572.00, 874.00 572.00 Z" fill="#cbd5e1" fill-opacity="0.55" stroke="none"/>
+<path d="M 874.00 594.00 C 931.23 594.00, 980.27 583.50, 1037.50 583.50 L 1037.50 597.00 C 980.27 597.00, 931.23 607.50, 874.00 607.50 Z" fill="#d97706" fill-opacity="0.55" stroke="none"/>
+<path d="M 1065.50 169.50 C 1122.72 169.50, 1171.78 140.25, 1229.00 140.25 L 1229.00 549.75 C 1171.78 549.75, 1122.72 579.00, 1065.50 579.00 Z" fill="#cbd5e1" fill-opacity="0.55" stroke="none"/>
+<path d="M 1065.50 579.00 C 1122.72 579.00, 1171.78 571.75, 1229.00 571.75 L 1229.00 585.25 C 1171.78 585.25, 1122.72 592.50, 1065.50 592.50 Z" fill="#0891b2" fill-opacity="0.55" stroke="none"/>
+<path d="M 1065.50 592.50 C 1122.72 592.50, 1171.78 611.75, 1229.00 611.75 L 1229.00 619.75 C 1171.78 619.75, 1122.72 600.50, 1065.50 600.50 Z" fill="#be123c" fill-opacity="0.55" stroke="none"/>
+<path d="M 1257.00 140.25 C 1314.22 140.25, 1363.28 169.50, 1420.50 169.50 L 1420.50 579.00 C 1363.28 579.00, 1314.22 549.75, 1257.00 549.75 Z" fill="#cbd5e1" fill-opacity="0.55" stroke="none"/>
+<path d="M 1257.00 571.75 C 1314.22 571.75, 1363.28 579.00, 1420.50 579.00 L 1420.50 592.50 C 1363.28 592.50, 1314.22 585.25, 1257.00 585.25 Z" fill="#0891b2" fill-opacity="0.55" stroke="none"/>
+<path d="M 1257.00 611.75 C 1314.22 611.75, 1363.28 592.50, 1420.50 592.50 L 1420.50 600.50 C 1363.28 600.50, 1314.22 619.75, 1257.00 619.75 Z" fill="#be123c" fill-opacity="0.55" stroke="none"/>
+<path d="M 1448.50 169.50 C 1505.72 169.50, 1554.78 153.50, 1612.00 153.50 L 1612.00 576.50 C 1554.78 576.50, 1505.72 592.50, 1448.50 592.50 Z" fill="#059669" fill-opacity="0.55" stroke="none"/>
+<path d="M 1448.50 592.50 C 1505.72 592.50, 1554.78 598.50, 1612.00 598.50 L 1612.00 606.50 C 1554.78 606.50, 1505.72 600.50, 1448.50 600.50 Z" fill="#b45309" fill-opacity="0.55" stroke="none"/>
+<rect x="80.00" y="160.00" width="28.00" height="450.00" rx="4" fill="#475569" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="271.50" y="149.00" width="28.00" height="427.50" rx="4" fill="#64748b" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="271.50" y="598.50" width="28.00" height="22.50" rx="4" fill="#dc2626" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="463.00" y="160.25" width="28.00" height="337.50" rx="4" fill="#94a3b8" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="463.00" y="519.75" width="28.00" height="90.00" rx="4" fill="#2563eb" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="654.50" y="171.25" width="28.00" height="427.50" rx="4" fill="#475569" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="846.00" y="158.00" width="28.00" height="414.00" rx="4" fill="#cbd5e1" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="846.00" y="594.00" width="28.00" height="18.00" rx="4" fill="#d97706" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="1037.50" y="169.50" width="28.00" height="431.00" rx="4" fill="#475569" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="1229.00" y="140.25" width="28.00" height="409.50" rx="4" fill="#cbd5e1" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="1229.00" y="571.75" width="28.00" height="18.00" rx="4" fill="#0891b2" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="1229.00" y="611.75" width="28.00" height="18.00" rx="4" fill="#be123c" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="1420.50" y="169.50" width="28.00" height="431.00" rx="4" fill="#475569" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="1612.00" y="153.50" width="28.00" height="423.00" rx="4" fill="#059669" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="1612.00" y="598.50" width="28.00" height="18.00" rx="4" fill="#b45309" stroke="#0f172a" stroke-width="0.8"/>
+<text x="116.00" y="380.00" text-anchor="start" class="label">Input genes</text>
+<text x="116.00" y="395.00" text-anchor="start" class="count">100 genes</text>
+<text x="307.50" y="357.75" text-anchor="start" class="label">After duplicate removal</text>
+<text x="307.50" y="372.75" text-anchor="start" class="count">95 genes</text>
+<text x="307.50" y="607.50" text-anchor="start" class="label">Duplicate genes removed</text>
+<text x="307.50" y="622.50" text-anchor="start" class="count">5 genes</text>
+<text x="499.00" y="324.00" text-anchor="start" class="label">Genes unchanged by transcript choice</text>
+<text x="499.00" y="339.00" text-anchor="start" class="count">75 genes</text>
+<text x="499.00" y="559.75" text-anchor="start" class="label">Genes with transcript pruning</text>
+<text x="499.00" y="574.75" text-anchor="start" class="count">20 genes</text>
+<text x="690.50" y="380.00" text-anchor="start" class="label">After single-mRNA selection</text>
+<text x="690.50" y="395.00" text-anchor="start" class="count">95 genes</text>
+<text x="882.00" y="360.00" text-anchor="start" class="label">Genes unchanged by frame correction</text>
+<text x="882.00" y="375.00" text-anchor="start" class="count">92 genes</text>
+<text x="882.00" y="603.00" text-anchor="start" class="label">Genes updated to restore frame</text>
+<text x="882.00" y="618.00" text-anchor="start" class="count">3 genes</text>
+<text x="1073.50" y="380.00" text-anchor="start" class="label">After frame correction</text>
+<text x="1073.50" y="395.00" text-anchor="start" class="count">95 genes</text>
+<text x="1265.00" y="340.00" text-anchor="start" class="label">Genes unchanged by padding</text>
+<text x="1265.00" y="355.00" text-anchor="start" class="count">91 genes</text>
+<text x="1265.00" y="580.75" text-anchor="start" class="label">Genes updated by padding</text>
+<text x="1265.00" y="595.75" text-anchor="start" class="count">3 genes</text>
+<text x="1265.00" y="620.75" text-anchor="start" class="label">Genes with stops after padding</text>
+<text x="1265.00" y="635.75" text-anchor="start" class="count">1 genes</text>
+<text x="1412.50" y="380.00" text-anchor="end" class="label">After padding analysis</text>
+<text x="1412.50" y="395.00" text-anchor="end" class="count">95 genes</text>
+<text x="1604.00" y="360.00" text-anchor="end" class="label">Final CDS genes</text>
+<text x="1604.00" y="375.00" text-anchor="end" class="count">94 genes</text>
+<text x="1604.00" y="607.50" text-anchor="end" class="label">Final misc_feature genes</text>
+<text x="1604.00" y="622.50" text-anchor="end" class="count">1 genes</text>
+</svg>
