@@ -1,0 +1,103 @@
+[project]
+name = "Dimus"
+output_dir = "../build/Dimus"
+
+[inputs]
+fasta = "/path/to/Dionaea_muscipula_v2.1.fa"
+gff = "/path/to/Dionaea_muscipula.gff3"
+
+[sample]
+locus_tag = "Dimus"
+locus_tag_digits = 6
+scientific_name = "Dionaea muscipula"
+strain = ""
+isolate = "Cresco Carnivora WT1"
+geo_loc_name = "Germany"
+collection_date = "2020-10-21"
+sex = ""
+linkage_evidence = "proximity ligation"
+genetic_code = "1"
+
+[submission]
+datatype = "WGS"
+hold_date = "20270401"
+bioproject = "PRJDB15741"
+biosample = "SAMD00598703"
+sra = [
+  "DRR463573",
+  "DRR463574",
+  "DRR463575",
+  "DRR463576",
+  "DRR463577",
+  "DRR463578",
+  "DRR463579",
+  "DRR463580",
+]
+keywords = ["WGS", "STANDARD_DRAFT"]
+
+[submitter]
+ab_name = ["Doe,J."]
+contact = "Jane Doe"
+institute = "Institute"
+department = "Department"
+country = "Japan"
+state = "State"
+city = "City"
+street = "Street Address"
+zip = "000-0000"
+phone = "00-00-0000-0000"
+email = "your.email@example.org"
+
+[reference]
+title = "Dionaea muscipula genome sequencing"
+ab_name = ["Fukushima,K."]
+year = 2025
+status = "Unpublished"
+
+[st_comment]
+tagset_id = "Genome-Assembly-Data"
+assembly_method = "Flye v. 2.8.3; medaka v. 1.4.3; NextPolish v. 1.3.1"
+assembly_name = "Diomu_v2.1"
+genome_coverage = "272X"
+sequencing_technology = "Nanopore PromethION"
+
+[pipeline]
+run_gapjust = true
+gap_assembly = "unknown"
+infer_complete = true
+validate_in_parallel = true
+feature_with_gap = "misc_feature"
+min_assembly_gap = 50
+min_artificial_intron_size = 10
+replace_product_patterns = [
+  "Arf17p",
+  "Cullin-1",
+  "Cullin-3A",
+  "Cullin-4",
+  "Dnae2p",
+  "Gcp2p",
+  "Iaa10p",
+  "Iaa15p",
+  "Iaa2p",
+  "Iaa33p",
+  "L14B",
+  "Lhcb6-1p",
+  "Lox4p",
+  "Lox9p",
+  "Lta2p",
+  "MIP05841p",
+  "Mlo14p",
+  "Rhm1p",
+  "Rps7-ap",
+  "Sdh2-1p",
+  "Sec63",
+  "Villin-3",
+  "Villin-4",
+  "Ycf1p",
+  "aci13",
+  "cTPxI",
+  "trkA",
+]
+
+[tools]
+java_heap = "16G"

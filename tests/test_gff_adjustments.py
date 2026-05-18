@@ -1,0 +1,164 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from msspack.gff_adjustments import apply_padding_to_gff, fix_gff_to_inframe
+
+
+class GffAdjustmentTests(unittest.TestCase):
+    def test_fix_gff_to_inframe_updates_boundaries_and_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            output_gff = base / "output.gff3"
+            log_path = base / "summary.log"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t12\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t12\t.\t+\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t5\t.\t+\t.\tID=t1.ex1;Parent=t1",
+                        "chr1\tsrc\texon\t10\t12\t.\t+\t.\tID=t1.ex2;Parent=t1",
+                        "chr1\tsrc\tCDS\t1\t5\t.\t+\t1\tID=t1.cds;Parent=t1",
+                        "chr1\tsrc\tCDS\t10\t12\t.\t+\t0\tID=t1.cds;Parent=t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            summary = fix_gff_to_inframe(
+                input_path=input_gff,
+                output_path=output_gff,
+                log_path=log_path,
+            )
+
+            self.assertEqual(summary["updated_gene_models"], 1)
+            text = output_gff.read_text(encoding="utf-8")
+            self.assertIn("gene\t2\t11", text)
+            self.assertIn("mRNA\t2\t11", text)
+            self.assertIn("exon\t2\t5", text)
+            self.assertIn("exon\t10\t11", text)
+            self.assertIn("CDS\t2\t5\t.\t+\t0", text)
+            self.assertIn("CDS\t10\t11\t.\t+\t0", text)
+
+    def test_apply_padding_to_gff_updates_gene_and_lists_updated_gene(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            padding_log = base / "padding.log"
+            output_gff = base / "output.gff3"
+            with_stops = base / "with_stops.txt"
+            updated = base / "updated.txt"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t9\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t9\t.\t+\t.\tID=g1-RA;Parent=g1",
+                        "chr1\tsrc\texon\t1\t9\t.\t+\t.\tID=g1-RA.ex1;Parent=g1-RA",
+                        "chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=g1-RA.cds;Parent=g1-RA",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            padding_log.write_text(
+                "g1, original_seqlen=9, head_padding=2, tail_padding=3, original_num_stop=1, new_num_stop=0\n",
+                encoding="utf-8",
+            )
+
+            summary = apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=padding_log,
+                output_path=output_gff,
+                genes_with_stops_path=with_stops,
+                updated_genes_path=updated,
+            )
+
+            self.assertEqual(summary["updated_genes"], ["g1"])
+            self.assertIn("g1", updated.read_text(encoding="utf-8"))
+            self.assertEqual(with_stops.read_text(encoding="utf-8"), "")
+            text = output_gff.read_text(encoding="utf-8")
+            self.assertIn("gene\t2\t9", text)
+            self.assertIn("mRNA\t2\t9", text)
+            self.assertIn("exon\t2\t9", text)
+            self.assertIn("CDS\t2\t9\t.\t+\t0", text)
+
+    def test_apply_padding_to_gff_keeps_gene_with_stops_unmodified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            padding_log = base / "padding.log"
+            output_gff = base / "output.gff3"
+            with_stops = base / "with_stops.txt"
+            updated = base / "updated.txt"
+            original = "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t9\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t9\t.\t+\t.\tID=g1-RA;Parent=g1",
+                        "chr1\tsrc\texon\t1\t9\t.\t+\t.\tID=g1-RA.ex1;Parent=g1-RA",
+                        "chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=g1-RA.cds;Parent=g1-RA",
+                        "",
+                    ]
+                )
+            input_gff.write_text(original, encoding="utf-8")
+            padding_log.write_text(
+                "g1, original_seqlen=9, head_padding=2, tail_padding=3, original_num_stop=1, new_num_stop=1\n",
+                encoding="utf-8",
+            )
+
+            summary = apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=padding_log,
+                output_path=output_gff,
+                genes_with_stops_path=with_stops,
+                updated_genes_path=updated,
+            )
+
+            self.assertEqual(summary["genes_with_stops"], ["g1"])
+            self.assertEqual(output_gff.read_text(encoding="utf-8"), original)
+            self.assertIn("g1", with_stops.read_text(encoding="utf-8"))
+            self.assertEqual(updated.read_text(encoding="utf-8"), "")
+
+    def test_apply_padding_to_gff_resolves_transcript_ids_without_ra_suffix_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            padding_log = base / "padding.log"
+            output_gff = base / "output.gff3"
+            with_stops = base / "with_stops.txt"
+            updated = base / "updated.txt"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t9\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\ttranscript\t1\t9\t.\t+\t.\tID=tx1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t9\t.\t+\t.\tID=tx1.ex1;Parent=tx1",
+                        "chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=tx1.cds;Parent=tx1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            padding_log.write_text(
+                "tx1, original_seqlen=9, head_padding=2, tail_padding=3, original_num_stop=1, new_num_stop=0\n",
+                encoding="utf-8",
+            )
+
+            summary = apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=padding_log,
+                output_path=output_gff,
+                genes_with_stops_path=with_stops,
+                updated_genes_path=updated,
+            )
+
+            self.assertEqual(summary["updated_genes"], ["g1"])
+            self.assertIn("g1", updated.read_text(encoding="utf-8"))
+            text = output_gff.read_text(encoding="utf-8")
+            self.assertIn("gene\t2\t9", text)
+            self.assertIn("transcript\t2\t9", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

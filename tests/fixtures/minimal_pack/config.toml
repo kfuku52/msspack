@@ -1,0 +1,67 @@
+[project]
+name = "Fixture"
+output_dir = "build/Fixture"
+
+[inputs]
+fasta = "input.fa"
+gff = "input.gff3"
+
+[sample]
+locus_tag = "Fix"
+locus_tag_digits = 6
+scientific_name = "Fixture organism"
+strain = ""
+isolate = "Iso1"
+geo_loc_name = "Japan"
+collection_date = "2026-01-02"
+sex = ""
+linkage_evidence = "paired-ends"
+genetic_code = "1"
+
+[submission]
+datatype = "WGS"
+hold_date = "20271231"
+bioproject = "PRJDB000001"
+biosample = "SAMD00000001"
+sra = ["DRR000001"]
+keywords = ["WGS"]
+
+[submitter]
+ab_name = ["Doe,J."]
+contact = "Jane Doe"
+institute = "Institute"
+department = "Department"
+country = "Japan"
+state = "Tokyo"
+city = "Tokyo"
+street = "Street"
+zip = "000-0000"
+phone = "00-00-0000-0000"
+email = "fixture@example.org"
+
+[reference]
+title = "Fixture genome sequencing"
+ab_name = ["Doe,J."]
+year = 2026
+status = "Unpublished"
+
+[st_comment]
+tagset_id = "Genome-Assembly-Data"
+assembly_method = "assembler v1"
+assembly_name = "Fixture_1.0"
+genome_coverage = "10X"
+sequencing_technology = "Illumina"
+
+[pipeline]
+run_gapjust = false
+gap_assembly = "unknown"
+infer_complete = true
+feature_with_gap = "misc_feature"
+min_assembly_gap = 50
+min_artificial_intron_size = 10
+replace_product_patterns = []
+validate_with_parser = false
+validate_with_transchecker = false
+
+[tools]
+java_heap = "1G"

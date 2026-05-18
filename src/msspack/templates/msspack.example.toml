@@ -1,0 +1,84 @@
+[project]
+name = "MySubmission"
+output_dir = "build/MySubmission"
+
+[inputs]
+fasta = "/absolute/path/to/reference.fa"
+gff = "/absolute/path/to/annotation.gff"
+
+[sample]
+locus_tag = "MyTag"
+locus_tag_digits = 6
+scientific_name = "Genus species"
+strain = ""
+isolate = ""
+geo_loc_name = "Japan"
+collection_date = "2026-01-01"
+sex = ""
+linkage_evidence = "proximity ligation"
+genetic_code = "1"
+
+[submission]
+datatype = "WGS"
+hold_date = "20261231"
+bioproject = "PRJDB00000"
+biosample = "SAMD00000000"
+sra = ["DRR000000"]
+keywords = ["WGS", "STANDARD_DRAFT"]
+
+[submitter]
+ab_name = ["Doe,J."]
+contact = "Jane Doe"
+institute = "Institute"
+department = "Department"
+country = "Japan"
+state = "State"
+city = "City"
+street = "Street Address"
+zip = "000-0000"
+phone = "00-00-0000-0000"
+email = "your.email@example.org"
+
+[reference]
+title = "Genome sequencing"
+ab_name = ["Doe,J."]
+year = 2026
+status = "Unpublished"
+
+[st_comment]
+tagset_id = "Genome-Assembly-Data"
+assembly_method = "Assembler 1.0"
+assembly_name = "MyAssembly_1.0"
+genome_coverage = "100X"
+sequencing_technology = "Sequencer"
+
+[pipeline]
+run_gapjust = true
+gap_assembly = "unknown"
+infer_complete = true
+validate_in_parallel = true
+feature_with_gap = "misc_feature"
+min_assembly_gap = 50
+min_artificial_intron_size = 10
+replace_product_patterns = [
+  "\\) transport protein",
+  "18S rRNA",
+  "Cullin-1",
+  "Cullin-3A",
+  "Cullin-4",
+]
+
+[busco]
+command = "busco"
+run_cds = true
+run_genome = false
+mode = "genome"
+cds_mode = "transcriptome"
+lineage_dataset = ""
+auto_lineage = true
+auto_lineage_scope = "all"
+threads = 8
+download_path = ""
+offline = false
+force = false
+opt_out_run_stats = true

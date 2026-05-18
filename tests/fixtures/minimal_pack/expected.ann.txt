@@ -1,0 +1,38 @@
+COMMON	DATE		hold_date	20271231
+	DATATYPE		type	WGS
+	DBLINK		project	PRJDB000001
+			biosample	SAMD00000001
+			sequence read archive	DRR000001
+	KEYWORD		keyword	WGS
+	SUBMITTER		ab_name	Doe,J.
+			contact	Jane Doe
+			institute	Institute
+			department	Department
+			country	Japan
+			state	Tokyo
+			city	Tokyo
+			street	Street
+			zip	000-0000
+			phone	00-00-0000-0000
+			email	fixture@example.org
+	REFERENCE		title	Fixture genome sequencing
+			ab_name	Doe,J.
+			year	2026
+			status	Unpublished
+	ST_COMMENT		tagset_id	Genome-Assembly-Data
+			Assembly Method	assembler v1
+			Assembly Name	Fixture_1.0
+			Genome Coverage	10X
+			Sequencing Technology	Illumina
+ctg1	source	1..9	ff_definition	@@[organism]@@ @@[isolate]@@ DNA, @@[submitter_seqid]@@
+			mol_type	genomic DNA
+			organism	Fixture organism
+			isolate	Iso1
+			geo_loc_name	Japan
+			collection_date	2026-01-02
+			submitter_seqid	@@[entry]@@
+	CDS	1..9	locus_tag	Fix_gene1
+			note	transcript_id:tx1
+			product	test protein
+			transl_table	1
+			codon_start	1
