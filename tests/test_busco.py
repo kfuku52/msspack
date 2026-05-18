@@ -130,6 +130,8 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
         self.assertIn('width="3.6in"', svg)
         self.assertIn('viewBox="0 0 259.20 187.20"', svg)
         self.assertIn('y="143.0" text-anchor="middle" class="tick">0%</text>', svg)
+        self.assertIn('x="66.0" y="73.0" text-anchor="end" class="label">input</text>', svg)
+        self.assertIn('x="66.0" y="127.0" text-anchor="end" class="label">processed</text>', svg)
         self.assertIn("input", svg)
         self.assertIn("processed", svg)
         self.assertIn("embryophyta_odb12", svg)

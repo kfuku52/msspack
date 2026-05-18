@@ -148,6 +148,7 @@ class ComparisonChartLayout(TypedDict):
     width: float
     height: float
     left: float
+    label_x: float
     top: float
     bar_height: float
     bar_gap: float
@@ -614,7 +615,8 @@ def _comparison_chart_layout(
         raise MSSPackError("BUSCO comparison plot expects exactly two summaries")
     width = BUSCO_COMPARISON_WIDTH_PT
     height = 187.2
-    left = 58.0
+    left = 70.0
+    label_x = left - 4.0
     top = 64.0
     bar_height = 12.0
     bar_gap = 54.0
@@ -684,6 +686,7 @@ def _comparison_chart_layout(
         "width": width,
         "height": height,
         "left": left,
+        "label_x": label_x,
         "top": top,
         "bar_height": bar_height,
         "bar_gap": bar_gap,
@@ -715,6 +718,7 @@ def _write_comparison_svg(
     width = float(layout["width"])
     height = float(layout["height"])
     left = float(layout["left"])
+    label_x = float(layout["label_x"])
     top = float(layout["top"])
     bar_width = float(layout["bar_width"])
     bar_height = float(layout["bar_height"])
@@ -756,7 +760,7 @@ def _write_comparison_svg(
         summary = row["summary"]
         y = float(row["y"])
         parts.append(
-            f'<text x="14" y="{float(row["label_y"]):.1f}" class="label">{escape(summary.label)}</text>'
+            f'<text x="{label_x:.1f}" y="{float(row["label_y"]):.1f}" text-anchor="end" class="label">{escape(summary.label)}</text>'
         )
         for segment in row["segments"]:
             parts.append(
@@ -784,6 +788,7 @@ def _write_comparison_pdf(
     width = float(layout["width"])
     height = float(layout["height"])
     left = float(layout["left"])
+    label_x = float(layout["label_x"])
     top = float(layout["top"])
     bar_width = float(layout["bar_width"])
     bar_height = float(layout["bar_height"])
@@ -851,10 +856,11 @@ def _write_comparison_pdf(
         )
     for row in layout["rows"]:
         summary = row["summary"]
+        label_offset = CHART_FONT_SIZE_PT * 0.52 * len(summary.label)
         commands.append(
             _pdf_text_command(
                 page_height=height,
-                x=14,
+                x=max(2.0, label_x - label_offset),
                 y_top=float(row["label_y"]),
                 text=summary.label,
                 font="F2",
