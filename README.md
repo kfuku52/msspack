@@ -123,6 +123,62 @@ Most numbered pipeline stages also emit `logs/*.metrics.json` sidecars so downst
 For step-level debugging, `msspack` now exposes a single internal namespace such as `msspack internal select-one-mrna ...` and `msspack internal gff3sort ...`. The old `src/msspack/steps/*.py` standalone helper entrypoints have been removed so there is only one maintained CLI surface.
 Intermediate files and logs now use sequential descriptive stage names such as `04.gff.semicolons-fixed.gff` and `11.update-gff-with-padding.log` so the build directory is easier to inspect.
 
+## Command workflow
+
+GitHub renders the following Mermaid diagram directly in this README. It shows how the main `msspack` commands pass files to each other:
+
+```mermaid
+flowchart TD
+  Config["TOML config<br/>my_submission.toml"]
+  Inputs["Genome FASTA + GFF3<br/>paths declared in config"]
+  ToolCache["DDBJ tool cache<br/>Parser + transChecker"]
+  FinalFiles["Final MSS files<br/>final/*.ann.txt + final/*.fasta"]
+  Logs["Build logs and metrics<br/>logs/*.log + logs/*.metrics.json"]
+  Manifest["build-manifest.json"]
+  Validation["Validation outputs<br/>Parser/transChecker logs + FASTA"]
+  Plots["Pipeline plots<br/>plots/*.svg + plots/*.pdf + plots/*.tsv"]
+  Busco["BUSCO comparisons<br/>busco/cds/* and optional busco/genome/*"]
+  Report["HTML report<br/>report/index.html"]
+
+  Init["msspack init"] --> Config
+  Config --> Doctor["msspack doctor"]
+  Tools["msspack tools install"] --> ToolCache
+  Config --> Pack["msspack pack"]
+  Inputs --> Pack
+  ToolCache --> Pack
+  Pack --> FinalFiles
+  Pack --> Logs
+  Pack --> Manifest
+  FinalFiles --> Validate["msspack validate"]
+  ToolCache --> Validate
+  Validate --> Validation
+  Logs --> Plot["msspack plot"]
+  Manifest --> Plot
+  Plot --> Plots
+  FinalFiles --> BuscoCmd["msspack busco"]
+  Inputs --> BuscoCmd
+  BuscoCmd --> Busco
+  FinalFiles --> ReportCmd["msspack report"]
+  Logs --> ReportCmd
+  Manifest --> ReportCmd
+  Validation --> ReportCmd
+  Plots --> ReportCmd
+  Busco --> ReportCmd
+  ReportCmd --> Report
+```
+
+| Command | Main inputs | Main outputs |
+| --- | --- | --- |
+| `msspack init my_submission.toml` | Bundled template | A starter TOML config |
+| `msspack doctor --config my_submission.toml` | Config and local environment | Text dependency report on stdout |
+| `msspack tools install` | DDBJ download page and local cache path | Cached `Parser` and `transChecker` installations |
+| `msspack pack --config my_submission.toml` | Config, genome FASTA, GFF3, cached validation tools | `final/*.ann.txt`, `final/*.fasta`, `logs/*`, `logs/*.metrics.json`, `build-manifest.json` |
+| `msspack validate --config my_submission.toml --ann final/*.ann.txt --fasta final/*.fasta` | Existing MSS annotation and FASTA files, cached validation tools | Parser/transChecker logs and transChecker FASTA outputs |
+| `msspack plot --config my_submission.toml` | Existing `pack` build logs, metrics, and manifest | Pipeline Sankey, event-count, and changed-gene overlap plots under `plots/` |
+| `msspack busco --config my_submission.toml` | Existing `pack` outputs and GFF-derived CDS FASTA sets | BUSCO summaries and comparison plots under `busco/cds/` |
+| `msspack busco --config my_submission.toml --genome` | CDS inputs plus genome FASTA before and after processing | Additional BUSCO summaries and comparison plots under `busco/genome/` |
+| `msspack report --config my_submission.toml` | Final MSS files, logs, metrics, manifest, validation outputs, plots, and BUSCO outputs | `report/index.html` |
+
 ## Config
 
 See [`examples/msspack.example.toml`](examples/msspack.example.toml) for the current schema.
