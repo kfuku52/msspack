@@ -60,6 +60,9 @@ SEGMENT_COLORS_RGB = {
     key: tuple(int(value[index : index + 2], 16) / 255.0 for index in (1, 3, 5))
     for key, value in SEGMENT_COLORS_HEX.items()
 }
+PDF_POINTS_PER_INCH = 72.0
+BUSCO_COMPARISON_WIDTH_IN = 3.6
+BUSCO_COMPARISON_WIDTH_PT = BUSCO_COMPARISON_WIDTH_IN * PDF_POINTS_PER_INCH
 
 
 @dataclass(frozen=True)
@@ -137,21 +140,25 @@ class RowLayout(TypedDict):
     label_y: float
     summary_y: float
     segments: list[SegmentLayout]
-    summary_text: str
+    summary_lines: list[str]
 
 
 class ComparisonChartLayout(TypedDict):
     comparison_name: str
-    width: int
-    height: int
-    left: int
-    top: int
-    bar_height: int
-    bar_gap: int
-    bar_width: int
-    title_y: int
-    subtitle_y: int
-    legend_y: int
+    width: float
+    height: float
+    left: float
+    top: float
+    bar_height: float
+    bar_gap: float
+    bar_width: float
+    axis_bottom: float
+    tick_label_y: float
+    title_y: float
+    subtitle_y: float
+    legend_y: float
+    legend_gap: float
+    legend_marker_size: float
     ticks: list[TickLayout]
     legend: list[LegendItemLayout]
     rows: list[RowLayout]
@@ -605,19 +612,29 @@ def _comparison_chart_layout(
 ) -> ComparisonChartLayout:
     if len(summaries) != 2:
         raise MSSPackError("BUSCO comparison plot expects exactly two summaries")
-    width = 980
-    height = 300
-    left = 210
-    top = 110
-    bar_height = 28
-    bar_gap = 70
-    bar_width = 680
+    width = BUSCO_COMPARISON_WIDTH_PT
+    height = 187.2
+    left = 58.0
+    top = 64.0
+    bar_height = 12.0
+    bar_gap = 54.0
+    right_margin = 12.0
+    bar_width = width - left - right_margin
+    axis_bottom = top + bar_gap + bar_height
+    tick_label_y = axis_bottom + 13.0
     legend: list[LegendItemLayout] = [
-        {"label": "Single-copy", "key": "single_copy"},
-        {"label": "Duplicated", "key": "duplicated"},
-        {"label": "Fragmented", "key": "fragmented"},
-        {"label": "Missing", "key": "missing"},
+        {"label": "Single", "key": "single_copy"},
+        {"label": "Dup", "key": "duplicated"},
+        {"label": "Frag", "key": "fragmented"},
+        {"label": "Miss", "key": "missing"},
     ]
+    lineage_datasets = {summary.lineage_dataset for summary in summaries}
+    if len(lineage_datasets) == 1:
+        lineage_note = summaries[0].lineage_dataset
+    else:
+        lineage_note = " | ".join(
+            f"{summary.label}:{summary.lineage_dataset}" for summary in summaries
+        )
     rows: list[RowLayout] = []
     for index, summary in enumerate(summaries):
         y = top + index * bar_gap
@@ -643,19 +660,23 @@ def _comparison_chart_layout(
                 }
             )
             cursor += segment_width
-        summary_text = (
-            f"C:{summary.complete_pct:.1f}% [S:{summary.single_copy_pct:.1f}%, "
-            f"D:{summary.duplicated_pct:.1f}%], F:{summary.fragmented_pct:.1f}%, "
-            f"M:{summary.missing_pct:.1f}%, n:{summary.total_buscos}"
-        )
+        summary_y = y + bar_height + 10.0
+        if index == len(summaries) - 1:
+            summary_y = tick_label_y + 19.0
+        summary_lines = [
+            f"C{summary.complete_pct:.1f}% S{summary.single_copy_pct:.1f}% "
+            f"D{summary.duplicated_pct:.1f}%",
+            f"F{summary.fragmented_pct:.1f}% M{summary.missing_pct:.1f}% "
+            f"n{summary.total_buscos}",
+        ]
         rows.append(
             {
                 "summary": summary,
                 "y": y,
-                "label_y": y + 18,
-                "summary_y": y + 48,
+                "label_y": y + 9,
+                "summary_y": summary_y,
                 "segments": segments,
-                "summary_text": summary_text,
+                "summary_lines": summary_lines,
             }
         )
     return {
@@ -667,18 +688,20 @@ def _comparison_chart_layout(
         "bar_height": bar_height,
         "bar_gap": bar_gap,
         "bar_width": bar_width,
-        "title_y": 36,
-        "subtitle_y": 58,
-        "legend_y": 80,
+        "axis_bottom": axis_bottom,
+        "tick_label_y": tick_label_y,
+        "title_y": 14.0,
+        "subtitle_y": 27.0,
+        "legend_y": 42.0,
+        "legend_gap": 46.0,
+        "legend_marker_size": 5.5,
         "ticks": [
             {"value": tick, "x": left + (bar_width * tick / 100.0)}
             for tick in (0, 25, 50, 75, 100)
         ],
         "legend": legend,
         "rows": rows,
-        "lineage_note": " | ".join(
-            f"{summary.label}: {summary.lineage_dataset}" for summary in summaries
-        ),
+        "lineage_note": lineage_note,
     }
 
 
@@ -689,53 +712,64 @@ def _write_comparison_svg(
     comparison_name: str,
 ) -> Path:
     layout = _comparison_chart_layout(summaries, comparison_name=comparison_name)
-    width = int(layout["width"])
-    height = int(layout["height"])
+    width = float(layout["width"])
+    height = float(layout["height"])
     left = float(layout["left"])
     top = float(layout["top"])
-    bar_gap = float(layout["bar_gap"])
     bar_width = float(layout["bar_width"])
     bar_height = float(layout["bar_height"])
+    axis_bottom = float(layout["axis_bottom"])
+    tick_label_y = float(layout["tick_label_y"])
+    svg_width = f"{width / PDF_POINTS_PER_INCH:g}in"
+    svg_height = f"{height / PDF_POINTS_PER_INCH:g}in"
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_width}" height="{svg_height}" viewBox="0 0 {width:.2f} {height:.2f}">',
         f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .muted{{fill:#4b5563;font-size:{SVG_FONT_SIZE}}} .label{{font-size:{SVG_FONT_SIZE};font-weight:700}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .tick{{font-size:{SVG_FONT_SIZE};fill:#6b7280}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
-        f'<text x="30" y="36" class="title">BUSCO comparison: {escape(comparison_name)}</text>',
+        f'<text x="14" y="{float(layout["title_y"]):.1f}" class="title">BUSCO comparison: {escape(comparison_name)}</text>',
     ]
     parts.append(
-        f'<text x="30" y="{int(layout["subtitle_y"])}" class="muted">mode={escape(summaries[0].mode)} | datasets={escape(str(layout["lineage_note"]))}</text>'
+        f'<text x="14" y="{float(layout["subtitle_y"]):.1f}" class="muted">{escape(summaries[0].mode)} | {escape(str(layout["lineage_note"]))}</text>'
     )
     for tick in layout["ticks"]:
         x = float(tick["x"])
-        parts.append(f'<line x1="{x:.1f}" y1="{top - 18}" x2="{x:.1f}" y2="{top + 2 * bar_gap}" stroke="#e5e7eb"/>')
         parts.append(
-            f'<text x="{x:.1f}" y="{top - 24}" text-anchor="middle" class="tick">{tick["value"]}%</text>'
+            f'<line x1="{x:.1f}" y1="{top:.1f}" x2="{x:.1f}" y2="{axis_bottom:.1f}" stroke="#e5e7eb" stroke-width="0.6"/>'
+        )
+        parts.append(
+            f'<text x="{x:.1f}" y="{tick_label_y:.1f}" text-anchor="middle" class="tick">{tick["value"]}%</text>'
         )
     legend_x = left
     legend_y = float(layout["legend_y"])
+    legend_gap = float(layout["legend_gap"])
+    legend_marker_size = float(layout["legend_marker_size"])
     for index, item in enumerate(layout["legend"]):
-        x = legend_x + index * 160
+        x = legend_x + index * legend_gap
         color = SEGMENT_COLORS_HEX[str(item["key"])]
-        parts.append(f'<rect x="{x}" y="{legend_y}" width="14" height="14" rx="2" fill="{color}"/>')
         parts.append(
-            f'<text x="{x + 22}" y="{legend_y + 12}" class="muted">{escape(str(item["label"]))}</text>'
+            f'<rect x="{x:.1f}" y="{legend_y:.1f}" width="{legend_marker_size:.1f}" height="{legend_marker_size:.1f}" rx="1" fill="{color}"/>'
+        )
+        parts.append(
+            f'<text x="{x + legend_marker_size + 3:.1f}" y="{legend_y + legend_marker_size + 1.6:.1f}" class="muted">{escape(str(item["label"]))}</text>'
         )
     for row in layout["rows"]:
         summary = row["summary"]
         y = float(row["y"])
         parts.append(
-            f'<text x="30" y="{float(row["label_y"]):.1f}" class="label">{escape(summary.label)}</text>'
+            f'<text x="14" y="{float(row["label_y"]):.1f}" class="label">{escape(summary.label)}</text>'
         )
         for segment in row["segments"]:
             parts.append(
                 f'<rect x="{float(segment["x"]):.2f}" y="{float(segment["y"]):.2f}" width="{float(segment["width"]):.2f}" height="{float(segment["height"]):.2f}" fill="{SEGMENT_COLORS_HEX[str(segment["key"])]}"/>'
             )
         parts.append(
-            f'<rect x="{left}" y="{y}" width="{bar_width}" height="{bar_height}" fill="none" stroke="#111827" stroke-width="1"/>'
+            f'<rect x="{left:.1f}" y="{y:.1f}" width="{bar_width:.1f}" height="{bar_height:.1f}" fill="none" stroke="#111827" stroke-width="0.6"/>'
         )
-        parts.append(
-            f'<text x="{left}" y="{float(row["summary_y"]):.1f}" class="muted">{escape(str(row["summary_text"]))}</text>'
-        )
+        for line_index, line in enumerate(row["summary_lines"]):
+            summary_y = float(row["summary_y"]) + line_index * 10.0
+            parts.append(
+                f'<text x="{left}" y="{summary_y:.1f}" class="muted">{escape(line)}</text>'
+            )
     parts.append("</svg>")
     return write_text(output_path, "\n".join(parts) + "\n")
 
@@ -751,14 +785,15 @@ def _write_comparison_pdf(
     height = float(layout["height"])
     left = float(layout["left"])
     top = float(layout["top"])
-    bar_gap = float(layout["bar_gap"])
     bar_width = float(layout["bar_width"])
     bar_height = float(layout["bar_height"])
+    axis_bottom = float(layout["axis_bottom"])
+    tick_label_y = float(layout["tick_label_y"])
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
         _pdf_text_command(
             page_height=height,
-            x=30,
+            x=14,
             y_top=float(layout["title_y"]),
             text=f"BUSCO comparison: {comparison_name}",
             font="F2",
@@ -767,9 +802,9 @@ def _write_comparison_pdf(
         ),
         _pdf_text_command(
             page_height=height,
-            x=30,
+            x=14,
             y_top=float(layout["subtitle_y"]),
-            text=f"mode={summaries[0].mode} | datasets={str(layout['lineage_note'])}",
+            text=f"{summaries[0].mode} | {str(layout['lineage_note'])}",
             font="F1",
             size=CHART_FONT_SIZE_PT,
             color=MUTED_RGB,
@@ -777,16 +812,16 @@ def _write_comparison_pdf(
     ]
     for tick in layout["ticks"]:
         x = float(tick["x"])
-        y1 = _pdf_top_to_bottom(height, top - 18)
-        y2 = _pdf_top_to_bottom(height, top + 2 * bar_gap)
-        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 1 w {x:.2f} {y1:.2f} m {x:.2f} {y2:.2f} l S")
+        y1 = _pdf_top_to_bottom(height, top)
+        y2 = _pdf_top_to_bottom(height, axis_bottom)
+        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 0.6 w {x:.2f} {y1:.2f} m {x:.2f} {y2:.2f} l S")
         tick_text = f'{tick["value"]}%'
-        tick_offset = 3.2 * len(tick_text)
+        tick_offset = 2.1 * len(tick_text)
         commands.append(
             _pdf_text_command(
                 page_height=height,
                 x=x - tick_offset,
-                y_top=top - 24,
+                y_top=tick_label_y,
                 text=tick_text,
                 font="F1",
                 size=CHART_FONT_SIZE_PT,
@@ -794,16 +829,20 @@ def _write_comparison_pdf(
             )
         )
     legend_y = float(layout["legend_y"])
+    legend_gap = float(layout["legend_gap"])
+    legend_marker_size = float(layout["legend_marker_size"])
     for index, item in enumerate(layout["legend"]):
-        x = left + index * 160
+        x = left + index * legend_gap
         r, g, b = SEGMENT_COLORS_RGB[str(item["key"])]
-        rect_y = _pdf_top_to_bottom(height, legend_y, 14)
-        commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg {x:.2f} {rect_y:.2f} 14 14 re f")
+        rect_y = _pdf_top_to_bottom(height, legend_y, legend_marker_size)
+        commands.append(
+            f"{r:.3f} {g:.3f} {b:.3f} rg {x:.2f} {rect_y:.2f} {legend_marker_size:.2f} {legend_marker_size:.2f} re f"
+        )
         commands.append(
             _pdf_text_command(
                 page_height=height,
-                x=x + 22,
-                y_top=legend_y + 12,
+                x=x + legend_marker_size + 3,
+                y_top=legend_y + legend_marker_size + 1.6,
                 text=str(item["label"]),
                 font="F1",
                 size=CHART_FONT_SIZE_PT,
@@ -815,7 +854,7 @@ def _write_comparison_pdf(
         commands.append(
             _pdf_text_command(
                 page_height=height,
-                x=30,
+                x=14,
                 y_top=float(row["label_y"]),
                 text=summary.label,
                 font="F2",
@@ -835,19 +874,20 @@ def _write_comparison_pdf(
             )
         border_y = _pdf_top_to_bottom(height, float(row["y"]), bar_height)
         commands.append(
-            f"{TEXT_RGB[0]:.3f} {TEXT_RGB[1]:.3f} {TEXT_RGB[2]:.3f} RG 1 w {left:.2f} {border_y:.2f} {bar_width:.2f} {bar_height:.2f} re S"
+            f"{TEXT_RGB[0]:.3f} {TEXT_RGB[1]:.3f} {TEXT_RGB[2]:.3f} RG 0.6 w {left:.2f} {border_y:.2f} {bar_width:.2f} {bar_height:.2f} re S"
         )
-        commands.append(
-            _pdf_text_command(
-                page_height=height,
-                x=left,
-                y_top=float(row["summary_y"]),
-                text=str(row["summary_text"]),
-                font="F1",
-                size=CHART_FONT_SIZE_PT,
-                color=MUTED_RGB,
+        for line_index, line in enumerate(row["summary_lines"]):
+            commands.append(
+                _pdf_text_command(
+                    page_height=height,
+                    x=left,
+                    y_top=float(row["summary_y"]) + line_index * 10.0,
+                    text=line,
+                    font="F1",
+                    size=CHART_FONT_SIZE_PT,
+                    color=MUTED_RGB,
+                )
             )
-        )
 
     return write_single_page_pdf(
         width=width,

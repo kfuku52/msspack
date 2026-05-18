@@ -57,7 +57,7 @@ def write_single_page_pdf(
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
         b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
         (
-            f"<< /Type /Page /Parent 5 0 R /MediaBox [0 0 {int(width)} {int(height)}] "
+            f"<< /Type /Page /Parent 5 0 R /MediaBox [0 0 {width:.2f} {height:.2f}] "
             f"/Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 3 0 R >>"
         ).encode("latin-1"),
         b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",

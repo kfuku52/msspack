@@ -189,7 +189,7 @@ flowchart TD
 
 `msspack busco` can also render a compact BUSCO comparison for GFF-derived CDS FASTA sets. The example below uses synthetic BUSCO summary values so no unpublished assembly metrics are exposed.
 
-<img src="docs/assets/sample-busco-cds-comparison.svg" alt="Example msspack BUSCO CDS comparison plot" width="700">
+<img src="docs/assets/sample-busco-cds-comparison.svg" alt="Example msspack BUSCO CDS comparison plot" width="360">
 
 ## Config
 

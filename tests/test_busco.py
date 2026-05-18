@@ -10,6 +10,7 @@ from msspack.busco import (
     _discover_short_summary,
     _publish_busco_workspace,
     _update_busco_manifest,
+    _write_comparison_pdf,
     _write_comparison_svg,
     _write_summary_json,
     busco_workspace_root,
@@ -119,15 +120,22 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
                 selection_strategy="auto-lineage-from-input",
             )
             svg_path = base / "comparison.svg"
+            pdf_path = base / "comparison.pdf"
             _write_comparison_svg([input_summary, processed_summary], svg_path, comparison_name="genome")
+            _write_comparison_pdf([input_summary, processed_summary], pdf_path, comparison_name="genome")
             svg = svg_path.read_text(encoding="utf-8")
+            pdf = pdf_path.read_bytes().decode("latin-1")
 
         self.assertIn("BUSCO comparison: genome", svg)
+        self.assertIn('width="3.6in"', svg)
+        self.assertIn('viewBox="0 0 259.20 187.20"', svg)
+        self.assertIn('y="143.0" text-anchor="middle" class="tick">0%</text>', svg)
         self.assertIn("input", svg)
         self.assertIn("processed", svg)
         self.assertIn("embryophyta_odb12", svg)
         self.assertIn("font-size:8pt", svg)
         self.assertNotRegex(svg, r"font-size:\d+px")
+        self.assertIn("/MediaBox [0 0 259.20 187.20]", pdf)
 
     def test_summarize_busco_artifacts_reports_metric_changes(self) -> None:
         summary_text_input = """\
