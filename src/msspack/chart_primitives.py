@@ -7,6 +7,8 @@ from .utils import ensure_dir
 TEXT_RGB = (17 / 255.0, 24 / 255.0, 39 / 255.0)
 MUTED_RGB = (75 / 255.0, 85 / 255.0, 99 / 255.0)
 GRID_RGB = (229 / 255.0, 231 / 255.0, 235 / 255.0)
+CHART_FONT_SIZE_PT = 8
+SVG_FONT_SIZE = f"{CHART_FONT_SIZE_PT}pt"
 
 
 def hex_to_rgb(hex_color: str) -> tuple[float, float, float]:

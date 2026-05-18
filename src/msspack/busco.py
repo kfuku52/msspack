@@ -11,8 +11,10 @@ from typing import Optional, Sequence, TypedDict
 from xml.sax.saxutils import escape
 
 from .chart_primitives import (
+    CHART_FONT_SIZE_PT,
     GRID_RGB,
     MUTED_RGB,
+    SVG_FONT_SIZE,
     TEXT_RGB,
     write_single_page_pdf,
 )
@@ -696,7 +698,7 @@ def _write_comparison_svg(
     bar_height = float(layout["bar_height"])
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<style>text{font-family:Helvetica,Arial,sans-serif;fill:#111827} .muted{fill:#4b5563;font-size:12px} .label{font-size:14px;font-weight:700} .title{font-size:20px;font-weight:700} .tick{font-size:11px;fill:#6b7280}</style>',
+        f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .muted{{fill:#4b5563;font-size:{SVG_FONT_SIZE}}} .label{{font-size:{SVG_FONT_SIZE};font-weight:700}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .tick{{font-size:{SVG_FONT_SIZE};fill:#6b7280}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
         f'<text x="30" y="36" class="title">BUSCO comparison: {escape(comparison_name)}</text>',
     ]
@@ -760,7 +762,7 @@ def _write_comparison_pdf(
             y_top=float(layout["title_y"]),
             text=f"BUSCO comparison: {comparison_name}",
             font="F2",
-            size=20,
+            size=CHART_FONT_SIZE_PT,
             color=TEXT_RGB,
         ),
         _pdf_text_command(
@@ -769,7 +771,7 @@ def _write_comparison_pdf(
             y_top=float(layout["subtitle_y"]),
             text=f"mode={summaries[0].mode} | datasets={str(layout['lineage_note'])}",
             font="F1",
-            size=12,
+            size=CHART_FONT_SIZE_PT,
             color=MUTED_RGB,
         ),
     ]
@@ -787,7 +789,7 @@ def _write_comparison_pdf(
                 y_top=top - 24,
                 text=tick_text,
                 font="F1",
-                size=11,
+                size=CHART_FONT_SIZE_PT,
                 color=MUTED_RGB,
             )
         )
@@ -804,7 +806,7 @@ def _write_comparison_pdf(
                 y_top=legend_y + 12,
                 text=str(item["label"]),
                 font="F1",
-                size=12,
+                size=CHART_FONT_SIZE_PT,
                 color=MUTED_RGB,
             )
         )
@@ -817,7 +819,7 @@ def _write_comparison_pdf(
                 y_top=float(row["label_y"]),
                 text=summary.label,
                 font="F2",
-                size=14,
+                size=CHART_FONT_SIZE_PT,
                 color=TEXT_RGB,
             )
         )
@@ -842,7 +844,7 @@ def _write_comparison_pdf(
                 y_top=float(row["summary_y"]),
                 text=str(row["summary_text"]),
                 font="F1",
-                size=12,
+                size=CHART_FONT_SIZE_PT,
                 color=MUTED_RGB,
             )
         )

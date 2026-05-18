@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from .chart_primitives import GRID_RGB, MUTED_RGB, TEXT_RGB, write_single_page_pdf
+from .chart_primitives import (
+    CHART_FONT_SIZE_PT,
+    GRID_RGB,
+    MUTED_RGB,
+    SVG_FONT_SIZE,
+    TEXT_RGB,
+    write_single_page_pdf,
+)
 from .chart_primitives import hex_to_rgb as _hex_to_rgb
 from .chart_primitives import pdf_text_command as _pdf_text_command
 from .chart_primitives import pdf_top_to_bottom as _pdf_top_to_bottom
@@ -421,7 +428,7 @@ def write_sankey_svg(
     height = int(meta["height"])
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<style>text{font-family:Helvetica,Arial,sans-serif;fill:#111827} .title{font-size:22px;font-weight:700} .subtitle{font-size:12px;fill:#4b5563} .stage{font-size:12px;font-weight:700;fill:#334155} .label{font-size:12px} .count{font-size:11px;fill:#475569}</style>',
+        f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .stage{{font-size:{SVG_FONT_SIZE};font-weight:700;fill:#334155}} .label{{font-size:{SVG_FONT_SIZE}}} .count{{font-size:{SVG_FONT_SIZE};fill:#475569}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
         '<text x="40" y="40" class="title">Stage-wise pipeline gene flow</text>',
         '<text x="40" y="62" class="subtitle">Branches show step-specific categories. Merge nodes reset totals between independent pipeline stages, so the ribbons summarize stage counts without implying per-gene overlap across steps.</text>',
@@ -473,13 +480,13 @@ def write_sankey_pdf(
     height = float(meta["height"])
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
-        _pdf_text_command(page_height=height, x=40, y_top=40, text="Stage-wise pipeline gene flow", font="F2", size=22, color=TEXT_RGB),
-        _pdf_text_command(page_height=height, x=40, y_top=62, text="Branches show step-specific categories; merge nodes reset totals between independent stages.", font="F1", size=12, color=MUTED_RGB),
+        _pdf_text_command(page_height=height, x=40, y_top=40, text="Stage-wise pipeline gene flow", font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB),
+        _pdf_text_command(page_height=height, x=40, y_top=62, text="Branches show step-specific categories; merge nodes reset totals between independent stages.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB),
     ]
     total_stages = len(stage_labels)
     for index, label in enumerate(stage_labels):
         stage_x = meta["left"] + index * meta["stage_gap"] - 18.0
-        commands.append(_pdf_text_command(page_height=height, x=stage_x, y_top=104, text=label, font="F2", size=12, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=stage_x, y_top=104, text=label, font="F2", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     for link in laid_out_links:
         r, g, b = _hex_to_rgb(link.link.color)
         commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg")
@@ -494,8 +501,8 @@ def write_sankey_pdf(
         label_y = node.y + min(max(node.height / 2.0, 14.0), node.height - 4.0)
         if node.node.stage >= total_stages - 2:
             label_x = max(12.0, label_x - 95.0)
-        commands.append(_pdf_text_command(page_height=height, x=label_x, y_top=label_y - 5.0, text=node.node.label, font="F1", size=12, color=TEXT_RGB))
-        commands.append(_pdf_text_command(page_height=height, x=label_x, y_top=label_y + 10.0, text=f"{node.node.count:,} genes", font="F1", size=11, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=label_x, y_top=label_y - 5.0, text=node.node.label, font="F1", size=CHART_FONT_SIZE_PT, color=TEXT_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=label_x, y_top=label_y + 10.0, text=f"{node.node.count:,} genes", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     return write_single_page_pdf(width=width, height=height, commands=commands, output_path=output_path)
 
 
@@ -512,7 +519,7 @@ def write_event_counts_svg(events: list[EventCount], output_path: Path) -> Path:
     ticks = [0, axis_max / 4.0, axis_max / 2.0, axis_max * 3.0 / 4.0, axis_max]
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<style>text{font-family:Helvetica,Arial,sans-serif;fill:#111827} .title{font-size:22px;font-weight:700} .subtitle{font-size:12px;fill:#4b5563} .label{font-size:12px;font-weight:700} .unit{font-size:11px;fill:#64748b} .value{font-size:11px;fill:#334155} .tick{font-size:11px;fill:#6b7280}</style>',
+        f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .label{{font-size:{SVG_FONT_SIZE};font-weight:700}} .unit{{font-size:{SVG_FONT_SIZE};fill:#64748b}} .value{{font-size:{SVG_FONT_SIZE};fill:#334155}} .tick{{font-size:{SVG_FONT_SIZE};fill:#6b7280}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
         '<text x="40" y="40" class="title">Pipeline event counts</text>',
         '<text x="40" y="62" class="subtitle">Step-level counts from the packaging logs. Labels include the unit for each metric because removed mRNAs are transcript counts while the other bars are gene counts.</text>',
@@ -548,8 +555,8 @@ def write_event_counts_pdf(events: list[EventCount], output_path: Path) -> Path:
     ticks = [0, axis_max / 4.0, axis_max / 2.0, axis_max * 3.0 / 4.0, axis_max]
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
-        _pdf_text_command(page_height=height, x=40, y_top=40, text="Pipeline event counts", font="F2", size=22, color=TEXT_RGB),
-        _pdf_text_command(page_height=height, x=40, y_top=62, text="Step-level counts from packaging logs. Removed mRNAs are transcript counts; the other bars are gene counts.", font="F1", size=12, color=MUTED_RGB),
+        _pdf_text_command(page_height=height, x=40, y_top=40, text="Pipeline event counts", font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB),
+        _pdf_text_command(page_height=height, x=40, y_top=62, text="Step-level counts from packaging logs. Removed mRNAs are transcript counts; the other bars are gene counts.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB),
     ]
     for tick in ticks:
         x = left + (bar_width * tick / axis_max if axis_max else 0.0)
@@ -557,19 +564,19 @@ def write_event_counts_pdf(events: list[EventCount], output_path: Path) -> Path:
         y2 = _pdf_top_to_bottom(height, height - 32)
         commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 1 w {x:.2f} {y1:.2f} m {x:.2f} {y2:.2f} l S")
         tick_text = str(int(tick) if float(tick).is_integer() else round(tick, 1))
-        commands.append(_pdf_text_command(page_height=height, x=x - 8, y_top=top - 30, text=tick_text, font="F1", size=11, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=x - 8, y_top=top - 30, text=tick_text, font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     for index, event in enumerate(events):
         y = top + index * bar_gap
         bar_len = 0.0 if axis_max == 0 else bar_width * event.count / axis_max
         bg_y = _pdf_top_to_bottom(height, y, bar_height)
-        commands.append(_pdf_text_command(page_height=height, x=40, y_top=y + 12, text=event.label, font="F2", size=12, color=TEXT_RGB))
-        commands.append(_pdf_text_command(page_height=height, x=40, y_top=y + 28, text=event.unit, font="F1", size=11, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=40, y_top=y + 12, text=event.label, font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=40, y_top=y + 28, text=event.unit, font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
         commands.append(f"0.973 0.980 0.988 rg {left:.2f} {bg_y:.2f} {bar_width:.2f} {bar_height:.2f} re f")
         commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG {left:.2f} {bg_y:.2f} {bar_width:.2f} {bar_height:.2f} re S")
         if event.count > 0:
             r, g, b = _hex_to_rgb(event.color)
             commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg {left:.2f} {bg_y:.2f} {bar_len:.2f} {bar_height:.2f} re f")
-        commands.append(_pdf_text_command(page_height=height, x=left + bar_width + 16, y_top=y + 18, text=f"{event.count:,}", font="F1", size=11, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=left + bar_width + 16, y_top=y + 18, text=f"{event.count:,}", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     return write_single_page_pdf(width=width, height=height, commands=commands, output_path=output_path)
 
 
@@ -595,7 +602,7 @@ def write_overlap_svg(
     max_count = max((row.count for row in plot_rows), default=1)
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<style>text{font-family:Helvetica,Arial,sans-serif;fill:#111827} .title{font-size:22px;font-weight:700} .subtitle{font-size:12px;fill:#4b5563} .axis{font-size:11px;fill:#475569} .count{font-size:11px;fill:#334155} .label{font-size:11px;fill:#334155}</style>',
+        f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .axis{{font-size:{SVG_FONT_SIZE};fill:#475569}} .count{{font-size:{SVG_FONT_SIZE};fill:#334155}} .label{{font-size:{SVG_FONT_SIZE};fill:#334155}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
         '<text x="40" y="40" class="title">Changed-gene overlap</text>',
         '<text x="40" y="62" class="subtitle">Exclusive intersections across stage-emitted changed-gene ID sets. Filled squares mark the stages included in each overlap row.</text>',
@@ -641,13 +648,13 @@ def write_overlap_pdf(
     max_count = max((row.count for row in plot_rows), default=1)
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
-        _pdf_text_command(page_height=height, x=40, y_top=40, text="Changed-gene overlap", font="F2", size=22, color=TEXT_RGB),
-        _pdf_text_command(page_height=height, x=40, y_top=62, text="Exclusive intersections across stage-emitted changed-gene ID sets.", font="F1", size=12, color=MUTED_RGB),
+        _pdf_text_command(page_height=height, x=40, y_top=40, text="Changed-gene overlap", font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB),
+        _pdf_text_command(page_height=height, x=40, y_top=62, text="Exclusive intersections across stage-emitted changed-gene ID sets.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB),
     ]
     for column, gene_set in enumerate(gene_sets):
         x = matrix_left + column * column_gap
-        commands.append(_pdf_text_command(page_height=height, x=x, y_top=128, text=gene_set.label, font="F1", size=10, color=MUTED_RGB))
-    commands.append(_pdf_text_command(page_height=height, x=bar_left, y_top=128, text="Exclusive genes", font="F1", size=11, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=x, y_top=128, text=gene_set.label, font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+    commands.append(_pdf_text_command(page_height=height, x=bar_left, y_top=128, text="Exclusive genes", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     for row_index, row in enumerate(plot_rows):
         y = matrix_top + row_index * row_height
         line_y = _pdf_top_to_bottom(height, y + marker_size / 2.0)
@@ -665,9 +672,9 @@ def write_overlap_pdf(
         commands.append(f"0.973 0.980 0.988 rg {bar_left:.2f} {bg_y:.2f} {bar_width:.2f} {marker_size + 4.0:.2f} re f")
         commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG {bar_left:.2f} {bg_y:.2f} {bar_width:.2f} {marker_size + 4.0:.2f} re S")
         commands.append(f"0.114 0.306 0.847 rg {bar_left:.2f} {bg_y:.2f} {bar_len:.2f} {marker_size + 4.0:.2f} re f")
-        commands.append(_pdf_text_command(page_height=height, x=bar_left + bar_width + 16.0, y_top=y + 10.0, text=f"{row.count:,}", font="F1", size=11, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=bar_left + bar_width + 16.0, y_top=y + 10.0, text=f"{row.count:,}", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     if not plot_rows:
-        commands.append(_pdf_text_command(page_height=height, x=40, y_top=170, text="No non-empty exclusive overlaps were available for plotting.", font="F1", size=12, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=40, y_top=170, text="No non-empty exclusive overlaps were available for plotting.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     return write_single_page_pdf(width=width, height=height, commands=commands, output_path=output_path)
 
 

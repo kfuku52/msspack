@@ -126,6 +126,8 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
         self.assertIn("input", svg)
         self.assertIn("processed", svg)
         self.assertIn("embryophyta_odb12", svg)
+        self.assertIn("font-size:8pt", svg)
+        self.assertNotRegex(svg, r"font-size:\d+px")
 
     def test_summarize_busco_artifacts_reports_metric_changes(self) -> None:
         summary_text_input = """\

@@ -402,17 +402,25 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertTrue(artifacts.overlap_tsv.exists())
             self.assertTrue(artifacts.overlap_svg.exists())
             self.assertTrue(artifacts.overlap_pdf.exists())
+            svg_texts = [
+                artifacts.gene_flow_svg.read_text(encoding="utf-8"),
+                artifacts.event_counts_svg.read_text(encoding="utf-8"),
+                artifacts.overlap_svg.read_text(encoding="utf-8"),
+            ]
+            for svg_text in svg_texts:
+                self.assertIn("font-size:8pt", svg_text)
+                self.assertNotRegex(svg_text, r"font-size:\d+px")
             self.assertIn(
                 "Stage-wise pipeline gene flow",
-                artifacts.gene_flow_svg.read_text(encoding="utf-8"),
+                svg_texts[0],
             )
             self.assertIn(
                 "Pipeline event counts",
-                artifacts.event_counts_svg.read_text(encoding="utf-8"),
+                svg_texts[1],
             )
             self.assertIn(
                 "Changed-gene overlap",
-                artifacts.overlap_svg.read_text(encoding="utf-8"),
+                svg_texts[2],
             )
             payload = json.loads(artifacts.summary_json.read_text(encoding="utf-8"))
             self.assertEqual(payload["metrics"]["converted_to_misc_genes"], 1)
