@@ -41,16 +41,6 @@ pip install git+https://github.com/kfuku52/msspack.git
 
 `openjdk` provides the `java` command required by the DDBJ validation tools. `busco` is only needed when you run `msspack busco`; omit it if you do not need BUSCO comparison plots.
 
-For local development:
-
-```bash
-git clone https://github.com/kfuku52/msspack.git
-cd msspack
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
 ## Quick Start
 
 Create a starter config:
@@ -161,6 +151,16 @@ Older configs may still contain `tools.gff3sort`; that setting is ignored becaus
 ## Development
 
 Local contributor workflow is documented in [`CONTRIBUTING.md`](CONTRIBUTING.md), and release steps are summarized in [`RELEASE.md`](RELEASE.md).
+
+For local development:
+
+```bash
+git clone https://github.com/kfuku52/msspack.git
+cd msspack
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
 
 Run checks locally with:
 
