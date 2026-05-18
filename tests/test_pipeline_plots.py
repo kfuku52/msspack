@@ -414,6 +414,10 @@ class PipelinePlotTests(unittest.TestCase):
                 "Stage-wise pipeline gene flow",
                 svg_texts[0],
             )
+            self.assertIn('width="7.2in"', svg_texts[0])
+            self.assertIn('viewBox="0 0 518.40 288.00"', svg_texts[0])
+            gene_flow_pdf = artifacts.gene_flow_pdf.read_bytes().decode("latin-1")
+            self.assertIn("/MediaBox [0 0 518.40 288.00]", gene_flow_pdf)
             self.assertIn(
                 "Pipeline event counts",
                 svg_texts[1],

@@ -183,9 +183,9 @@ flowchart TD
 
 ## Example outputs
 
-`msspack plot` renders a stage-wise Sankey diagram that summarizes how gene models move through the packaging pipeline. This example was generated from synthetic stage metrics so no unpublished submission data are exposed.
+`msspack plot` renders a stage-wise Sankey diagram that summarizes how gene models move through the packaging pipeline. This 7.2-inch-wide SVG uses 8 pt text and was generated from synthetic stage metrics so no unpublished submission data are exposed.
 
-<img src="docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram" width="900">
+<img src="docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram">
 
 `msspack busco` can also render a compact BUSCO comparison for GFF-derived CDS FASTA sets. The example below uses synthetic BUSCO summary values so no unpublished assembly metrics are exposed.
 

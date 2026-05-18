@@ -29,6 +29,39 @@ from .pipeline_plot_models import (
 )
 from .utils import ensure_dir, write_text
 
+PDF_POINTS_PER_INCH = 72.0
+SANKEY_WIDTH_IN = 7.2
+SANKEY_WIDTH = SANKEY_WIDTH_IN * PDF_POINTS_PER_INCH
+SANKEY_HEIGHT = 288.0
+SANKEY_STAGE_LABELS = {
+    "Duplicate removal": "Dedup",
+    "Transcript choice": "Transcript",
+    "After transcript choice": "Selected",
+    "Frame correction": "Frame",
+    "After frame correction": "Framed",
+    "Padding analysis": "Padding",
+    "After padding": "Padded",
+    "Final feature fate": "Final",
+}
+SANKEY_NODE_LABELS = {
+    "start": "Input",
+    "after_dedup": "Kept",
+    "duplicate_removed": "Removed",
+    "transcript_changed": "Pruned",
+    "transcript_unchanged": "Unchanged",
+    "after_transcript": "Selected",
+    "inframe_updated": "Frame fixed",
+    "inframe_unchanged": "Frame OK",
+    "after_inframe": "Framed",
+    "padding_updated": "Padded",
+    "genes_with_stops": "Stops",
+    "padding_unchanged": "No padding",
+    "after_padding": "Padded",
+    "final_cds": "Final CDS",
+    "final_misc": "Final misc",
+}
+SANKEY_UNLABELED_NODES = {"after_transcript", "after_inframe", "after_padding"}
+
 
 def build_plot_artifacts(output_root: Path) -> PipelinePlotArtifacts:
     root = ensure_dir(output_root / "plots")
@@ -317,35 +350,57 @@ class _LaidOutLink:
     height: float
 
 
+def _sankey_stage_label(label: str) -> str:
+    return SANKEY_STAGE_LABELS.get(label, label)
+
+
+def _sankey_node_label(node: SankeyNode) -> str:
+    return SANKEY_NODE_LABELS.get(node.id, node.label)
+
+
+def _sankey_node_is_labeled(node: SankeyNode) -> bool:
+    return node.id not in SANKEY_UNLABELED_NODES
+
+
+def _format_gene_count(count: int) -> str:
+    suffix = "gene" if count == 1 else "genes"
+    return f"{count:,} {suffix}"
+
+
 def _sankey_layout(
     stage_labels: list[str],
     nodes: list[SankeyNode],
     links: list[SankeyLink],
 ) -> tuple[dict[str, _LaidOutNode], list[_LaidOutLink], dict[str, float]]:
-    width = 1720.0
-    left = 80.0
-    top = 160.0
-    bottom = 70.0
-    node_width = 28.0
+    width = SANKEY_WIDTH
+    chart_height = SANKEY_HEIGHT
+    left = 28.0
+    top = 78.0
+    bottom = 24.0
+    node_width = 9.0
     stage_gap = (width - left * 2 - node_width) / max(1, len(stage_labels) - 1)
-    content_height = 680.0 - top - bottom
-    node_gap = 22.0
-    flow_min_height = 8.0
+    content_height = chart_height - top - bottom
+    node_gap = 18.0
+    flow_min_height = 3.5
+    node_min_height = 7.0
     totals_by_stage: dict[int, int] = {}
     for node in nodes:
         totals_by_stage[node.stage] = totals_by_stage.get(node.stage, 0) + node.count
+    nodes_by_stage: dict[int, list[SankeyNode]] = {}
+    for node in nodes:
+        nodes_by_stage.setdefault(node.stage, []).append(node)
     max_stage_total = max(totals_by_stage.values()) if totals_by_stage else 1
-    scale = content_height / max_stage_total
+    max_gap_total = max(
+        ((len(stage_nodes) - 1) * node_gap for stage_nodes in nodes_by_stage.values()),
+        default=0.0,
+    )
+    scale = max(0.1, (content_height - max_gap_total) / max_stage_total)
 
     display_flow_heights: dict[tuple[str, str], float] = {}
     for link in links:
         display_flow_heights[(link.source, link.target)] = (
             max(link.count * scale, flow_min_height) if link.count > 0 else 0.0
         )
-
-    nodes_by_stage: dict[int, list[SankeyNode]] = {}
-    for node in nodes:
-        nodes_by_stage.setdefault(node.stage, []).append(node)
 
     outgoing_totals = {node.id: 0.0 for node in nodes}
     incoming_totals = {node.id: 0.0 for node in nodes}
@@ -358,15 +413,21 @@ def _sankey_layout(
     for stage_index, stage_nodes in nodes_by_stage.items():
         ordered_nodes = sorted(stage_nodes, key=lambda node: node.label)
         heights = [
-            max(node.count * scale, outgoing_totals[node.id], incoming_totals[node.id], 18.0)
+            max(node.count * scale, outgoing_totals[node.id], incoming_totals[node.id], node_min_height)
             for node in ordered_nodes
         ]
         total_height = sum(heights) + max(0, len(heights) - 1) * node_gap
         cursor = top + (content_height - total_height) / 2.0
         x = left + stage_index * stage_gap
-        for node, height in zip(ordered_nodes, heights):
-            laid_out_nodes[node.id] = _LaidOutNode(node=node, x=x, y=cursor, width=node_width, height=height)
-            cursor += height + node_gap
+        for node, node_height in zip(ordered_nodes, heights):
+            laid_out_nodes[node.id] = _LaidOutNode(
+                node=node,
+                x=x,
+                y=cursor,
+                width=node_width,
+                height=node_height,
+            )
+            cursor += node_height + node_gap
 
     source_offsets = {node_id: 0.0 for node_id in laid_out_nodes}
     target_offsets = {node_id: 0.0 for node_id in laid_out_nodes}
@@ -388,7 +449,7 @@ def _sankey_layout(
 
     return laid_out_nodes, laid_out_links, {
         "width": width,
-        "height": 680.0,
+        "height": chart_height,
         "left": left,
         "top": top,
         "stage_gap": stage_gap,
@@ -402,7 +463,7 @@ def _sankey_link_path(link: _LaidOutLink) -> str:
     y1 = link.source_y
     y2 = link.target_y
     height = link.height
-    curve = max(36.0, (x2 - x1) * 0.35)
+    curve = max(10.0, (x2 - x1) * 0.35)
     return (
         f"M {x1:.2f} {y1:.2f} "
         f"C {x1 + curve:.2f} {y1:.2f}, {x2 - curve:.2f} {y2:.2f}, {x2:.2f} {y2:.2f} "
@@ -413,8 +474,8 @@ def _sankey_link_path(link: _LaidOutLink) -> str:
 
 def _sankey_label_anchor(node: _LaidOutNode, total_stages: int) -> tuple[float, str]:
     if node.node.stage >= total_stages - 2:
-        return node.x - 8.0, "end"
-    return node.x + node.width + 8.0, "start"
+        return node.x - 4.0, "end"
+    return node.x + node.width + 4.0, "start"
 
 
 def write_sankey_svg(
@@ -424,43 +485,53 @@ def write_sankey_svg(
     output_path: Path,
 ) -> Path:
     laid_out_nodes, laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
-    width = int(meta["width"])
-    height = int(meta["height"])
+    width = float(meta["width"])
+    height = float(meta["height"])
+    svg_width = f"{width / PDF_POINTS_PER_INCH:g}in"
+    svg_height = f"{height / PDF_POINTS_PER_INCH:g}in"
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_width}" height="{svg_height}" viewBox="0 0 {width:.2f} {height:.2f}">',
         f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .stage{{font-size:{SVG_FONT_SIZE};font-weight:700;fill:#334155}} .label{{font-size:{SVG_FONT_SIZE}}} .count{{font-size:{SVG_FONT_SIZE};fill:#475569}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
-        '<text x="40" y="40" class="title">Stage-wise pipeline gene flow</text>',
-        '<text x="40" y="62" class="subtitle">Branches show step-specific categories. Merge nodes reset totals between independent pipeline stages, so the ribbons summarize stage counts without implying per-gene overlap across steps.</text>',
+        '<text x="16" y="16" class="title">Stage-wise pipeline gene flow</text>',
+        '<text x="16" y="31" class="subtitle">Synthetic example; ribbons summarize stage counts.</text>',
     ]
     total_stages = len(stage_labels)
     for index, label in enumerate(stage_labels):
         stage_x = meta["left"] + index * meta["stage_gap"] + meta["node_width"] / 2.0
-        parts.append(f'<text x="{stage_x:.2f}" y="104" text-anchor="middle" class="stage">{escape(label)}</text>')
+        parts.append(
+            f'<text x="{stage_x:.2f}" y="58" text-anchor="middle" class="stage">{escape(_sankey_stage_label(label))}</text>'
+        )
     for link in laid_out_links:
         parts.append(f'<path d="{_sankey_link_path(link)}" fill="{link.link.color}" fill-opacity="0.55" stroke="none"/>')
     for node in laid_out_nodes.values():
         parts.append(f'<rect x="{node.x:.2f}" y="{node.y:.2f}" width="{node.width:.2f}" height="{node.height:.2f}" rx="4" fill="{node.node.color}" stroke="#0f172a" stroke-width="0.8"/>')
     for node in laid_out_nodes.values():
+        if not _sankey_node_is_labeled(node.node):
+            continue
         label_x, anchor = _sankey_label_anchor(node, total_stages)
-        label_y = node.y + min(max(node.height / 2.0, 14.0), node.height - 4.0)
-        parts.append(f'<text x="{label_x:.2f}" y="{label_y - 5:.2f}" text-anchor="{anchor}" class="label">{escape(node.node.label)}</text>')
-        parts.append(f'<text x="{label_x:.2f}" y="{label_y + 10:.2f}" text-anchor="{anchor}" class="count">{node.node.count:,} genes</text>')
+        label_y = node.y + min(max(node.height / 2.0, 9.0), node.height - 2.0)
+        parts.append(
+            f'<text x="{label_x:.2f}" y="{label_y - 4:.2f}" text-anchor="{anchor}" class="label">{escape(_sankey_node_label(node.node))}</text>'
+        )
+        parts.append(
+            f'<text x="{label_x:.2f}" y="{label_y + 8:.2f}" text-anchor="{anchor}" class="count">{_format_gene_count(node.node.count)}</text>'
+        )
     parts.append("</svg>")
     return write_text(output_path, "\n".join(parts) + "\n")
 
 
-def _sankey_pdf_path_commands(link: _LaidOutLink) -> str:
+def _sankey_pdf_path_commands(link: _LaidOutLink, page_height: float) -> str:
     x1 = link.source.x + link.source.width
     x2 = link.target.x
     y1 = link.source_y
     y2 = link.target_y
     h = link.height
-    curve = max(36.0, (x2 - x1) * 0.35)
-    py1 = _pdf_top_to_bottom(680.0, y1)
-    py2 = _pdf_top_to_bottom(680.0, y2)
-    py1b = _pdf_top_to_bottom(680.0, y1 + h)
-    py2b = _pdf_top_to_bottom(680.0, y2 + h)
+    curve = max(10.0, (x2 - x1) * 0.35)
+    py1 = _pdf_top_to_bottom(page_height, y1)
+    py2 = _pdf_top_to_bottom(page_height, y2)
+    py1b = _pdf_top_to_bottom(page_height, y1 + h)
+    py2b = _pdf_top_to_bottom(page_height, y2 + h)
     return (
         f"{x1:.2f} {py1:.2f} m "
         f"{x1 + curve:.2f} {py1:.2f} {x2 - curve:.2f} {py2:.2f} {x2:.2f} {py2:.2f} c "
@@ -480,29 +551,83 @@ def write_sankey_pdf(
     height = float(meta["height"])
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
-        _pdf_text_command(page_height=height, x=40, y_top=40, text="Stage-wise pipeline gene flow", font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB),
-        _pdf_text_command(page_height=height, x=40, y_top=62, text="Branches show step-specific categories; merge nodes reset totals between independent stages.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB),
+        _pdf_text_command(
+            page_height=height,
+            x=16,
+            y_top=16,
+            text="Stage-wise pipeline gene flow",
+            font="F2",
+            size=CHART_FONT_SIZE_PT,
+            color=TEXT_RGB,
+        ),
+        _pdf_text_command(
+            page_height=height,
+            x=16,
+            y_top=31,
+            text="Synthetic example; ribbons summarize stage counts.",
+            font="F1",
+            size=CHART_FONT_SIZE_PT,
+            color=MUTED_RGB,
+        ),
     ]
     total_stages = len(stage_labels)
     for index, label in enumerate(stage_labels):
-        stage_x = meta["left"] + index * meta["stage_gap"] - 18.0
-        commands.append(_pdf_text_command(page_height=height, x=stage_x, y_top=104, text=label, font="F2", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+        stage_label = _sankey_stage_label(label)
+        stage_x = meta["left"] + index * meta["stage_gap"] + meta["node_width"] / 2.0
+        commands.append(
+            _pdf_text_command(
+                page_height=height,
+                x=stage_x - 2.1 * len(stage_label),
+                y_top=58,
+                text=stage_label,
+                font="F2",
+                size=CHART_FONT_SIZE_PT,
+                color=MUTED_RGB,
+            )
+        )
     for link in laid_out_links:
         r, g, b = _hex_to_rgb(link.link.color)
         commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg")
-        commands.append(_sankey_pdf_path_commands(link))
+        commands.append(_sankey_pdf_path_commands(link, height))
     for node in laid_out_nodes.values():
         r, g, b = _hex_to_rgb(node.node.color)
         rect_y = _pdf_top_to_bottom(height, node.y, node.height)
         commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg {node.x:.2f} {rect_y:.2f} {node.width:.2f} {node.height:.2f} re f")
         commands.append(f"{TEXT_RGB[0]:.3f} {TEXT_RGB[1]:.3f} {TEXT_RGB[2]:.3f} RG 0.8 w {node.x:.2f} {rect_y:.2f} {node.width:.2f} {node.height:.2f} re S")
     for node in laid_out_nodes.values():
-        label_x, _anchor = _sankey_label_anchor(node, total_stages)
-        label_y = node.y + min(max(node.height / 2.0, 14.0), node.height - 4.0)
-        if node.node.stage >= total_stages - 2:
-            label_x = max(12.0, label_x - 95.0)
-        commands.append(_pdf_text_command(page_height=height, x=label_x, y_top=label_y - 5.0, text=node.node.label, font="F1", size=CHART_FONT_SIZE_PT, color=TEXT_RGB))
-        commands.append(_pdf_text_command(page_height=height, x=label_x, y_top=label_y + 10.0, text=f"{node.node.count:,} genes", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+        if not _sankey_node_is_labeled(node.node):
+            continue
+        label_x, anchor = _sankey_label_anchor(node, total_stages)
+        label_y = node.y + min(max(node.height / 2.0, 9.0), node.height - 2.0)
+        label = _sankey_node_label(node.node)
+        count = _format_gene_count(node.node.count)
+        if anchor == "end":
+            label_x = max(10.0, label_x - 3.4 * len(label))
+        commands.append(
+            _pdf_text_command(
+                page_height=height,
+                x=label_x,
+                y_top=label_y - 4.0,
+                text=label,
+                font="F1",
+                size=CHART_FONT_SIZE_PT,
+                color=TEXT_RGB,
+            )
+        )
+        count_x = label_x
+        if anchor == "end":
+            count_x = max(10.0, label_x - 3.4 * max(0, len(count) - len(label)))
+        commands.append(
+            _pdf_text_command(
+                page_height=height,
+                x=count_x,
+                y_top=label_y + 8.0,
+                text=count,
+                font="F1",
+                size=CHART_FONT_SIZE_PT,
+                color=MUTED_RGB,
+            )
+        )
     return write_single_page_pdf(width=width, height=height, commands=commands, output_path=output_path)
 
 
