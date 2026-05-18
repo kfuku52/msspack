@@ -8,7 +8,7 @@
 
 `msspack` builds DDBJ MSS submission files from genome FASTA + GFF inputs and runs the official DDBJ checking tools.
 
-For the official submission workflow, file requirements, and checking tools, see the DDBJ [MSS - Mass Submission System](https://www.ddbj.nig.ac.jp/ddbj/mss.html) documentation.
+For the official submission workflow, file requirements, and checking tools, see the DDBJ [MSS - Mass Submission System](https://www.ddbj.nig.ac.jp/ddbj/mss-e.html) documentation.
 
 The MSS conversion layer in this repository was originally developed by adapting logic from the MIT-licensed [`GFF2MSS`](https://github.com/maedat/GFF2MSS) project. That logic now lives as internal `msspack` modules under `src/msspack/mss_converter/`, while the surrounding preprocessing, packaging, caching, and DDBJ tool orchestration are implemented directly in `msspack`.
 
