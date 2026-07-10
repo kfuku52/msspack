@@ -22,7 +22,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("-t", "--gty", default="paired-ends")
     parser.add_argument("-c", "--gct", default="1")
     parser.add_argument("--ifc", default=False, action="store_true")
-    parser.add_argument("--stc", default="ATG")
+    parser.add_argument("--stc")
     parser.add_argument("--iso", default="")
     parser.add_argument("--sex", default="")
     parser.add_argument("--cou", default="")
@@ -49,7 +49,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         linkage_evidence=args.gty,
         genetic_code=args.gct,
         infer_boundary=bool(args.ifc),
-        start_codons=tuple(args.stc.split(",")),
+        start_codons=tuple(args.stc.split(",")) if args.stc else None,
         isolate=args.iso,
         sex=args.sex,
         country=args.cou,

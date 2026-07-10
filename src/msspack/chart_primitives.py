@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .utils import ensure_dir
+from .utils import atomic_binary_writer
 
 TEXT_RGB = (17 / 255.0, 24 / 255.0, 39 / 255.0)
 MUTED_RGB = (75 / 255.0, 85 / 255.0, 99 / 255.0)
@@ -81,6 +81,6 @@ def write_single_page_pdf(
             f"startxref\n{xref_start}\n%%EOF\n"
         ).encode("latin-1")
     )
-    ensure_dir(output_path.parent)
-    output_path.write_bytes(pdf)
+    with atomic_binary_writer(output_path) as handle:
+        handle.write(pdf)
     return output_path

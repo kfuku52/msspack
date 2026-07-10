@@ -13,12 +13,17 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkstemp
 from typing import Dict, Iterable, Optional, Tuple
 
-from .utils import MSSPackError, default_cache_dir, ensure_dir, run_command
+from .utils import MSSPackError, default_cache_dir, ensure_dir, run_command, write_text
 
 DDBJ_TOOL_INDEX = "https://ddbj.nig.ac.jp/public/ddbj-cib/MSS/"
+TRUSTED_ARCHIVE_SHA256 = {
+    "UME_unix_V1.66.zip": "62342c07396ee8670486e5d3b7043d839de3ad4158de5a893908eafed2e1c351",
+    "Parser_V6.80.tar.gz": "c3ec1cf9f90e5dcf647be42e9cd46f30b83e4a7b58c1dd30b7acafc7b94fdd64",
+    "transChecker_V2.26.tar.gz": "2a4a68a44ef4f4a81ba7c72c516e2a7fec2922e2d43a18672d9abcc115657f21",
+}
 
 
 @dataclass(frozen=True)
@@ -60,7 +65,7 @@ def _iso_utc_now() -> str:
 
 
 def fetch_index_html() -> str:
-    with urllib.request.urlopen(DDBJ_TOOL_INDEX) as response:
+    with urllib.request.urlopen(DDBJ_TOOL_INDEX, timeout=30) as response:
         return response.read().decode("utf-8")
 
 
@@ -92,33 +97,86 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _installation_tree_sha256(root: Path) -> str:
+    digest = hashlib.sha256()
+    metadata_path = root / ".msspack-install.json"
+    for child in sorted(root.rglob("*"), key=lambda path: str(path.relative_to(root))):
+        if child == metadata_path or child.is_dir():
+            continue
+        if child.is_symlink() or not child.is_file():
+            raise MSSPackError(f"Unsupported file in DDBJ tool installation: {child}")
+        relative = str(child.relative_to(root)).encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(f"{stat.S_IMODE(child.stat().st_mode):o}".encode("ascii"))
+        digest.update(b"\0")
+        with child.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _write_json(path: Path, payload: dict[str, object]) -> Path:
-    ensure_dir(path.parent)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return path
 
 
 def _read_json(path: Path) -> Optional[dict[str, object]]:
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _download_metadata_path(archive_path: Path) -> Path:
     return archive_path.parent / f"{archive_path.name}.json"
 
 
-def _download(url: str, destination: Path) -> Path:
+def _download(
+    url: str,
+    destination: Path,
+    *,
+    expected_sha256: Optional[str] = None,
+) -> Path:
     ensure_dir(destination.parent)
-    with urllib.request.urlopen(url) as response, destination.open("wb") as handle:
-        shutil.copyfileobj(response, handle)
+    descriptor, temporary_name = mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".part",
+        dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, os.fdopen(
+            descriptor, "wb"
+        ) as handle:
+            shutil.copyfileobj(response, handle)
+        actual_sha256 = _sha256_file(temporary)
+        if expected_sha256 is not None and actual_sha256 != expected_sha256:
+            raise MSSPackError(
+                f"Checksum mismatch for {destination.name}: expected {expected_sha256}, "
+                f"got {actual_sha256}"
+            )
+        os.replace(temporary, destination)
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        temporary.unlink(missing_ok=True)
+        raise
     _write_json(
         _download_metadata_path(destination),
         {
             "url": url,
             "path": str(destination),
             "size": destination.stat().st_size,
-            "sha256": _sha256_file(destination),
+            "sha256": actual_sha256,
+            "expected_sha256": expected_sha256,
+            "checksum_verified": expected_sha256 is not None,
             "downloaded_at": _iso_utc_now(),
         },
     )
@@ -161,7 +219,48 @@ def _is_valid_installation(root: Path, component: str) -> bool:
         archive_name="",
         root=root,
     ).executable
-    return executable.exists() and executable.is_file()
+    if not (executable.exists() and executable.is_file()):
+        return False
+    metadata = read_installation_metadata(root)
+    if metadata is None:
+        return False
+    archive_name = metadata.get("archive_name")
+    match = (
+        _PATTERNS[component].fullmatch(archive_name)
+        if isinstance(archive_name, str)
+        else None
+    )
+    if (
+        metadata.get("component") != component
+        or metadata.get("version") != root.name
+        or match is None
+        or match.group("version") != root.name
+        or archive_name not in TRUSTED_ARCHIVE_SHA256
+    ):
+        return False
+    expected_executable_sha256 = metadata.get("executable_sha256")
+    if not isinstance(expected_executable_sha256, str):
+        return False
+    if expected_executable_sha256 != _sha256_file(executable):
+        return False
+    expected_tree_sha256 = metadata.get("installation_tree_sha256")
+    if not isinstance(expected_tree_sha256, str):
+        return False
+    try:
+        if expected_tree_sha256 != _installation_tree_sha256(root):
+            return False
+    except (MSSPackError, OSError):
+        return False
+    download = metadata.get("download")
+    if isinstance(download, dict):
+        trusted_sha256 = TRUSTED_ARCHIVE_SHA256[archive_name]
+        if (
+            download.get("checksum_verified") is not True
+            or download.get("expected_sha256") != trusted_sha256
+            or download.get("sha256") != trusted_sha256
+        ):
+            return False
+    return True
 
 
 def read_installation_metadata(root: Path | ToolInstallation) -> Optional[dict[str, object]]:
@@ -192,6 +291,8 @@ def _write_installation_metadata(
         "archive_name": archive_name,
         "root": str(root),
         "executable": str(installation.executable),
+        "executable_sha256": _sha256_file(installation.executable),
+        "installation_tree_sha256": _installation_tree_sha256(root),
         "installed_at": _iso_utc_now(),
     }
     if archive_metadata is not None:
@@ -243,25 +344,33 @@ def install_component(
         raise MSSPackError(f"Could not resolve a download for {component}")
 
     version, archive_name = resolved[component]
+    expected_sha256 = TRUSTED_ARCHIVE_SHA256.get(archive_name)
+    if expected_sha256 is None:
+        raise MSSPackError(
+            f"DDBJ archive {archive_name} has no trusted checksum in this msspack release. "
+            "Upgrade msspack after the new tool release has been reviewed."
+        )
     root = cache_root(cache_dir) / "ddbj-tools" / component / version
     if root.exists() and not reinstall and _is_valid_installation(root, component):
         metadata = read_installation_metadata(root)
-        if metadata is None:
-            archive_path = cache_root(cache_dir) / "downloads" / archive_name
-            metadata = _write_installation_metadata(
-                component=component,
-                version=version,
-                archive_name=archive_name,
-                root=root,
-                archive_path=archive_path if archive_path.exists() else None,
-            )
+        assert metadata is not None
         return ToolInstallation(component, version, archive_name, root, metadata)
 
     if root.exists():
         shutil.rmtree(root)
 
     archive_path = cache_root(cache_dir) / "downloads" / archive_name
-    _download(f"{DDBJ_TOOL_INDEX}{archive_name}", archive_path)
+    _download(
+        f"{DDBJ_TOOL_INDEX}{archive_name}",
+        archive_path,
+        expected_sha256=expected_sha256,
+    )
+    actual_sha256 = _sha256_file(archive_path)
+    if actual_sha256 != expected_sha256:
+        raise MSSPackError(
+            f"Checksum mismatch for cached archive {archive_name}: expected {expected_sha256}, "
+            f"got {actual_sha256}"
+        )
 
     with TemporaryDirectory(prefix=f"msspack-{component}-") as tmp_dir:
         extracted_root = _unpack(archive_path, Path(tmp_dir))
@@ -288,7 +397,15 @@ def list_installed(cache_dir: Optional[str | Path] = None) -> Dict[str, ToolInst
         component_dir = base / component
         if not component_dir.exists():
             continue
-        versions = [entry.name for entry in component_dir.iterdir() if entry.is_dir()]
+        versions = []
+        for entry in component_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            try:
+                _version_key(entry.name)
+            except ValueError:
+                continue
+            versions.append(entry.name)
         if not versions:
             continue
         version = max(versions, key=_version_key)

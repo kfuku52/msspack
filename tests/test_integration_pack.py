@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -60,6 +61,49 @@ class IntegrationPackTests(unittest.TestCase):
                 json.loads(render_metrics.read_text(encoding="utf-8"))["step"],
                 "render-final-annotation",
             )
+
+    def test_second_identical_run_reuses_every_pipeline_stage(self) -> None:
+        fixture_dir = Path(__file__).resolve().parent / "fixtures" / "minimal_pack"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir) / "minimal_pack"
+            shutil.copytree(fixture_dir, base)
+
+            outputs = run_pipeline(base / "config.toml", validate=False)
+            run_pipeline(base / "config.toml", validate=False)
+
+            manifest = json.loads(outputs.manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["stage_summary"]["ran"], 0)
+            self.assertEqual(
+                manifest["stage_summary"]["reused"],
+                manifest["stage_summary"]["count"],
+            )
+
+    def test_same_size_same_mtime_input_edit_invalidates_pipeline_cache(self) -> None:
+        fixture_dir = Path(__file__).resolve().parent / "fixtures" / "minimal_pack"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir) / "minimal_pack"
+            shutil.copytree(fixture_dir, base)
+            config_path = base / "config.toml"
+            input_fasta = base / "input.fa"
+
+            outputs = run_pipeline(config_path, validate=False)
+            original_stat = input_fasta.stat()
+            original_text = input_fasta.read_text(encoding="utf-8")
+            changed_text = original_text.replace("AAA", "AAT", 1)
+            self.assertEqual(len(changed_text), len(original_text))
+            input_fasta.write_text(changed_text, encoding="utf-8")
+            os.utime(
+                input_fasta,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+
+            run_pipeline(config_path, validate=False)
+
+            manifest = json.loads(outputs.manifest_path.read_text(encoding="utf-8"))
+            stages = {stage["name"]: stage for stage in manifest["stages"]}
+            self.assertTrue(stages["00.copy-input-fasta"]["ran"])
+            self.assertFalse(stages["00.copy-input-gff"]["ran"])
+            self.assertGreater(manifest["stage_summary"]["ran"], 1)
 
 
 if __name__ == "__main__":

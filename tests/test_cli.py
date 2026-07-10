@@ -8,6 +8,7 @@ from unittest.mock import patch
 from msspack import cli
 from msspack.busco import BuscoArtifacts, BuscoComparisonArtifacts
 from msspack.cli import main
+from msspack.doctor import Check
 from msspack.pipeline import PipelineOutputs
 from msspack.pipeline_plots import PipelinePlotArtifacts
 from msspack.report import ReportArtifacts
@@ -22,7 +23,7 @@ class CliTests(unittest.TestCase):
                 main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "msspack 0.1.0")
+        self.assertEqual(stdout.getvalue().strip(), "msspack 0.2.0")
 
     def test_main_init_writes_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -36,6 +37,17 @@ class CliTests(unittest.TestCase):
             self.assertTrue(output.exists())
             self.assertEqual(stdout.getvalue().strip(), str(output.resolve()))
             self.assertEqual(output.read_text(encoding="utf-8"), cli._example_config_text())
+
+    def test_main_doctor_returns_nonzero_for_required_failure(self) -> None:
+        stdout = io.StringIO()
+        checks = [Check("required", False, "missing", required=True)]
+        with patch("msspack.cli.run_doctor", return_value=checks), patch(
+            "msspack.cli.render_doctor_report", return_value="[MISSING] required: missing"
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(["doctor"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("[MISSING]", stdout.getvalue())
 
     def test_main_pack_dispatches_to_pipeline(self) -> None:
         outputs = PipelineOutputs(

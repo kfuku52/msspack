@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import tarfile
+import zipfile
+from pathlib import Path
+
+
+def _wheel_members(path: Path) -> set[str]:
+    with zipfile.ZipFile(path) as archive:
+        return set(archive.namelist())
+
+
+def _sdist_members(path: Path) -> set[str]:
+    with tarfile.open(path, "r:gz") as archive:
+        return set(archive.getnames())
+
+
+def verify_distribution(path: Path) -> None:
+    if path.suffix == ".whl":
+        members = _wheel_members(path)
+    elif path.name.endswith(".tar.gz"):
+        members = _sdist_members(path)
+    else:
+        raise ValueError(f"Unsupported distribution file: {path}")
+    required_suffixes = ("LICENSE", "THIRD_PARTY_NOTICES.md")
+    missing = [
+        suffix
+        for suffix in required_suffixes
+        if not any(member.endswith("/" + suffix) or member == suffix for member in members)
+    ]
+    if missing:
+        raise ValueError(f"{path} is missing required notices: {', '.join(missing)}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify built msspack distributions")
+    parser.add_argument("paths", nargs="*", type=Path, help="wheel/sdist files")
+    args = parser.parse_args()
+    paths = args.paths or sorted(Path("dist").glob("msspack-*"))
+    if not paths:
+        raise ValueError("No distribution files were found")
+    for path in paths:
+        verify_distribution(path)
+        print(f"verified {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

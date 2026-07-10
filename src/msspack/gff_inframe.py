@@ -8,6 +8,7 @@ from typing import Optional, TypedDict
 
 from .gff import child_ids, parse_attributes
 from .step_logging import write_id_list, write_step_log, write_step_metrics
+from .utils import atomic_text_writer
 
 
 @dataclass
@@ -201,8 +202,16 @@ def fix_gff_to_inframe(
     typed_lines: list[tuple[list[str], str, str]] = []
 
     with Path(input_path).open("r", encoding="utf-8") as handle:
+        in_fasta = False
         for raw_line in handle:
             line = raw_line.rstrip("\n")
+            if in_fasta:
+                all_lines.append(line)
+                continue
+            if line == "##FASTA":
+                in_fasta = True
+                all_lines.append(line)
+                continue
             if not line or line.startswith("#"):
                 all_lines.append(line)
                 continue
@@ -233,7 +242,11 @@ def fix_gff_to_inframe(
 
     for gene_id, gene_data in genes.items():
         mrna_map = gene_data.mrnas
-        for mline in (child for child in children_of.get(gene_id, []) if child[2] == "mRNA"):
+        for mline in (
+            child
+            for child in children_of.get(gene_id, [])
+            if child[2] in ("mRNA", "transcript")
+        ):
             mrna_id = parse_attributes(mline[8]).get("ID")
             if mrna_id:
                 mrna_map[mrna_id] = _MrnaModel(line=mline)
@@ -296,7 +309,7 @@ def fix_gff_to_inframe(
         else:
             num_unchanged += 1
 
-    with Path(output_path).open("w", encoding="utf-8") as handle:
+    with atomic_text_writer(Path(output_path)) as handle:
         for item in all_lines:
             if isinstance(item, str):
                 handle.write(item + "\n")

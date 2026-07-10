@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from . import __version__
 from .annotation_table import build_annotation_table
 from .build_manifest import ManifestRecorder
 from .config import MSSPackConfig, load_config
@@ -98,6 +99,7 @@ class PipelineContext:
             outputs=output_paths,
             dependencies=dependency_paths,
             action=action,
+            cache_key={"msspack_version": __version__, "step": name},
         )
         self.manifest.record_stage(
             name=name,
@@ -185,7 +187,7 @@ def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
     ctx.run_step(
         name="00.copy-input-fasta",
         outputs=[prepared_fasta, logs / "00.copy-input-fasta.log", copy_fasta_metrics],
-        dependencies=input_fasta,
+        dependencies=[input_fasta, ctx.modules.pipeline_actions],
         action=lambda: copy_input_fasta(
             input_path=input_fasta,
             output_path=prepared_fasta,
@@ -199,7 +201,7 @@ def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
     ctx.run_step(
         name="00.copy-input-gff",
         outputs=[prepared_gff, logs / "00.copy-input-gff.log", copy_gff_metrics],
-        dependencies=input_gff,
+        dependencies=[input_gff, ctx.modules.pipeline_actions],
         action=lambda: copy_input_gff(
             input_path=input_gff,
             output_path=prepared_gff,
@@ -578,6 +580,7 @@ def _build_annotation_artifacts(
             log_path=logs / "16.mss-cds-to-misc.log",
             converted_gene_ids_path=misc_converted_gene_ids,
             metrics_path=misc_metrics,
+            locus_tag_prefix=config.sample.locus_tag,
         ),
     )
 

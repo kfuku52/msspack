@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+from Bio.Data import CodonTable
+
 from .config_errors import ConfigError
 from .config_models import (
     BuscoConfig,
@@ -27,6 +29,8 @@ VALID_BUSCO_AUTO_LINEAGE_SCOPE = {"all", "euk", "prok"}
 def ensure_nonempty(value: str, key: str) -> None:
     if not value.strip():
         raise ConfigError(f"Config value '{key}' must not be empty")
+    if any(character in value for character in ("\x00", "\r", "\n", "\t")):
+        raise ConfigError(f"Config value '{key}' must not contain control characters")
 
 
 def ensure_nonnegative(value: int, key: str) -> None:
@@ -69,11 +73,18 @@ def validate_sample_config(sample: SampleConfig) -> None:
     ensure_positive(sample.locus_tag_digits, "sample.locus_tag_digits")
     ensure_nonempty(sample.scientific_name, "sample.scientific_name")
     ensure_date(sample.collection_date, "sample.collection_date", "%Y-%m-%d")
+    try:
+        genetic_code = int(sample.genetic_code)
+    except ValueError as exc:
+        raise ConfigError("Config value 'sample.genetic_code' must be an NCBI table number") from exc
+    if genetic_code not in CodonTable.unambiguous_dna_by_id:
+        raise ConfigError(f"Unknown NCBI genetic code table: {genetic_code}")
 
 
 def validate_submission_config(submission: SubmissionConfig) -> None:
     if not HOLD_DATE_RE.match(submission.hold_date):
         raise ConfigError("Config value 'submission.hold_date' must match YYYYMMDD")
+    ensure_date(submission.hold_date, "submission.hold_date", "%Y%m%d")
     ensure_nonempty(submission.bioproject, "submission.bioproject")
     ensure_nonempty(submission.biosample, "submission.biosample")
     ensure_nonempty(submission.datatype, "submission.datatype")
@@ -108,6 +119,13 @@ def validate_pipeline_config(pipeline: PipelineConfig) -> None:
         pipeline.min_artificial_intron_size,
         "pipeline.min_artificial_intron_size",
     )
+    for pattern in pipeline.replace_product_patterns:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ConfigError(
+                f"Invalid regex in 'pipeline.replace_product_patterns': {pattern!r}: {exc}"
+            ) from exc
 
 
 def validate_tools_config(tools: ToolsConfig) -> None:

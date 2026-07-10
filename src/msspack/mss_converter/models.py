@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from ..gff import iter_gff_records
+from ..gff import child_ids, iter_gff_records
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,8 @@ def build_gff_indexes(
         if feature.type == "gene":
             gene_lookup.setdefault(feature.seq_id, []).append(feature)
         if feature.parent:
-            parent_lookup.setdefault(feature.parent, []).append(feature)
+            for parent_id in child_ids(feature.parent):
+                parent_lookup.setdefault(parent_id, []).append(feature)
     for seq_id in gene_lookup:
         gene_lookup[seq_id].sort(key=lambda feature: (feature.start, feature.end, feature.id))
     for parent_id in parent_lookup:

@@ -1,6 +1,6 @@
 # msspack
 
-![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 ![CI](https://github.com/kfuku52/msspack/actions/workflows/ci.yml/badge.svg)
 ![Linted with Ruff](https://img.shields.io/badge/lint-ruff-46a2f1)
@@ -34,7 +34,7 @@ Using an isolated environment is recommended but not required.
 If you use conda or mamba, you can install the external runtime tools at the same time:
 
 ```bash
-conda create -n msspack -c conda-forge -c bioconda python pip openjdk busco
+conda create -n msspack -c conda-forge -c bioconda "python>=3.10" pip openjdk busco
 conda activate msspack
 pip install git+https://github.com/kfuku52/msspack.git
 ```
@@ -168,6 +168,7 @@ Run checks locally with:
 PYTHONPATH=src python -m unittest discover -s tests -v
 ruff check .
 mypy src
+pip-audit .
 ```
 
 To clean repo-local build, cache, and BUSCO artifact files before a fresh run:

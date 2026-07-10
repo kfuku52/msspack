@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Tuple, Type, Union
 
 try:
     import tomllib
@@ -21,6 +21,141 @@ from .config_models import (
     SubmitterConfig,
     ToolsConfig,
 )
+
+ExpectedType = Union[Type[Any], Tuple[Type[Any], ...]]
+
+
+SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
+    "project": {"name": str, "output_dir": str},
+    "inputs": {"fasta": str, "gff": str},
+    "sample": {
+        "locus_tag": str,
+        "locus_tag_digits": int,
+        "scientific_name": str,
+        "strain": str,
+        "isolate": str,
+        "geo_loc_name": str,
+        "collection_date": str,
+        "sex": str,
+        "linkage_evidence": str,
+        "genetic_code": str,
+    },
+    "submission": {
+        "datatype": str,
+        "hold_date": str,
+        "bioproject": str,
+        "biosample": str,
+        "sra": (str, list),
+        "keywords": (str, list),
+    },
+    "submitter": {
+        "ab_name": (str, list),
+        "contact": str,
+        "institute": str,
+        "department": str,
+        "country": str,
+        "state": str,
+        "city": str,
+        "street": str,
+        "zip": str,
+        "phone": str,
+        "email": str,
+    },
+    "reference": {
+        "title": str,
+        "ab_name": (str, list),
+        "year": int,
+        "status": str,
+    },
+    "st_comment": {
+        "tagset_id": str,
+        "assembly_method": str,
+        "assembly_name": str,
+        "genome_coverage": str,
+        "sequencing_technology": str,
+    },
+    "pipeline": {
+        "run_gapjust": bool,
+        "gapjust_gap_len": int,
+        "gapjust_min": int,
+        "gapjust_max": int,
+        "gap_assembly": str,
+        "infer_complete": bool,
+        "feature_with_gap": str,
+        "min_assembly_gap": int,
+        "min_artificial_intron_size": int,
+        "replace_product_patterns": (str, list),
+        "replace_product_with": str,
+        "validate_with_parser": bool,
+        "validate_with_transchecker": bool,
+        "validate_in_parallel": bool,
+    },
+    "tools": {
+        "cache_dir": str,
+        "java": str,
+        "gff3sort": str,
+        "java_heap": str,
+    },
+    "busco": {
+        "command": str,
+        "run_cds": bool,
+        "run_genome": bool,
+        "mode": str,
+        "cds_mode": str,
+        "lineage_dataset": str,
+        "auto_lineage": bool,
+        "auto_lineage_scope": str,
+        "threads": int,
+        "download_path": str,
+        "offline": bool,
+        "force": bool,
+        "opt_out_run_stats": bool,
+    },
+}
+
+
+def _type_label(expected: ExpectedType) -> str:
+    if isinstance(expected, tuple):
+        return " or ".join(item.__name__ for item in expected)
+    return expected.__name__
+
+
+def _validate_raw_config(data: dict[str, Any]) -> None:
+    unknown_sections = sorted(set(data) - set(SECTION_TYPES))
+    if unknown_sections:
+        raise ConfigError(f"Unknown config section(s): {', '.join(unknown_sections)}")
+    for section_name, values in data.items():
+        if not isinstance(values, dict):
+            raise ConfigError(f"Section '{section_name}' must be a table/object")
+        schema = SECTION_TYPES[section_name]
+        unknown_keys = sorted(set(values) - set(schema))
+        if unknown_keys:
+            dotted = ", ".join(f"{section_name}.{key}" for key in unknown_keys)
+            raise ConfigError(f"Unknown config key(s): {dotted}")
+        for key, value in values.items():
+            expected = schema[key]
+            if expected is int and isinstance(value, bool):
+                valid = False
+            else:
+                valid = isinstance(value, expected)
+            if not valid:
+                raise ConfigError(
+                    f"Config value '{section_name}.{key}' must be {_type_label(expected)}, "
+                    f"got {type(value).__name__}"
+                )
+            if isinstance(value, list) and any(not isinstance(item, str) for item in value):
+                raise ConfigError(
+                    f"Config value '{section_name}.{key}' must contain only strings"
+                )
+            strings = value if isinstance(value, list) else [value]
+            if any(
+                isinstance(item, str)
+                and any(character in item for character in ("\x00", "\r", "\n", "\t"))
+                for item in strings
+            ):
+                raise ConfigError(
+                    f"Config value '{section_name}.{key}' must not contain control characters"
+                )
 
 
 def require(mapping: dict[str, Any], key: str, section: str) -> Any:
@@ -166,10 +301,16 @@ def load_busco_config(data: dict[str, Any]) -> BuscoConfig:
 
 
 def read_config_data(config_path: Path) -> dict[str, Any]:
-    return tomllib.loads(config_path.read_text(encoding="utf-8"))
+    try:
+        return tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ConfigError(f"Could not read config file {config_path}: {exc}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"Invalid TOML in {config_path}: {exc}") from exc
 
 
 def load_sections(data: dict[str, Any]) -> dict[str, Any]:
+    _validate_raw_config(data)
     return {
         "project": load_project_config(section(data, "project")),
         "inputs": load_inputs_config(section(data, "inputs")),

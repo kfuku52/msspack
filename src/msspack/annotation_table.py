@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .gff import iter_gff_records
 from .step_logging import write_step_log, write_step_metrics
-from .utils import ensure_dir
+from .utils import atomic_text_writer, ensure_dir
 
 
 def build_annotation_table(
@@ -18,7 +18,7 @@ def build_annotation_table(
 ) -> None:
     started_at = datetime.now()
     gene_to_mrnas: dict[str, list[str]] = {}
-    gene_to_product: dict[str, str] = {}
+    transcript_to_product: dict[str, str] = {}
     hypothetical_count = 0
     other_product_count = 0
 
@@ -29,23 +29,32 @@ def build_annotation_table(
                 gene_to_mrnas.setdefault(gene_id, [])
         elif record.type in ("mRNA", "transcript"):
             mrna_id = record.attributes.get("ID")
-            parent_gene_id = record.attributes.get("Parent")
-            if not (parent_gene_id and mrna_id):
+            parent_gene_ids = [item for item in record.attributes.get("Parent", "").split(",") if item]
+            if not (parent_gene_ids and mrna_id):
                 continue
-            gene_to_mrnas.setdefault(parent_gene_id, []).append(mrna_id)
-            if parent_gene_id not in gene_to_product:
-                product = record.attributes.get("product")
-                if product:
-                    gene_to_product[parent_gene_id] = product
+            for parent_gene_id in parent_gene_ids:
+                gene_to_mrnas.setdefault(parent_gene_id, []).append(mrna_id)
+            product = record.attributes.get("product")
+            if product:
+                transcript_to_product[mrna_id] = product
+        elif record.type == "CDS":
+            product = record.attributes.get("product")
+            if product:
+                for transcript_id in record.attributes.get("Parent", "").split(","):
+                    if transcript_id:
+                        transcript_to_product.setdefault(transcript_id, product)
 
     ensure_dir(output_path.parent)
-    with output_path.open("w", encoding="utf-8") as out_handle:
+    with atomic_text_writer(output_path) as out_handle:
         out_handle.write("ID\tDescription\tLocus_tag\n")
         for gene_id, mrna_ids in gene_to_mrnas.items():
-            product = gene_to_product.get(gene_id, "hypothetical protein")
             for mrna_id in mrna_ids:
+                product = transcript_to_product.get(mrna_id, "hypothetical protein")
                 locus_tag = gene_id
-                if locus_tag_prefix and not locus_tag.startswith(locus_tag_prefix):
+                already_prefixed = locus_tag == locus_tag_prefix or locus_tag.startswith(
+                    locus_tag_prefix + "_"
+                )
+                if locus_tag_prefix and not already_prefixed:
                     locus_tag = f"{locus_tag_prefix}_{locus_tag}"
                 out_handle.write(f"{mrna_id}\t{product}\t{locus_tag}\n")
                 if product == "hypothetical protein":

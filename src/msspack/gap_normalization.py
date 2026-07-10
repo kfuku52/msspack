@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +9,7 @@ from typing import Iterable, Optional
 from .fasta import iter_fasta, write_fasta_record
 from .gff import GFFDocument, read_gff_document, write_gff_document
 from .step_logging import write_step_log, write_step_metrics
-from .utils import ensure_dir
+from .utils import atomic_text_writer, ensure_dir, link_or_copy
 
 # Some of the gap-normalization logic below is carried forward from earlier
 # internal tooling used before msspack unified the MSS packaging workflow.
@@ -205,11 +204,10 @@ def normalize_gap_lengths(
         )
     else:
         detail_lines.append("No gap edits were made.")
-        ensure_dir(output_fasta_path.parent)
-        shutil.copy2(fasta_path, output_fasta_path)
+        link_or_copy(fasta_path, output_fasta_path)
     if num_justifications:
         ensure_dir(output_fasta_path.parent)
-        with output_fasta_path.open("w", encoding="utf-8") as handle:
+        with atomic_text_writer(output_fasta_path) as handle:
             for record_id, description, sequence in records:
                 write_fasta_record(
                     handle,
@@ -249,8 +247,7 @@ def normalize_gap_lengths(
         if num_justifications:
             write_gff_document(output_gff_path, document)
         else:
-            ensure_dir(output_gff_path.parent)
-            shutil.copy2(input_gff_path, output_gff_path)
+            link_or_copy(input_gff_path, output_gff_path)
         detail_lines.append(f"Number of output GFF header lines: {len(document.header_lines):,}")
         detail_lines.append(f"Number of output GFF records: {len(document.records):,}")
         detail_lines.append(

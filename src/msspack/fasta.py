@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, TextIO
 
+from .utils import atomic_text_writer
+
 _COMPLEMENT_TABLE = str.maketrans(
     "ACGTRYMKBDHVSWNUacgtrymkbdhvswnu",
     "TGCAYRKMVHDBSWNAtgcayrkmvhdbswna",
@@ -89,7 +91,7 @@ def write_fasta_records(
     *,
     width: int = 60,
 ) -> None:
-    with Path(path).open("w", encoding="utf-8") as handle:
+    with atomic_text_writer(Path(path)) as handle:
         for record in records:
             write_fasta_record(
                 handle,

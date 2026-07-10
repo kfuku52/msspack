@@ -51,13 +51,41 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def remove_output_dir(config_path: Path) -> None:
     config = load_config(config_path)
-    if config.output_dir.exists():
-        shutil.rmtree(config.output_dir)
+    configured_output_dir = config.output_dir
+    if configured_output_dir.is_symlink():
+        raise ValueError(
+            f"Refusing to recursively remove symlinked output directory: {configured_output_dir}"
+        )
+    output_dir = configured_output_dir.resolve()
+    protected_directories = {
+        Path(output_dir.anchor),
+        Path.home().resolve(),
+        REPO_ROOT.resolve(),
+        config.base_dir.resolve(),
+    }
+    protected_files = {
+        config_path.resolve(),
+        config.fasta_path.resolve(),
+        config.gff_path.resolve(),
+    }
+    if output_dir in protected_directories or any(
+        output_dir in protected.parents for protected in protected_directories
+    ):
+        raise ValueError(f"Refusing to remove protected output directory: {output_dir}")
+    contained_inputs = [path for path in protected_files if path == output_dir or output_dir in path.parents]
+    if contained_inputs:
+        raise ValueError(
+            f"Refusing to remove output directory containing config/input files: {output_dir}"
+        )
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     config_path = Path(args.config).expanduser().resolve()
+    if args.repeats <= 0:
+        raise ValueError("--repeats must be greater than zero")
 
     if args.clean_first or args.clean_between_runs:
         remove_output_dir(config_path)

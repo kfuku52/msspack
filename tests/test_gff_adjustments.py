@@ -159,6 +159,103 @@ class GffAdjustmentTests(unittest.TestCase):
             self.assertIn("gene\t2\t9", text)
             self.assertIn("transcript\t2\t9", text)
 
+    def test_partial_transcript_does_not_lose_an_extra_codon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            padding_log = base / "padding.log"
+            output_gff = base / "output.gff3"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t8\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\ttranscript\t1\t8\t.\t+\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t8\t.\t+\t.\tID=e1;Parent=t1",
+                        "chr1\tsrc\tCDS\t1\t8\t.\t+\t0\tID=c1;Parent=t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            padding_log.write_text(
+                "t1, original_seqlen=8, head_padding=0, tail_padding=1, "
+                "original_num_stop=0, new_num_stop=0\n",
+                encoding="utf-8",
+            )
+
+            apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=padding_log,
+                output_path=output_gff,
+                genes_with_stops_path=base / "stops.txt",
+                updated_genes_path=base / "updated.txt",
+            )
+
+            text = output_gff.read_text(encoding="utf-8")
+            self.assertIn("gene\t1\t6", text)
+            self.assertIn("CDS\t1\t6", text)
+
+    def test_padding_keeps_gene_without_explicit_exons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            padding_log = base / "padding.log"
+            output_gff = base / "output.gff3"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t9\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t9\t.\t+\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=c1;Parent=t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            padding_log.write_text(
+                "t1, original_seqlen=9, head_padding=1, tail_padding=2, "
+                "original_num_stop=1, new_num_stop=0\n",
+                encoding="utf-8",
+            )
+
+            summary = apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=padding_log,
+                output_path=output_gff,
+                genes_with_stops_path=base / "stops.txt",
+                updated_genes_path=base / "updated.txt",
+            )
+
+            self.assertEqual(summary["updated_genes"], ["g1"])
+            self.assertIn("gene", output_gff.read_text(encoding="utf-8"))
+
+    def test_padding_keeps_embedded_fasta_after_feature_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            output_gff = base / "output.gff3"
+            input_gff.write_text(
+                "##gff-version 3\n"
+                "chr1\tsrc\tgene\t1\t9\t.\t+\t.\tID=g1\n"
+                "chr1\tsrc\tmRNA\t1\t9\t.\t+\t.\tID=t1;Parent=g1\n"
+                "chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=c1;Parent=t1\n"
+                "##FASTA\n>chr1\nATGAAATAA\n",
+                encoding="utf-8",
+            )
+            (base / "padding.log").write_text("", encoding="utf-8")
+
+            apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=base / "padding.log",
+                output_path=output_gff,
+                genes_with_stops_path=base / "stops.txt",
+                updated_genes_path=base / "updated.txt",
+            )
+
+            output = output_gff.read_text(encoding="utf-8")
+            self.assertLess(output.index("ID=c1"), output.index("##FASTA"))
+            self.assertTrue(output.endswith("##FASTA\n>chr1\nATGAAATAA\n"))
+
 
 if __name__ == "__main__":
     unittest.main()

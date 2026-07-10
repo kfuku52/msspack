@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import gzip
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from .config import MSSPackConfig
+from .fasta import iter_fasta_handle
 from .fasta_steps import remove_trailing_ns_fasta, write_mss_fasta
 from .gap_normalization import normalize_gap_lengths
 from .gff import sort_gff_file_precise
@@ -25,7 +27,7 @@ from .step_logging import (
 )
 from .submission_render import render_final_annotation
 from .transcript_selection import select_one_mrna_per_gene
-from .utils import copy_or_decompress, link_or_copy, write_text
+from .utils import MSSPackError, copy_or_decompress, link_or_copy, write_text
 
 
 def run_gapjust(
@@ -93,8 +95,30 @@ def copy_input_fasta(
     metrics_path: Path | None = None,
 ) -> None:
     started_at = datetime.now()
+    seen_ids: set[str] = set()
+    duplicate_ids: set[str] = set()
+    empty_ids: list[str] = []
+    opener = gzip.open if input_path.suffix == ".gz" else Path.open
+    with opener(input_path, "rt", encoding="utf-8") as input_handle:
+        for record in iter_fasta_handle(input_handle):
+            if record.id in seen_ids:
+                duplicate_ids.add(record.id)
+            seen_ids.add(record.id)
+            if not record.sequence:
+                empty_ids.append(record.id)
+    if not seen_ids:
+        raise MSSPackError("FASTA input does not contain any sequence records")
+    if duplicate_ids:
+        raise MSSPackError(
+            "Duplicate FASTA sequence IDs are not supported: "
+            + ", ".join(sorted(duplicate_ids)[:10])
+        )
+    if empty_ids:
+        raise MSSPackError(
+            "FASTA records must contain sequence data: " + ", ".join(empty_ids[:10])
+        )
     copy_or_decompress(input_path, output_path)
-    output_total = count_fasta_records(output_path)
+    output_total = len(seen_ids)
     write_step_log(
         log_path=log_path,
         command=f"msspack pipeline copy-input-fasta --input {input_path} --output {output_path}",
@@ -344,6 +368,7 @@ def run_mss_cds_to_misc(
     log_path: Path,
     converted_gene_ids_path: Path | None = None,
     metrics_path: Path | None = None,
+    locus_tag_prefix: str = "",
 ) -> None:
     started_at = datetime.now()
     summary = convert_cds_features_to_misc(
@@ -351,6 +376,7 @@ def run_mss_cds_to_misc(
         genes_input_path=genes_input_path,
         mss_output_path=mss_output_path,
         converted_gene_ids_path=converted_gene_ids_path,
+        locus_tag_prefix=locus_tag_prefix,
     )
     input_total = count_mss_feature_blocks(mss_input_path)
     output_total = count_mss_feature_blocks(mss_output_path)

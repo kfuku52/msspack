@@ -1,10 +1,17 @@
 import unittest
 from types import SimpleNamespace
 
-from msspack.mss_converter.core import build_gff_feature_indexes, detect_gap_regions
+from msspack.mss_converter.core import (
+    _get_start_codons,
+    build_gff_feature_indexes,
+    detect_gap_regions,
+)
 
 
 class MssConverterTests(unittest.TestCase):
+    def test_start_codons_follow_selected_genetic_code(self) -> None:
+        self.assertIn("ATA", _get_start_codons("2"))
+
     def test_detect_gap_regions_finds_contiguous_n_runs(self) -> None:
         record = SimpleNamespace(seq="AANNNTAANNNNN")
         out, gaps = detect_gap_regions(
@@ -66,6 +73,23 @@ class MssConverterTests(unittest.TestCase):
         self.assertEqual(parent_lookup["Gene1"][0].id, "Gene1-T1")
         self.assertEqual(parent_lookup["Gene1-T1"][0].phase, 2)
         self.assertEqual(parent_lookup["Gene1-T1"][0].parent, "Gene1-T1")
+
+    def test_build_gff_feature_indexes_splits_multiple_parents(self) -> None:
+        shared = {
+            "seq_id": "chr1",
+            "type": "CDS",
+            "ID": "shared",
+            "Parent": "tx1,tx2",
+            "start": 1,
+            "end": 9,
+            "strand": "+",
+            "phase": "0",
+        }
+
+        _, parent_lookup = build_gff_feature_indexes([shared])
+
+        self.assertEqual(parent_lookup["tx1"][0].id, "shared")
+        self.assertEqual(parent_lookup["tx2"][0].id, "shared")
 
 
 if __name__ == "__main__":

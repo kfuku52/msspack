@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from .step_logging import write_id_list
+from .utils import atomic_text_writer
 
 _LOCUS_TAG_PATTERN = re.compile(r"\blocus_tag\s+(\S+)")
 
@@ -18,20 +19,24 @@ class MssPostprocessSummary(TypedDict):
     converted_gene_ids: list[str]
 
 
-def normalize_gene_identifier(identifier: str) -> str:
-    if "_" in identifier:
-        return identifier.split("_")[-1]
-    return identifier
-
-
-def read_gene_lookup(genes_file: str | Path) -> dict[str, str]:
+def read_gene_lookup(
+    genes_file: str | Path,
+    *,
+    locus_tag_prefix: str = "",
+) -> dict[str, str]:
     genes: dict[str, str] = {}
     with Path(genes_file).open("r", encoding="utf-8") as handle:
         for raw_line in handle:
             gene = raw_line.strip()
             if gene:
                 genes.setdefault(gene, gene)
-                genes.setdefault(normalize_gene_identifier(gene), gene)
+                if locus_tag_prefix:
+                    prefixed = (
+                        gene
+                        if gene == locus_tag_prefix or gene.startswith(locus_tag_prefix + "_")
+                        else f"{locus_tag_prefix}_{gene}"
+                    )
+                    genes.setdefault(prefixed, gene)
     return genes
 
 
@@ -61,9 +66,7 @@ def process_feature_block(
         locus_tag = get_locus_tag_from_block(block_lines)
         matched_gene_id = None
         if locus_tag:
-            matched_gene_id = gene_lookup.get(locus_tag) or gene_lookup.get(
-                normalize_gene_identifier(locus_tag)
-            )
+            matched_gene_id = gene_lookup.get(locus_tag)
         if matched_gene_id is not None:
             indent = header_line[: len(header_line) - len(header_line.lstrip())]
             block_lines[0] = indent + header_stripped.replace("CDS", "misc_feature", 1)
@@ -101,16 +104,17 @@ def convert_cds_features_to_misc(
     genes_input_path: str | Path,
     mss_output_path: str | Path,
     converted_gene_ids_path: str | Path | None = None,
+    locus_tag_prefix: str = "",
 ) -> MssPostprocessSummary:
-    gene_lookup = read_gene_lookup(genes_input_path)
+    gene_lookup = read_gene_lookup(genes_input_path, locus_tag_prefix=locus_tag_prefix)
     total_cds_input = 0
     total_edited_genes = 0
     total_cds_output = 0
     total_misc_feature_output = 0
     converted_gene_ids: list[str] = []
 
-    with Path(mss_input_path).open("r", encoding="utf-8") as infile, Path(mss_output_path).open(
-        "w", encoding="utf-8"
+    with Path(mss_input_path).open("r", encoding="utf-8") as infile, atomic_text_writer(
+        Path(mss_output_path)
     ) as outfile:
         current_block: list[str] = []
 

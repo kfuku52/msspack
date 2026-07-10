@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from .fasta import iter_fasta
 from .step_logging import write_step_log, write_step_metrics
-from .utils import ensure_dir
+from .utils import atomic_text_writer, ensure_dir
 
 
 def remove_trailing_ns_fasta(
@@ -21,8 +21,8 @@ def remove_trailing_ns_fasta(
     input_total = 0
     changed_total = 0
     ensure_dir(output_path.parent)
-    with input_path.open("r", encoding="utf-8") as in_handle, output_path.open(
-        "w", encoding="utf-8"
+    with input_path.open("r", encoding="utf-8") as in_handle, atomic_text_writer(
+        output_path
     ) as out_handle:
         header: Optional[str] = None
         seq_lines: List[str] = []
@@ -107,7 +107,7 @@ def write_mss_fasta(
     started_at = datetime.now()
     entries = 0
     ensure_dir(output_path.parent)
-    with output_path.open("w", encoding="utf-8") as out_handle:
+    with atomic_text_writer(output_path) as out_handle:
         for record in iter_fasta(input_path):
             out_handle.write(f">{record.id}\n")
             seq = record.sequence

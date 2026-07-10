@@ -8,6 +8,7 @@ from typing import Optional
 from Bio.Data import CodonTable
 
 from ..fasta import iter_fasta
+from ..utils import atomic_text_writer
 from .features import convert_contig_features
 from .gaps import detect_gap_regions
 from .models import (
@@ -34,7 +35,7 @@ class ConversionOptions:
     linkage_evidence: str = "paired-ends"
     genetic_code: str = "1"
     infer_boundary: bool = False
-    start_codons: tuple[str, ...] = ("ATG",)
+    start_codons: Optional[tuple[str, ...]] = None
     isolate: str = ""
     sex: str = ""
     country: str = ""
@@ -72,6 +73,13 @@ def _get_stop_codons(genetic_code: str) -> set[str]:
     }
 
 
+def _get_start_codons(genetic_code: str) -> set[str]:
+    return {
+        str(codon)
+        for codon in CodonTable.unambiguous_dna_by_id[int(genetic_code)].start_codons
+    }
+
+
 def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
     annotation_lookup, has_custom_locus_tags = load_annotation_lookup(options.annotation_path)
     protein_lookup = load_protein_id_lookup(options.protein_id_path)
@@ -80,10 +88,14 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
     overall_counts: Counter[str] = Counter()
     contig_summaries: list[ContigSummary] = []
     locus_tag_counter = 0
-    start_codons = {codon for codon in options.start_codons if codon}
+    start_codons = (
+        {codon.upper() for codon in options.start_codons if codon}
+        if options.start_codons is not None
+        else _get_start_codons(options.genetic_code)
+    )
     stop_codons = _get_stop_codons(options.genetic_code)
 
-    with options.output_path.open("w", encoding="utf-8") as out_handle:
+    with atomic_text_writer(options.output_path) as out_handle:
         for record in iter_fasta(options.fasta_path):
             sequence = record.sequence.upper()
             contig_counts: Counter[str] = Counter()

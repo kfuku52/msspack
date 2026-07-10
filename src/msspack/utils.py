@@ -6,8 +6,10 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Mapping, Optional, Sequence
+from typing import BinaryIO, Iterator, Mapping, Optional, Sequence, TextIO
 
 
 class MSSPackError(RuntimeError):
@@ -91,30 +93,93 @@ def run_command(
 
 
 def copy_or_decompress(source: Path, destination: Path) -> Path:
-    ensure_dir(destination.parent)
-    if source.suffix == ".gz":
-        with gzip.open(source, "rb") as src, destination.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
-    else:
-        shutil.copy2(source, destination)
+    with atomic_binary_writer(destination) as dst:
+        if source.suffix == ".gz":
+            with gzip.open(source, "rb") as src:
+                shutil.copyfileobj(src, dst)
+        else:
+            with source.open("rb") as src:
+                shutil.copyfileobj(src, dst)
     return destination
 
 
 def link_or_copy(source: Path, destination: Path) -> Path:
     ensure_dir(destination.parent)
-    if destination.exists() or destination.is_symlink():
-        destination.unlink()
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    temporary.unlink()
     try:
-        os.link(source, destination)
-    except OSError:
-        shutil.copy2(source, destination)
+        try:
+            os.link(source, temporary)
+        except OSError:
+            shutil.copy2(source, temporary)
+        os.replace(temporary, destination)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     return destination
 
 
 def write_text(path: Path, text: str) -> Path:
-    ensure_dir(path.parent)
-    path.write_text(text, encoding="utf-8")
+    with atomic_text_writer(path) as handle:
+        handle.write(text)
     return path
+
+
+@contextmanager
+def atomic_text_writer(path: Path) -> Iterator[TextIO]:
+    """Write text to a sibling temporary file and replace the target on success."""
+    ensure_dir(path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+        text=True,
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            yield handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.exists() and not path.is_symlink():
+            temporary_path.chmod(path.stat().st_mode & 0o777)
+        else:
+            temporary_path.chmod(0o644)
+        os.replace(temporary_path, path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+@contextmanager
+def atomic_binary_writer(path: Path) -> Iterator[BinaryIO]:
+    """Write bytes to a sibling temporary file and replace the target on success."""
+    ensure_dir(path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            yield handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.exists() and not path.is_symlink():
+            temporary_path.chmod(path.stat().st_mode & 0o777)
+        else:
+            temporary_path.chmod(0o644)
+        os.replace(temporary_path, path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def which(command: str) -> Optional[str]:

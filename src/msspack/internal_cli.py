@@ -218,6 +218,7 @@ def add_internal_parser(subparsers: argparse._SubParsersAction[argparse.Argument
             p.add_argument("--mss-input", required=True, help="input MSS annotation file"),
             p.add_argument("--genes-input", required=True, help="genes to convert"),
             p.add_argument("--output", required=True, help="output MSS annotation file"),
+            p.add_argument("--locus-tag-prefix", default="", help="configured locus_tag prefix"),
             p.add_argument("--log", help="optional log file"),
         ),
         handler=mss_cds_to_misc_handler,

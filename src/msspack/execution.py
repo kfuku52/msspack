@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
-from .utils import MSSPackError
+from .utils import MSSPackError, write_text
 
 NamedJob = tuple[str, Callable[[], object]]
+CACHE_SCHEMA_VERSION = 2
+_FILE_FINGERPRINT_CACHE: dict[tuple[str, int, int, int], dict[str, object]] = {}
 
 
 @lru_cache(maxsize=None)
@@ -33,19 +37,132 @@ def path_list(*items: object) -> list[Path]:
     return paths
 
 
-def is_up_to_date(outputs: list[Path], dependencies: list[Path]) -> bool:
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fingerprint(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    resolved = path.resolve()
+    if resolved.is_file():
+        stat = resolved.stat()
+        cache_identity = (
+            str(resolved),
+            stat.st_size,
+            stat.st_mtime_ns,
+            stat.st_ctime_ns,
+        )
+        cached = _FILE_FINGERPRINT_CACHE.get(cache_identity)
+        if cached is not None:
+            return cached
+        result: dict[str, object] = {
+            "kind": "file",
+            "size": stat.st_size,
+            "sha256": _sha256_file(resolved),
+        }
+        _FILE_FINGERPRINT_CACHE[cache_identity] = result
+        return result
+    if resolved.is_dir():
+        entries: list[dict[str, object]] = []
+        for child in sorted(item for item in resolved.rglob("*") if item.is_file()):
+            stat = child.stat()
+            entries.append(
+                {
+                    "path": str(child.relative_to(resolved)),
+                    "size": stat.st_size,
+                    "sha256": _sha256_file(child),
+                }
+            )
+        return {"kind": "directory", "entries": entries}
+    return {"kind": "other"}
+
+
+def _fingerprints(paths: list[Path]) -> dict[str, dict[str, object]] | None:
+    fingerprints: dict[str, dict[str, object]] = {}
+    for path in paths:
+        fingerprint = _fingerprint(path)
+        if fingerprint is None:
+            return None
+        fingerprints[str(path.resolve())] = fingerprint
+    return fingerprints
+
+
+def _normalized_cache_key(cache_key: object | None) -> object | None:
+    if cache_key is None:
+        return None
+    try:
+        return json.loads(json.dumps(cache_key, sort_keys=True))
+    except (TypeError, ValueError) as exc:
+        raise MSSPackError(f"Cache key is not JSON serializable: {cache_key!r}") from exc
+
+
+def _cache_state_path(outputs: list[Path]) -> Path:
+    identity = "\0".join(str(path.resolve()) for path in outputs)
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return outputs[0].parent / ".msspack-cache" / f"{digest}.json"
+
+
+def _read_cache_state(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("schema_version") != CACHE_SCHEMA_VERSION:
+        return None
+    return payload
+
+
+def is_up_to_date(
+    outputs: list[Path],
+    dependencies: list[Path],
+    *,
+    cache_key: object | None = None,
+) -> bool:
     if not outputs:
         return False
-    if any(not path.exists() for path in outputs):
+    state = _read_cache_state(_cache_state_path(outputs))
+    if state is None:
         return False
-    if not dependencies:
-        return True
-    existing_deps = [path for path in dependencies if path.exists()]
-    if not existing_deps:
-        return True
-    newest_input = max(path.stat().st_mtime for path in existing_deps)
-    oldest_output = min(path.stat().st_mtime for path in outputs)
-    return oldest_output >= newest_input
+    output_fingerprints = _fingerprints(outputs)
+    dependency_fingerprints = _fingerprints(dependencies)
+    if output_fingerprints is None or dependency_fingerprints is None:
+        return False
+    return (
+        state.get("outputs") == output_fingerprints
+        and state.get("dependencies") == dependency_fingerprints
+        and state.get("cache_key") == _normalized_cache_key(cache_key)
+    )
+
+
+def _write_cache_state(
+    outputs: list[Path],
+    dependencies: list[Path],
+    *,
+    cache_key: object | None,
+) -> None:
+    output_fingerprints = _fingerprints(outputs)
+    dependency_fingerprints = _fingerprints(dependencies)
+    if output_fingerprints is None:
+        missing = [str(path) for path in outputs if not path.exists()]
+        raise MSSPackError("Action did not create all declared outputs: " + ", ".join(missing))
+    if dependency_fingerprints is None:
+        missing = [str(path) for path in dependencies if not path.exists()]
+        raise MSSPackError("Action dependencies disappeared: " + ", ".join(missing))
+    payload = {
+        "schema_version": CACHE_SCHEMA_VERSION,
+        "outputs": output_fingerprints,
+        "dependencies": dependency_fingerprints,
+        "cache_key": _normalized_cache_key(cache_key),
+    }
+    state_path = _cache_state_path(outputs)
+    write_text(state_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def run_if_needed(
@@ -53,10 +170,24 @@ def run_if_needed(
     outputs: list[Path],
     dependencies: list[Path],
     action: Callable[[], object],
+    cache_key: object | None = None,
 ) -> bool:
-    if is_up_to_date(outputs, dependencies):
+    if not outputs:
+        raise MSSPackError("Cached actions must declare at least one output")
+    if is_up_to_date(outputs, dependencies, cache_key=cache_key):
         return False
+    state_path = _cache_state_path(outputs) if outputs else None
+    if state_path is not None:
+        state_path.unlink(missing_ok=True)
+    dependency_fingerprints_before = _fingerprints(dependencies)
+    if dependency_fingerprints_before is None:
+        missing = [str(path) for path in dependencies if not path.exists()]
+        raise MSSPackError("Action dependencies are missing: " + ", ".join(missing))
     action()
+    dependency_fingerprints_after = _fingerprints(dependencies)
+    if dependency_fingerprints_before != dependency_fingerprints_after:
+        raise MSSPackError("Action dependencies changed while the step was running; rerun the step")
+    _write_cache_state(outputs, dependencies, cache_key=cache_key)
     return True
 
 
@@ -67,9 +198,21 @@ def append_job_if_needed(
     outputs: list[Path],
     dependencies: list[Path],
     action: Callable[[], object],
+    cache_key: object | None = None,
 ) -> None:
-    if not is_up_to_date(outputs, dependencies):
-        jobs.append((name, action))
+    if is_up_to_date(outputs, dependencies, cache_key=cache_key):
+        return
+
+    def cached_action() -> object:
+        run_if_needed(
+            outputs=outputs,
+            dependencies=dependencies,
+            action=action,
+            cache_key=cache_key,
+        )
+        return None
+
+    jobs.append((name, cached_action))
 
 
 def run_named_jobs(jobs: list[NamedJob], *, parallel: bool) -> None:
@@ -85,10 +228,7 @@ def run_named_jobs(jobs: list[NamedJob], *, parallel: bool) -> None:
         max_workers=len(jobs),
         thread_name_prefix="msspack-validate",
     ) as executor:
-        future_to_name = {
-            executor.submit(action): name
-            for name, action in jobs
-        }
+        future_to_name = {executor.submit(action): name for name, action in jobs}
         for future in as_completed(future_to_name):
             try:
                 future.result()

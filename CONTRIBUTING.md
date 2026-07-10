@@ -5,7 +5,7 @@
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 
 ## Local checks
@@ -14,9 +14,12 @@ pip install -e .[dev]
 python -m compileall -q src tests
 ruff check .
 mypy src
+pip-audit .
 PYTHONPATH=src python -m unittest discover -s tests -v
 rm -rf build dist src/msspack.egg-info
-python -m build --wheel
+python -m build
+python scripts/check_distribution.py
+check-wheel-contents dist/*.whl
 ```
 
 ## Regression checks

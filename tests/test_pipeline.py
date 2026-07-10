@@ -1,5 +1,4 @@
 import json
-import os
 import tempfile
 import threading
 import time
@@ -13,10 +12,15 @@ from msspack.execution import (
     run_if_needed,
     run_named_jobs,
 )
+from msspack.utils import MSSPackError
 from msspack.validation import ValidationArtifacts, ValidationOptions
 
 
 class PipelineCacheTests(unittest.TestCase):
+    def test_cached_action_requires_a_declared_output(self) -> None:
+        with self.assertRaisesRegex(MSSPackError, "at least one output"):
+            run_if_needed(outputs=[], dependencies=[], action=lambda: None)
+
     def test_manifest_write_preserves_out_of_band_sections(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -148,22 +152,25 @@ class PipelineCacheTests(unittest.TestCase):
         self.assertTrue(options.run_parser)
         self.assertTrue(options.run_transchecker)
 
-    def test_is_up_to_date_uses_oldest_output_and_newest_dependency(self) -> None:
+    def test_is_up_to_date_uses_content_fingerprints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
             dep = base / "dep.txt"
             out_a = base / "out_a.txt"
             out_b = base / "out_b.txt"
-            dep.write_text("dep", encoding="utf-8")
-            out_a.write_text("a", encoding="utf-8")
-            out_b.write_text("b", encoding="utf-8")
+            dep.write_text("old", encoding="utf-8")
 
-            os.utime(dep, (100, 100))
-            os.utime(out_a, (200, 200))
-            os.utime(out_b, (300, 300))
+            run_if_needed(
+                outputs=[out_a, out_b],
+                dependencies=[dep],
+                action=lambda: (
+                    out_a.write_text("a", encoding="utf-8"),
+                    out_b.write_text("b", encoding="utf-8"),
+                ),
+            )
             self.assertTrue(is_up_to_date([out_a, out_b], [dep]))
 
-            os.utime(dep, (400, 400))
+            dep.write_text("new", encoding="utf-8")
             self.assertFalse(is_up_to_date([out_a, out_b], [dep]))
 
     def test_run_if_needed_skips_when_outputs_are_fresh(self) -> None:
@@ -172,25 +179,103 @@ class PipelineCacheTests(unittest.TestCase):
             dep = base / "dep.txt"
             out = base / "out.txt"
             dep.write_text("dep", encoding="utf-8")
-            out.write_text("out", encoding="utf-8")
-            os.utime(dep, (100, 100))
-            os.utime(out, (200, 200))
 
             calls = {"count": 0}
 
             def action() -> None:
                 calls["count"] += 1
+                out.write_text(f"out-{calls['count']}", encoding="utf-8")
 
-            self.assertFalse(
-                run_if_needed(outputs=[out], dependencies=[dep], action=action)
-            )
-            self.assertEqual(calls["count"], 0)
-
-            os.utime(dep, (300, 300))
             self.assertTrue(
                 run_if_needed(outputs=[out], dependencies=[dep], action=action)
             )
             self.assertEqual(calls["count"], 1)
+
+            self.assertFalse(
+                run_if_needed(outputs=[out], dependencies=[dep], action=action)
+            )
+            self.assertEqual(calls["count"], 1)
+
+            dep.write_text("changed", encoding="utf-8")
+            self.assertTrue(
+                run_if_needed(outputs=[out], dependencies=[dep], action=action)
+            )
+            self.assertEqual(calls["count"], 2)
+
+    def test_failed_action_never_creates_a_reusable_cache_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            dependency = base / "input.txt"
+            output = base / "parser.log"
+            dependency.write_text("input", encoding="utf-8")
+            calls = 0
+
+            def failing_action() -> None:
+                nonlocal calls
+                calls += 1
+                output.write_text("failed validation", encoding="utf-8")
+                raise RuntimeError("failed")
+
+            for _ in range(2):
+                with self.assertRaisesRegex(RuntimeError, "failed"):
+                    run_if_needed(
+                        outputs=[output],
+                        dependencies=[dependency],
+                        action=failing_action,
+                    )
+
+            self.assertEqual(calls, 2)
+            self.assertFalse(is_up_to_date([output], [dependency]))
+
+    def test_cache_key_invalidates_otherwise_identical_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            dependency = base / "input.txt"
+            output = base / "summary.json"
+            dependency.write_text("input", encoding="utf-8")
+
+            run_if_needed(
+                outputs=[output],
+                dependencies=[dependency],
+                cache_key={"lineage": "first"},
+                action=lambda: output.write_text("first", encoding="utf-8"),
+            )
+
+            self.assertTrue(
+                is_up_to_date(
+                    [output],
+                    [dependency],
+                    cache_key={"lineage": "first"},
+                )
+            )
+            self.assertFalse(
+                is_up_to_date(
+                    [output],
+                    [dependency],
+                    cache_key={"lineage": "second"},
+                )
+            )
+
+    def test_missing_dependency_never_reuses_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            dependency = base / "input.txt"
+            output = base / "output.txt"
+            dependency.write_text("input", encoding="utf-8")
+            run_if_needed(
+                outputs=[output],
+                dependencies=[dependency],
+                action=lambda: output.write_text("output", encoding="utf-8"),
+            )
+            dependency.unlink()
+
+            self.assertFalse(is_up_to_date([output], [dependency]))
+            with self.assertRaisesRegex(MSSPackError, "missing"):
+                run_if_needed(
+                    outputs=[output],
+                    dependencies=[dependency],
+                    action=lambda: None,
+                )
 
     def test_run_named_jobs_parallel_overlaps_work(self) -> None:
         current = 0

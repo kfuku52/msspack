@@ -1,21 +1,46 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Sequence
+from urllib.parse import unquote_to_bytes
 
-from .utils import ensure_dir
+from .utils import MSSPackError, atomic_text_writer, ensure_dir
+
+_INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+
+
+def _decode_attribute_component(value: str) -> str:
+    if _INVALID_PERCENT_ESCAPE.search(value):
+        raise ValueError(f"Invalid percent escape in GFF3 attribute: {value!r}")
+    try:
+        return unquote_to_bytes(value).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Invalid UTF-8 escape in GFF3 attribute: {value!r}") from exc
 
 
 def parse_attributes(text: str) -> Dict[str, str]:
+    if text.strip() in ("", "."):
+        return {}
     attrs: Dict[str, str] = {}
     for chunk in text.split(";"):
         chunk = chunk.strip()
-        if not chunk or "=" not in chunk:
+        if not chunk:
             continue
+        if "=" not in chunk:
+            raise ValueError(f"Invalid GFF3 attribute without '=': {chunk!r}")
         key, value = chunk.split("=", 1)
-        attrs[key] = value
+        key = _decode_attribute_component(key.strip())
+        if not key:
+            raise ValueError("Invalid empty GFF3 attribute key")
+        if key in attrs:
+            raise ValueError(f"Duplicate GFF3 attribute key: {key}")
+        decoded_value = _decode_attribute_component(value.strip())
+        if any(character in decoded_value for character in ("\x00", "\r", "\n", "\t")):
+            raise ValueError(f"GFF3 attribute {key!r} contains unsupported control characters")
+        attrs[key] = decoded_value
     return attrs
 
 
@@ -70,6 +95,7 @@ class GFFRecord:
 class GFFDocument:
     header_lines: List[str]
     records: List[GFFRecord]
+    fasta_lines: List[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -82,9 +108,18 @@ class _SortEntry:
 def read_gff_document(path: str | Path) -> GFFDocument:
     header_lines: List[str] = []
     records: List[GFFRecord] = []
+    fasta_lines: List[str] = []
+    in_fasta = False
     with Path(path).open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.rstrip("\n")
+            if in_fasta:
+                fasta_lines.append(line)
+                continue
+            if line == "##FASTA":
+                in_fasta = True
+                fasta_lines.append(line)
+                continue
             if not line:
                 header_lines.append(line)
                 continue
@@ -92,23 +127,31 @@ def read_gff_document(path: str | Path) -> GFFDocument:
                 header_lines.append(line)
                 continue
             records.append(GFFRecord.from_line(line))
-    return GFFDocument(header_lines=header_lines, records=records)
+    return GFFDocument(
+        header_lines=header_lines,
+        records=records,
+        fasta_lines=fasta_lines,
+    )
 
 
 def write_gff_document(path: str | Path, document: GFFDocument) -> Path:
     out_path = Path(path)
     ensure_dir(out_path.parent)
-    with out_path.open("w", encoding="utf-8") as handle:
+    with atomic_text_writer(out_path) as handle:
         for line in document.header_lines:
             handle.write(line + "\n")
         for record in document.records:
             handle.write(record.to_line() + "\n")
+        for line in document.fasta_lines:
+            handle.write(line + "\n")
     return out_path
 
 
 def iter_gff_records(path: str | Path) -> Iterator[GFFRecord]:
     with Path(path).open("r", encoding="utf-8") as handle:
         for line in handle:
+            if line.rstrip("\n") == "##FASTA":
+                break
             if (not line.strip()) or line.startswith("#"):
                 continue
             yield GFFRecord.from_line(line)
@@ -180,26 +223,38 @@ def sort_gff_file_precise(
     ensure_dir(destination.parent)
 
     pragma_lines: list[str] = []
+    fasta_lines: list[str] = []
     chromosome_order: list[str] = []
     blocks: Dict[str, Dict[int, list[_SortEntry]]] = defaultdict(lambda: defaultdict(list))
     with source.open("r", encoding="utf-8") as handle:
-        for raw_line in handle:
+        in_fasta = False
+        for line_number, raw_line in enumerate(handle, start=1):
             line = raw_line.rstrip("\n")
+            if in_fasta:
+                fasta_lines.append(line)
+                continue
             if line == "##FASTA":
-                break
+                in_fasta = True
+                fasta_lines.append(line)
+                continue
             if not line:
                 continue
             if line.startswith("#"):
-                if line.strip("#"):
-                    pragma_lines.append(line)
+                pragma_lines.append(line)
                 continue
 
             fields = line.split("\t")
             if len(fields) != 9:
-                continue
+                raise MSSPackError(
+                    f"Invalid GFF record at {source}:{line_number}: expected 9 columns, "
+                    f"found {len(fields)}"
+                )
             seqid = fields[0]
-            start = int(fields[3])
-            attrs = parse_attributes(fields[8])
+            try:
+                start = int(fields[3])
+                attrs = parse_attributes(fields[8])
+            except ValueError as exc:
+                raise MSSPackError(f"Invalid GFF record at {source}:{line_number}: {exc}") from exc
             entry = _SortEntry(
                 line=line,
                 record_id=attrs.get("ID", ""),
@@ -211,7 +266,7 @@ def sort_gff_file_precise(
 
     chromosome_order = sorted(chromosome_order)
 
-    with destination.open("w", encoding="utf-8") as out_handle:
+    with atomic_text_writer(destination) as out_handle:
         for line in pragma_lines:
             out_handle.write(line + "\n")
         for seqid in chromosome_order:
@@ -222,5 +277,7 @@ def sort_gff_file_precise(
                     continue
                 for line in _sort_same_start_block(entries):
                     out_handle.write(line + "\n")
+        for line in fasta_lines:
+            out_handle.write(line + "\n")
 
     return destination

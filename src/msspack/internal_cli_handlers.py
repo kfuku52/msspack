@@ -263,6 +263,7 @@ def mss_cds_to_misc_handler(args: argparse.Namespace) -> int:
             genes_input_path=genes_input_path,
             mss_output_path=output_path,
             log_path=log_path,
+            locus_tag_prefix=args.locus_tag_prefix,
         )
     print_paths(output_path, log_path if keep_log else None)
     return 0

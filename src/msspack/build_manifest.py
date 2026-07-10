@@ -12,7 +12,7 @@ from typing import Iterable, Optional
 
 from . import __version__
 from .config import MSSPackConfig
-from .utils import ensure_dir
+from .utils import ensure_dir, write_text
 
 
 def _iso_utc_now() -> str:
@@ -168,5 +168,5 @@ class ManifestRecorder:
         }
         for key, value in existing_payload.items():
             payload.setdefault(key, value)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
         return path

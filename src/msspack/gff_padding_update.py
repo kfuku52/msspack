@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable, TypedDict
 
 from .gff import child_ids, parse_attributes
+from .utils import write_text
 
 
 def _safe_phase(value: str) -> int:
@@ -41,16 +42,25 @@ def _parse_padding_log(log_path: str | Path) -> dict[str, dict[str, int]]:
 
 def _group_gene_records(
     gff_path: str | Path,
-) -> tuple[list[str], OrderedDict[str, list[list[str]]], dict[str, str]]:
+) -> tuple[list[str], OrderedDict[str, list[list[str]]], dict[str, str], list[str]]:
     header_lines: list[str] = []
+    fasta_lines: list[str] = []
     feature_rows: list[tuple[list[str], dict[str, str]]] = []
     gene_dict: OrderedDict[str, list[list[str]]] = OrderedDict()
     transcript_to_gene: dict[str, str] = {}
     gene_order: list[str] = []
 
     with Path(gff_path).open("r", encoding="utf-8") as handle:
+        in_fasta = False
         for raw_line in handle:
             line = raw_line.rstrip("\n")
+            if in_fasta:
+                fasta_lines.append(line)
+                continue
+            if line == "##FASTA":
+                in_fasta = True
+                fasta_lines.append(line)
+                continue
             if not line or line.startswith("#"):
                 header_lines.append(line)
                 continue
@@ -99,7 +109,7 @@ def _group_gene_records(
     for gene_id, records in gene_dict.items():
         if gene_id not in ordered_gene_dict:
             ordered_gene_dict[gene_id] = records
-    return header_lines, ordered_gene_dict, transcript_to_gene
+    return header_lines, ordered_gene_dict, transcript_to_gene, fasta_lines
 
 
 @dataclass
@@ -199,7 +209,7 @@ def apply_padding_to_gff(
     updated_genes_path: str | Path,
 ) -> PaddingUpdateSummary:
     padding_entries = _parse_padding_log(padding_log_path)
-    header_lines, gene_dict, transcript_to_gene = _group_gene_records(gff_path)
+    header_lines, gene_dict, transcript_to_gene, fasta_lines = _group_gene_records(gff_path)
     gene_info: dict[str, dict[str, int]] = {}
     for record_id, padding_info in padding_entries.items():
         gene_id = transcript_to_gene.get(record_id, record_id)
@@ -221,7 +231,6 @@ def apply_padding_to_gff(
             final_lines.extend("\t".join(rec) for rec in raw_records)
             continue
 
-        updated_genes.append(gene_id)
         strand = "+"
         gene_lines = [rec for rec in raw_records if rec[2] == "gene"]
         if gene_lines:
@@ -260,8 +269,8 @@ def apply_padding_to_gff(
         exons.sort(key=sorter, reverse=(strand == "-"))
         cdss.sort(key=sorter, reverse=(strand == "-"))
 
-        head_trim = 3 - info["head_padding"]
-        tail_trim = 3 - info["tail_padding"]
+        head_trim = (3 - info["head_padding"]) % 3
+        tail_trim = (3 - info["tail_padding"]) % 3
 
         if head_trim > 0:
             if strand == "+":
@@ -279,9 +288,14 @@ def apply_padding_to_gff(
                 _clip_from_3prime_minus(cdss, tail_trim)
 
         exons = _remove_zero_length(exons)
-        if not exons:
-            continue
         cdss = _remove_zero_length(cdss)
+        if not cdss:
+            forced_first_cds_warnings.append(
+                f"Gene {gene_id}: padding adjustment would remove every CDS; model was left unchanged."
+            )
+            final_lines.extend("\t".join(rec) for rec in raw_records)
+            continue
+        updated_genes.append(gene_id)
         exons.sort(key=sorter)
         cdss.sort(key=sorter)
 
@@ -318,8 +332,9 @@ def apply_padding_to_gff(
                     )
                 )
 
-        min_start = min(exon.start for exon in exons)
-        max_end = max(exon.end for exon in exons)
+        boundary_features = exons or cdss
+        min_start = min(feature.start for feature in boundary_features)
+        max_end = max(feature.end for feature in boundary_features)
         for feature in gene_structs + mrna_structs:
             feature.start = min_start
             feature.end = max_end
@@ -343,14 +358,16 @@ def apply_padding_to_gff(
         )
         final_lines.extend("\t".join(feature.rec) for feature in updated_records)
 
-    Path(output_path).write_text("\n".join(final_lines) + "\n", encoding="utf-8")
-    Path(genes_with_stops_path).write_text(
+    final_lines.extend(fasta_lines)
+
+    write_text(Path(output_path), "\n".join(final_lines) + "\n")
+    write_text(
+        Path(genes_with_stops_path),
         "\n".join(genes_with_stops) + ("\n" if genes_with_stops else ""),
-        encoding="utf-8",
     )
-    Path(updated_genes_path).write_text(
+    write_text(
+        Path(updated_genes_path),
         "\n".join(updated_genes) + ("\n" if updated_genes else ""),
-        encoding="utf-8",
     )
     return {
         "genes_with_stops": genes_with_stops,

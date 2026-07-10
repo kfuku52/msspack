@@ -40,6 +40,7 @@ class MssPostprocessTests(unittest.TestCase):
                 genes_input_path=genes_in,
                 mss_output_path=mss_out,
                 converted_gene_ids_path=changed_ids,
+                locus_tag_prefix="Org",
             )
 
             text = mss_out.read_text(encoding="utf-8")
@@ -53,6 +54,31 @@ class MssPostprocessTests(unittest.TestCase):
             self.assertEqual(summary["misc_feature_output"], 1)
             self.assertEqual(summary["converted_gene_ids"], ["Gene1"])
             self.assertEqual(changed_ids.read_text(encoding="utf-8"), "Gene1\n")
+
+    def test_similar_numeric_suffix_does_not_convert_unrelated_gene(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            mss_in = base / "input.mss"
+            genes_in = base / "genes.txt"
+            mss_out = base / "output.mss"
+            mss_in.write_text(
+                "\tCDS\t1..9\tlocus_tag\tPrefix_bar_001\n"
+                "\t\t\tproduct\tvalid protein\n"
+                "\t\t\ttransl_table\t1\n"
+                "\t\t\tcodon_start\t1\n",
+                encoding="utf-8",
+            )
+            genes_in.write_text("foo_001\n", encoding="utf-8")
+
+            summary = convert_cds_features_to_misc(
+                mss_input_path=mss_in,
+                genes_input_path=genes_in,
+                mss_output_path=mss_out,
+                locus_tag_prefix="Prefix",
+            )
+
+            self.assertEqual(summary["edited_genes"], 0)
+            self.assertIn("\tCDS\t", mss_out.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

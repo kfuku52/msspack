@@ -9,7 +9,7 @@ from . import __version__
 from .busco import cleanup_busco_cache, run_busco_comparison, summarize_busco_artifacts
 from .config import load_config
 from .ddbj_tools import install_component, list_installed
-from .doctor import render_doctor_report
+from .doctor import doctor_succeeded, render_doctor_report, run_doctor
 from .internal_cli import add_internal_parser, handle_internal
 from .pipeline import run_pipeline
 from .pipeline_plots import run_pipeline_plots, summarize_pipeline_plots
@@ -149,8 +149,9 @@ def _handle_init(args: argparse.Namespace) -> int:
 
 def _handle_doctor(args: argparse.Namespace) -> int:
     config = load_config(args.config) if args.config else None
-    print(render_doctor_report(config))
-    return 0
+    checks = run_doctor(config)
+    print(render_doctor_report(config, checks=checks))
+    return 0 if doctor_succeeded(checks) else 1
 
 
 def _handle_tools(args: argparse.Namespace) -> int:
@@ -265,6 +266,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _dispatch(args)
     except MSSPackError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (KeyError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

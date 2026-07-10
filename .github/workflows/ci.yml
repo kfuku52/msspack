@@ -3,6 +3,9 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -10,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Check out repository
@@ -35,10 +38,47 @@ jobs:
       - name: Type check
         run: mypy src
 
+      - name: Audit dependencies
+        if: matrix.python-version == '3.14'
+        run: pip-audit .
+
       - name: Run unit tests
         run: PYTHONPATH=src python -m unittest discover -s tests -v
 
-      - name: Build wheel
+      - name: Build distributions
+        if: matrix.python-version == '3.14'
         run: |
           rm -rf build dist src/msspack.egg-info
-          python -m build --wheel
+          python -m build
+          python scripts/check_distribution.py
+          check-wheel-contents dist/*.whl
+
+  external-tools:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-jre-headless hmmer ncbi-blast+ prodigal
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" busco
+
+      - name: Run official DDBJ regression
+        env:
+          MSSPACK_RUN_DDBJ_EXTERNAL: "1"
+        run: python -m unittest tests.test_external_tools.ExternalDdbjTests -v
+
+      - name: Run BUSCO regression
+        env:
+          MSSPACK_RUN_BUSCO_EXTERNAL: "1"
+          MSSPACK_BUSCO_LINEAGE: bacteria_odb12
+        run: python -m unittest tests.test_external_tools.ExternalBuscoTests -v

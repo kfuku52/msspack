@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import tarfile
@@ -11,6 +12,8 @@ from msspack.ddbj_tools import (
     MSSPackError,
     ToolInstallation,
     _download,
+    _installation_tree_sha256,
+    _sha256_file,
     _unpack,
     describe_installation,
     install_component,
@@ -19,6 +22,8 @@ from msspack.ddbj_tools import (
     resolve_latest_archives,
     run_parser,
 )
+
+FAKE_ARCHIVE_SHA256 = hashlib.sha256(b"archive").hexdigest()
 
 
 class ToolResolutionTests(unittest.TestCase):
@@ -67,6 +72,40 @@ class ToolResolutionTests(unittest.TestCase):
             root.mkdir(parents=True)
             self.assertNotIn("parser", list_installed(tmp_dir))
 
+    def test_list_installed_rejects_legacy_install_without_integrity_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "ddbj-tools" / "parser" / "6.80"
+            root.mkdir(parents=True)
+            (root / "jParser.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+            self.assertNotIn("parser", list_installed(tmp_dir))
+
+    def test_list_installed_rejects_tampered_tool_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "ddbj-tools" / "parser" / "6.80"
+            root.mkdir(parents=True)
+            executable = root / "jParser.sh"
+            helper = root / "parser.jar"
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            helper.write_bytes(b"original")
+            (root / ".msspack-install.json").write_text(
+                json.dumps(
+                    {
+                        "component": "parser",
+                        "version": "6.80",
+                        "archive_name": "Parser_V6.80.tar.gz",
+                        "executable_sha256": _sha256_file(executable),
+                        "installation_tree_sha256": _installation_tree_sha256(root),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertIn("parser", list_installed(tmp_dir))
+
+            helper.write_bytes(b"tampered")
+
+            self.assertNotIn("parser", list_installed(tmp_dir))
+
     def test_install_component_reinstalls_incomplete_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             cache_dir = Path(tmp_dir)
@@ -79,6 +118,11 @@ class ToolResolutionTests(unittest.TestCase):
                 (extracted / "jParser.sh").write_text("#!/bin/sh\n", encoding="utf-8")
                 return extracted
 
+            def fake_download(_url: str, destination: Path, **_kwargs) -> Path:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(b"archive")
+                return destination
+
             with patch(
                 "msspack.ddbj_tools.fetch_index_html",
                 return_value="<html></html>",
@@ -87,10 +131,13 @@ class ToolResolutionTests(unittest.TestCase):
                 return_value={"parser": ("9.99", "Parser_V9.99.tar.gz")},
             ), patch(
                 "msspack.ddbj_tools._download",
-                side_effect=lambda _url, destination: destination,
+                side_effect=fake_download,
             ), patch(
                 "msspack.ddbj_tools._unpack",
                 side_effect=fake_unpack,
+            ), patch.dict(
+                "msspack.ddbj_tools.TRUSTED_ARCHIVE_SHA256",
+                {"Parser_V9.99.tar.gz": FAKE_ARCHIVE_SHA256},
             ):
                 installation = install_component("parser", cache_dir=cache_dir)
 
@@ -106,7 +153,7 @@ class ToolResolutionTests(unittest.TestCase):
                 (extracted / "jParser.sh").write_text("#!/bin/sh\n", encoding="utf-8")
                 return extracted
 
-            def fake_download(_url: str, destination: Path) -> Path:
+            def fake_download(_url: str, destination: Path, **_kwargs) -> Path:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_text("archive", encoding="utf-8")
                 return destination
@@ -123,6 +170,9 @@ class ToolResolutionTests(unittest.TestCase):
             ), patch(
                 "msspack.ddbj_tools._unpack",
                 side_effect=fake_unpack,
+            ), patch.dict(
+                "msspack.ddbj_tools.TRUSTED_ARCHIVE_SHA256",
+                {"Parser_V9.99.tar.gz": FAKE_ARCHIVE_SHA256},
             ):
                 installation = install_component("parser", cache_dir=cache_dir)
 
@@ -159,6 +209,39 @@ class ToolResolutionTests(unittest.TestCase):
             self.assertEqual(metadata["url"], "https://example.test/Parser_V9.99.tar.gz")
             self.assertEqual(metadata["size"], len(b"archive-bytes"))
             self.assertIn("sha256", metadata)
+
+    def test_download_rejects_checksum_mismatch_without_publishing_archive(self) -> None:
+        class FakeResponse(io.BytesIO):
+            def __enter__(self) -> "FakeResponse":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                self.close()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            destination = Path(tmp_dir) / "Parser_V9.99.tar.gz"
+            with patch(
+                "urllib.request.urlopen",
+                return_value=FakeResponse(b"tampered"),
+            ), self.assertRaisesRegex(MSSPackError, "Checksum mismatch"):
+                _download(
+                    "https://example.test/Parser_V9.99.tar.gz",
+                    destination,
+                    expected_sha256="0" * 64,
+                )
+
+            self.assertFalse(destination.exists())
+
+    def test_install_rejects_unreviewed_archive_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "msspack.ddbj_tools.fetch_index_html",
+            return_value="<html></html>",
+        ), patch(
+            "msspack.ddbj_tools.resolve_latest_archives",
+            return_value={"parser": ("9.99", "Parser_V9.99.tar.gz")},
+        ):
+            with self.assertRaisesRegex(MSSPackError, "trusted checksum"):
+                install_component("parser", cache_dir=tmp_dir)
 
     def test_run_parser_uses_configured_java_binary_directory_when_named_java(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

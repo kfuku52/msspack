@@ -11,7 +11,7 @@ from Bio.Data import CodonTable
 from .fasta import iter_fasta, reverse_complement, write_fasta_record
 from .gff import GFFRecord, child_ids, read_gff_document
 from .step_logging import write_step_log, write_step_metrics
-from .utils import ensure_dir
+from .utils import atomic_text_writer, ensure_dir
 
 # Some of the padding logic below is carried forward from earlier internal
 # tooling used before msspack unified the MSS packaging workflow.
@@ -183,7 +183,7 @@ def write_spliced_cds_fasta(
     started_at = datetime.now()
 
     ensure_dir(output_path.parent)
-    with output_path.open("w", encoding="utf-8") as handle:
+    with atomic_text_writer(output_path) as handle:
         for record in iter_fasta(fasta_path):
             seq_models = models_by_seqid.get(record.id)
             if not seq_models:
@@ -244,7 +244,7 @@ def pad_fasta(
     detail_lines: list[str] = []
 
     ensure_dir(output_path.parent)
-    with output_path.open("w", encoding="utf-8") as out_handle:
+    with atomic_text_writer(output_path) as out_handle:
         for record in iter_fasta(input_path):
             result = _process_padding(record.id, record.sequence, genetic_code, padchar)
             write_fasta_record(

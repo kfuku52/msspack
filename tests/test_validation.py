@@ -59,7 +59,10 @@ class ValidationTests(unittest.TestCase):
             with patch(
                 "msspack.validation.ensure_installed",
                 return_value={
-                    "parser": SimpleNamespace(executable=base / "jParser.sh"),
+                    "parser": SimpleNamespace(
+                        executable=base / "jParser.sh",
+                        root=base / "parser",
+                    ),
                 },
             ), patch(
                 "msspack.validation.append_job_if_needed",

@@ -75,6 +75,22 @@ def _write_minimal_config(base: Path) -> Path:
 
 
 class ReportTests(unittest.TestCase):
+    def test_summary_cards_escape_project_html(self) -> None:
+        from msspack.report import _render_summary_cards
+
+        html = _render_summary_cards(
+            Path("/tmp/report"),
+            {
+                "project": "<img src=x onerror=alert(1)>",
+                "outputs": {},
+                "stage_summary": {},
+                "runtime": {},
+            },
+        )
+
+        self.assertNotIn("<img src=x", html)
+        self.assertIn("&lt;img src=x", html)
+
     def test_run_html_report_writes_index_and_updates_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

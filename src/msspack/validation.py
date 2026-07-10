@@ -137,9 +137,14 @@ def _build_validation_jobs(
             dependencies=path_list(
                 artifacts.ann_path,
                 artifacts.fasta_path,
-                tools["parser"].executable,
+                tools["parser"].root,
                 module_origin("msspack.ddbj_tools"),
             ),
+            cache_key={
+                "component": "parser",
+                "heap": options.heap,
+                "java": options.java_cmd,
+            },
             action=lambda: run_parser(
                 tools["parser"],
                 ann_path=artifacts.ann_path,
@@ -162,9 +167,14 @@ def _build_validation_jobs(
             dependencies=path_list(
                 artifacts.ann_path,
                 artifacts.fasta_path,
-                tools["transchecker"].executable,
+                tools["transchecker"].root,
                 module_origin("msspack.ddbj_tools"),
             ),
+            cache_key={
+                "component": "transchecker",
+                "heap": options.heap,
+                "java": options.java_cmd,
+            },
             action=lambda: run_transchecker(
                 tools["transchecker"],
                 ann_path=artifacts.ann_path,

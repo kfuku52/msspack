@@ -473,6 +473,18 @@ def _run_busco_once(
     ran = run_if_needed(
         outputs=[summary_json_path],
         dependencies=list(dependencies),
+        cache_key={
+            "command": busco.command,
+            "mode": busco.mode,
+            "threads": busco.threads,
+            "download_path": busco.download_path,
+            "offline": busco.offline,
+            "opt_out_run_stats": busco.opt_out_run_stats,
+            "lineage_dataset": lineage_dataset,
+            "use_auto_lineage": use_auto_lineage,
+            "auto_lineage_scope": busco.auto_lineage_scope,
+            "selection_strategy": selection_strategy,
+        },
         action=lambda: _execute_and_capture_summary(
             busco=busco,
             label=label,

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from .fasta import iter_fasta
-from .utils import ensure_dir, shell_join
+from .utils import shell_join, write_text
 
 
 def _format_count(value: int | None) -> str:
@@ -108,8 +108,7 @@ def write_step_log(
         lines.append("")
         lines.extend(detail_lines)
     lines.append("")
-    ensure_dir(log_path.parent)
-    log_path.write_text("\n".join(lines), encoding="utf-8")
+    write_text(log_path, "\n".join(lines))
     return log_path
 
 
@@ -134,15 +133,13 @@ def write_step_metrics(
         "output_total": output_total,
         "details": details or {},
     }
-    ensure_dir(metrics_path.parent)
-    metrics_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_text(metrics_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return metrics_path
 
 
 def write_id_list(path: Path, identifiers: Iterable[str]) -> Path:
     ordered = [identifier for identifier in identifiers if identifier]
-    ensure_dir(path.parent)
-    path.write_text("\n".join(ordered) + ("\n" if ordered else ""), encoding="utf-8")
+    write_text(path, "\n".join(ordered) + ("\n" if ordered else ""))
     return path
 
 
@@ -155,6 +152,8 @@ def count_gff_feature_records(path: str | Path) -> int:
     with Path(path).open("r", encoding="utf-8") as handle:
         for raw_line in handle:
             line = raw_line.strip()
+            if line == "##FASTA":
+                break
             if line and not line.startswith("#"):
                 count += 1
     return count
@@ -165,6 +164,8 @@ def count_gff_gene_records(path: str | Path) -> int:
     with Path(path).open("r", encoding="utf-8") as handle:
         for raw_line in handle:
             line = raw_line.strip()
+            if line == "##FASTA":
+                break
             if not line or line.startswith("#"):
                 continue
             fields = line.split("\t")
@@ -204,6 +205,8 @@ def count_reordered_feature_lines(
         with Path(path).open("r", encoding="utf-8") as handle:
             for raw_line in handle:
                 line = raw_line.strip()
+                if line == "##FASTA":
+                    break
                 if line and not line.startswith("#"):
                     lines.append(line)
         return lines

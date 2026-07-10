@@ -23,6 +23,92 @@ chr1	src	three_prime_UTR	361	380	.	+	.	ID=Gene1-T2.utr3b;Parent=Gene1-T2
 
 
 class SelectOneMrnaTests(unittest.TestCase):
+    def test_preserves_non_mrna_features_comments_and_fasta_section(self) -> None:
+        gff = """\
+##gff-version 3
+chr1\tsrc\tgene\t1\t9\t.\t+\t.\tID=rna_gene
+chr1\tsrc\ttRNA\t1\t9\t.\t+\t.\tID=trna1;Parent=rna_gene;Name=tRNA-Lys
+chr1\tsrc\texon\t1\t9\t.\t+\t.\tID=trna1.exon;Parent=trna1
+##FASTA
+>chr1
+ATGAAATAA
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            input_path = Path(tmp_dir) / "input.gff"
+            output_path = Path(tmp_dir) / "output.gff"
+            input_path.write_text(gff, encoding="utf-8")
+
+            select_one_mrna_per_gene(input_gff_path=input_path, output_gff_path=output_path)
+
+            self.assertEqual(output_path.read_text(encoding="utf-8"), gff)
+
+    def test_shared_child_keeps_surviving_parent(self) -> None:
+        gff = """\
+chr1\tsrc\tgene\t1\t12\t.\t+\t.\tID=g1
+chr1\tsrc\tmRNA\t1\t12\t.\t+\t.\tID=t1;Parent=g1
+chr1\tsrc\tmRNA\t1\t12\t.\t+\t.\tID=t2;Parent=g1
+chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=shared;Parent=t1,t2
+chr1\tsrc\tCDS\t10\t12\t.\t+\t0\tID=t1-only;Parent=t1
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            input_path = Path(tmp_dir) / "input.gff"
+            output_path = Path(tmp_dir) / "output.gff"
+            input_path.write_text(gff, encoding="utf-8")
+
+            select_one_mrna_per_gene(input_gff_path=input_path, output_gff_path=output_path)
+
+            output = output_path.read_text(encoding="utf-8")
+            self.assertIn("ID=t1;Parent=g1", output)
+            self.assertNotIn("ID=t2;Parent=g1", output)
+            self.assertIn("ID=shared;Parent=t1\n", output)
+
+    def test_shared_transcript_keeps_only_genes_for_which_it_was_selected(self) -> None:
+        gff = """\
+chr1\tsrc\tgene\t1\t30\t.\t+\t.\tID=g1
+chr1\tsrc\tgene\t1\t30\t.\t+\t.\tID=g2
+chr1\tsrc\tmRNA\t1\t30\t.\t+\t.\tID=shared;Parent=g1,g2
+chr1\tsrc\tmRNA\t1\t30\t.\t+\t.\tID=g1_alt;Parent=g1
+chr1\tsrc\tmRNA\t1\t30\t.\t+\t.\tID=g2_best;Parent=g2
+chr1\tsrc\tCDS\t1\t12\t.\t+\t0\tID=shared.cds;Parent=shared
+chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=g1_alt.cds;Parent=g1_alt
+chr1\tsrc\tCDS\t1\t15\t.\t+\t0\tID=g2_best.cds;Parent=g2_best
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            input_path = Path(tmp_dir) / "input.gff"
+            output_path = Path(tmp_dir) / "output.gff"
+            input_path.write_text(gff, encoding="utf-8")
+
+            summary = select_one_mrna_per_gene(
+                input_gff_path=input_path,
+                output_gff_path=output_path,
+            )
+
+            output = output_path.read_text(encoding="utf-8")
+            self.assertIn("ID=shared;Parent=g1\n", output)
+            self.assertIn("ID=g2_best;Parent=g2", output)
+            self.assertNotIn("ID=g1_alt;Parent=g1", output)
+            self.assertEqual(summary["removed_mrnas"], 1)
+
+    def test_direct_gene_cds_and_orphan_transcript_are_not_removed(self) -> None:
+        gff = """\
+chr1\tsrc\tgene\t1\t9\t.\t+\t.\tID=g1
+chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=g1.cds;Parent=g1
+chr1\tsrc\tmRNA\t20\t28\t.\t+\t.\tID=orphan
+chr1\tsrc\tCDS\t20\t28\t.\t+\t0\tID=orphan.cds;Parent=orphan
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            input_path = Path(tmp_dir) / "input.gff"
+            output_path = Path(tmp_dir) / "output.gff"
+            input_path.write_text(gff, encoding="utf-8")
+
+            summary = select_one_mrna_per_gene(
+                input_gff_path=input_path,
+                output_gff_path=output_path,
+            )
+
+            self.assertEqual(output_path.read_text(encoding="utf-8"), gff)
+            self.assertEqual(summary["removed_mrnas"], 0)
+
     def test_exact_tie_keeps_first_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             input_path = Path(tmp_dir) / "input.gff"

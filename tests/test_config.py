@@ -368,6 +368,59 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config(config_path)
 
+    def test_rejects_impossible_hold_date(self) -> None:
+        self._assert_fixture_rejected(
+            lambda text: text.replace('hold_date = "20271231"', 'hold_date = "20271399"'),
+            "submission.hold_date",
+        )
+
+    def test_rejects_quoted_boolean(self) -> None:
+        self._assert_fixture_rejected(
+            lambda text: text.replace("run_gapjust = false", 'run_gapjust = "false"'),
+            "pipeline.run_gapjust",
+        )
+
+    def test_rejects_unknown_key(self) -> None:
+        self._assert_fixture_rejected(
+            lambda text: text.replace(
+                "run_gapjust = false",
+                "run_gapjust = false\nvalidate_with_parsr = false",
+            ),
+            "pipeline.validate_with_parsr",
+        )
+
+    def test_rejects_invalid_product_regex(self) -> None:
+        self._assert_fixture_rejected(
+            lambda text: text.replace(
+                "replace_product_patterns = []",
+                'replace_product_patterns = ["("]',
+            ),
+            "replace_product_patterns",
+        )
+
+    def test_rejects_unknown_genetic_code(self) -> None:
+        self._assert_fixture_rejected(
+            lambda text: text.replace('genetic_code = "1"', 'genetic_code = "999"'),
+            "genetic code",
+        )
+
+    def test_rejects_control_characters_in_optional_strings(self) -> None:
+        self._assert_fixture_rejected(
+            lambda text: text.replace(
+                'title = "Fixture genome sequencing"',
+                'title = """Fixture genome\nsequencing"""',
+            ),
+            "control characters",
+        )
+
+    def _assert_fixture_rejected(self, transform, message: str) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "minimal_pack" / "config.toml"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "msspack.toml"
+            config_path.write_text(transform(fixture.read_text(encoding="utf-8")), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, message):
+                load_config(config_path)
+
 
 if __name__ == "__main__":
     unittest.main()

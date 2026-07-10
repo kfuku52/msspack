@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from .fasta import iter_fasta
 from .gff import parse_attributes
 from .step_logging import write_id_list, write_step_log, write_step_metrics
-from .utils import ensure_dir
+from .utils import MSSPackError, atomic_text_writer, ensure_dir
 
 
 def trim_gff_to_fasta_bounds(
@@ -24,25 +24,56 @@ def trim_gff_to_fasta_bounds(
     for record in iter_fasta(fasta_path):
         seq_lengths[record.id] = len(record.sequence)
 
+    unknown_seqids: dict[str, int] = defaultdict(int)
+    with gff_path.open("r", encoding="utf-8") as validation_handle:
+        for line_number, line in enumerate(validation_handle, start=1):
+            if line.rstrip("\n") == "##FASTA":
+                break
+            if line.startswith("#") or not line.strip():
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) != 9:
+                raise MSSPackError(
+                    f"Invalid GFF record at {gff_path}:{line_number}: expected 9 columns, "
+                    f"found {len(fields)}"
+                )
+            if fields[0] not in seq_lengths:
+                unknown_seqids[fields[0]] += 1
+    if unknown_seqids:
+        shown = ", ".join(
+            f"{seqid} ({count} features)"
+            for seqid, count in sorted(unknown_seqids.items())[:10]
+        )
+        if len(unknown_seqids) > 10:
+            shown += ", ..."
+        raise MSSPackError(
+            "GFF seqids are missing from the FASTA; refusing to discard annotations: " + shown
+        )
+
     input_total = 0
     updated_count = 0
     written_count = 0
     ensure_dir(output_path.parent)
-    with gff_path.open("r", encoding="utf-8") as in_handle, output_path.open(
-        "w", encoding="utf-8"
+    with gff_path.open("r", encoding="utf-8") as in_handle, atomic_text_writer(
+        output_path
     ) as out_handle:
+        in_fasta = False
         for line in in_handle:
+            if in_fasta:
+                out_handle.write(line)
+                continue
+            if line.rstrip("\n") == "##FASTA":
+                in_fasta = True
+                out_handle.write(line)
+                continue
             if line.startswith("#") or not line.strip():
                 out_handle.write(line)
                 continue
             fields = line.rstrip("\n").split("\t")
             input_total += 1
-            if len(fields) < 9:
-                out_handle.write(line)
-                continue
+            if len(fields) != 9:  # validated above; retained as a defensive guard
+                raise MSSPackError(f"Invalid GFF record encountered while writing: {line!r}")
             seqid = fields[0]
-            if seqid not in seq_lengths:
-                continue
             try:
                 start = int(fields[3])
                 end = int(fields[4])
@@ -105,8 +136,16 @@ def drop_duplicate_coordinate_genes(
     input_gene_total = 0
 
     with input_path.open("r", encoding="utf-8") as handle:
+        in_fasta = False
         for raw in handle:
             line = raw.rstrip("\n")
+            if in_fasta:
+                lines.append((False, line, None, None, None))
+                continue
+            if line == "##FASTA":
+                in_fasta = True
+                lines.append((False, line, None, None, None))
+                continue
             if (not line) or line.startswith("#"):
                 lines.append((False, line, None, None, None))
                 continue
@@ -141,7 +180,7 @@ def drop_duplicate_coordinate_genes(
 
     kept = 0
     ensure_dir(output_path.parent)
-    with output_path.open("w", encoding="utf-8") as out_handle:
+    with atomic_text_writer(output_path) as out_handle:
         for is_data, line, _, rec_id, parent in lines:
             if not is_data:
                 out_handle.write(line + "\n")
@@ -188,6 +227,8 @@ def drop_duplicate_coordinate_genes(
 
 
 def _fix_attributes(attribute_string: str) -> Tuple[str, bool, bool]:
+    if attribute_string.strip() in ("", "."):
+        return attribute_string, False, False
     trimmed_attr = attribute_string.rstrip(";")
     trailing_semicolons_removed = trimmed_attr != attribute_string
     parts = trimmed_attr.split(";")
@@ -203,10 +244,11 @@ def _fix_attributes(attribute_string: str) -> Tuple[str, bool, bool]:
             current_key = key
             current_value = [value]
         else:
-            if current_value:
-                current_value[-1] = current_value[-1] + "." + chunk
-            else:
-                current_value = [chunk]
+            if current_key is None or not current_value:
+                raise MSSPackError(
+                    f"Cannot repair GFF3 attribute fragment without a preceding key: {chunk!r}"
+                )
+            current_value[-1] = current_value[-1] + "." + chunk
             semicolon_value_fixed = True
     if current_key is not None:
         new_attributes.append(f"{current_key}={'.'.join(current_value)}")
@@ -226,11 +268,19 @@ def fix_gff_semicolons_file(
     internal_fixed = 0
     trailing_fixed = 0
     ensure_dir(output_path.parent)
-    with input_path.open("r", encoding="utf-8") as in_handle, output_path.open(
-        "w", encoding="utf-8"
+    with input_path.open("r", encoding="utf-8") as in_handle, atomic_text_writer(
+        output_path
     ) as out_handle:
+        in_fasta = False
         for raw in in_handle:
             line = raw.rstrip("\n")
+            if in_fasta:
+                out_handle.write(line + "\n")
+                continue
+            if line == "##FASTA":
+                in_fasta = True
+                out_handle.write(line + "\n")
+                continue
             if (not line) or line.startswith("#"):
                 out_handle.write(line + "\n")
                 continue

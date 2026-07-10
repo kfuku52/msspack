@@ -272,7 +272,7 @@ def _render_summary_cards(report_root: Path, payload: dict[str, Any]) -> str:
             link_targets["fasta"] = str(fasta["path"])
         output_links = _render_link_list(report_root, link_targets)
     body = "".join(
-        f"<div class='summary-card'><h3>{escape(str(label))}</h3><p>{value if '<' in str(value) else escape(str(value))}</p></div>"
+        f"<div class='summary-card'><h3>{escape(str(label))}</h3><p>{escape(str(value))}</p></div>"
         for label, value in cards
     )
     return "<section><h2>Run summary</h2><div class='summary-grid'>" + body + "</div>" + output_links + "</section>"
