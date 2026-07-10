@@ -4,7 +4,7 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from .gff import child_ids, parse_attributes
 from .step_logging import write_id_list, write_step_log, write_step_metrics
@@ -35,7 +35,7 @@ def _safe_phase(value: str) -> int:
     return int(value) if value.isdigit() else 0
 
 
-def _compute_mrna_boundaries(exons: list[list[str]]) -> tuple[Optional[int], Optional[int]]:
+def _compute_mrna_boundaries(exons: list[list[str]]) -> tuple[int | None, int | None]:
     if not exons:
         return None, None
     starts = [int(exon[3]) for exon in exons]
@@ -47,7 +47,7 @@ def _compute_total_cds_length(cdss: list[list[str]]) -> int:
     return sum((int(cds[4]) - int(cds[3]) + 1) for cds in cdss)
 
 
-def _find_terminal_cds(cdss: list[list[str]], strand: str, *, first: bool) -> Optional[list[str]]:
+def _find_terminal_cds(cdss: list[list[str]], strand: str, *, first: bool) -> list[str] | None:
     if not cdss:
         return None
     if strand == "+":
@@ -120,7 +120,7 @@ def _truncate_last_cds_to_multiple_of_three(
     cdss: list[list[str]],
     strand: str,
     exons: list[list[str]],
-) -> tuple[int, Optional[list[str]]]:
+) -> tuple[int, list[str] | None]:
     remainder = _compute_total_cds_length(cdss) % 3
     if remainder == 0:
         return 0, None

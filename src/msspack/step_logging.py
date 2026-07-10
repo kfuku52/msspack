@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Sequence
 
 from .fasta import iter_fasta
 from .utils import shell_join, write_text
@@ -213,6 +213,10 @@ def count_reordered_feature_lines(
 
     before_lines = feature_lines(before_path)
     after_lines = feature_lines(after_path)
-    changed = sum(1 for before, after in zip(before_lines, after_lines) if before != after)
+    changed = sum(
+        1
+        for before, after in zip(before_lines, after_lines, strict=False)
+        if before != after
+    )
     changed += abs(len(before_lines) - len(after_lines))
     return changed

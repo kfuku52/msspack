@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 SANKEY_COLORS = {
     "start": "#475569",
@@ -65,9 +64,9 @@ class ParsedStepRecord:
     path: Path
     step: str
     count_unit: str
-    input_total: Optional[int]
-    changed_total: Optional[int]
-    output_total: Optional[int]
+    input_total: int | None
+    changed_total: int | None
+    output_total: int | None
     details: dict[str, object]
 
 

@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
@@ -10,6 +13,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -17,10 +21,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -52,16 +56,77 @@ jobs:
           python -m build
           python scripts/check_distribution.py
           check-wheel-contents dist/*.whl
+          twine check dist/*
 
-  external-tools:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      - name: Test source distribution contents
+        if: matrix.python-version == '3.14'
+        run: |
+          sdist_dir="$(mktemp -d)"
+          python -m tarfile -e dist/*.tar.gz "$sdist_dir"
+          sdist_root="$(find "$sdist_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          (cd "$sdist_root" && PYTHONPATH=src python -m unittest discover -s tests -v)
+
+  minimum-dependencies:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.10"
+
+      - name: Install minimum compatible development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . \
+            "build==1.2.1" \
+            "check-wheel-contents==0.6.0" \
+            "mypy==1.19.1" \
+            "pip-audit==2.10.0" \
+            "ruff==0.11.0" \
+            "tomli==2.2.1" \
+            "twine==6.0.0"
+
+      - name: Run minimum-dependency checks
+        run: |
+          ruff check .
+          mypy src
+          PYTHONPATH=src python -m unittest discover -s tests -v
+
+  minimum-runtime-dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.10"
+
+      - name: Install minimum runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . --no-deps
+          python -m pip install "biopython==1.87" "tomli==1.1.0"
+
+      - name: Run tests with minimum runtime dependencies
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+
+  external-tools:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 

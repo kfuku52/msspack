@@ -5,9 +5,10 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Optional, Sequence, TypedDict
+from typing import TypedDict
 from xml.sax.saxutils import escape
 
 from .chart_primitives import (
@@ -80,11 +81,11 @@ class BuscoSummary:
     fragmented_pct: float
     missing_pct: float
     total_buscos: int
-    complete_count: Optional[int] = None
-    single_copy_count: Optional[int] = None
-    duplicated_count: Optional[int] = None
-    fragmented_count: Optional[int] = None
-    missing_count: Optional[int] = None
+    complete_count: int | None = None
+    single_copy_count: int | None = None
+    duplicated_count: int | None = None
+    fragmented_count: int | None = None
+    missing_count: int | None = None
     selection_strategy: str = ""
 
     def to_dict(self) -> dict[str, object]:
@@ -184,8 +185,8 @@ class BuscoComparisonArtifacts:
 @dataclass(frozen=True)
 class BuscoArtifacts:
     root: Path
-    cds: Optional[BuscoComparisonArtifacts]
-    genome: Optional[BuscoComparisonArtifacts]
+    cds: BuscoComparisonArtifacts | None
+    genome: BuscoComparisonArtifacts | None
 
 
 def _build_comparison_artifacts(root: Path, name: str) -> BuscoComparisonArtifacts:
@@ -267,7 +268,7 @@ def _build_busco_command(
     return command
 
 
-def _busco_env(command0: str) -> Optional[dict[str, str]]:
+def _busco_env(command0: str) -> dict[str, str] | None:
     command_path = Path(command0)
     if not command_path.is_absolute():
         return None
@@ -318,7 +319,7 @@ def busco_workspace_root() -> Path:
     return default_cache_dir() / "busco-work"
 
 
-def cleanup_busco_cache() -> Optional[Path]:
+def cleanup_busco_cache() -> Path | None:
     workspace_root = busco_workspace_root()
     if not workspace_root.exists():
         return None
@@ -353,7 +354,7 @@ def parse_short_summary(
     lineage_dataset = ""
     mode = ""
     counts: dict[str, int] = {}
-    summary_match: Optional[re.Match[str]] = None
+    summary_match: re.Match[str] | None = None
     for raw_line in summary_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line:
@@ -439,7 +440,7 @@ def _read_summary_json(path: Path) -> BuscoSummary:
     )
 
 
-def _optional_int(value: object) -> Optional[int]:
+def _optional_int(value: object) -> int | None:
     if value is None:
         return None
     if isinstance(value, int):
@@ -939,12 +940,12 @@ def _resolved_busco_config(
     config: MSSPackConfig,
     *,
     lineage_dataset: str = "",
-    threads: Optional[int] = None,
+    threads: int | None = None,
     force: bool = False,
-    auto_lineage: Optional[bool] = None,
+    auto_lineage: bool | None = None,
     auto_lineage_scope: str = "",
-    run_genome: Optional[bool] = None,
-    run_cds: Optional[bool] = None,
+    run_genome: bool | None = None,
+    run_cds: bool | None = None,
 ) -> BuscoConfig:
     busco = config.busco
     return BuscoConfig(
@@ -1126,14 +1127,12 @@ def summarize_busco_artifacts(artifacts: BuscoArtifacts) -> list[str]:
             continue
         input_summary, processed_summary = _load_comparison_pair(comparison)
         lines.append(
-            (
-                f"{name}\tlineage={processed_summary.lineage_dataset}"
-                f"\tcomplete={input_summary.complete_pct:.1f}->{processed_summary.complete_pct:.1f}"
-                f"\tsingle_copy={input_summary.single_copy_pct:.1f}->{processed_summary.single_copy_pct:.1f}"
-                f"\tduplicated={input_summary.duplicated_pct:.1f}->{processed_summary.duplicated_pct:.1f}"
-                f"\tfragmented={input_summary.fragmented_pct:.1f}->{processed_summary.fragmented_pct:.1f}"
-                f"\tmissing={input_summary.missing_pct:.1f}->{processed_summary.missing_pct:.1f}"
-            )
+            f"{name}\tlineage={processed_summary.lineage_dataset}"
+            f"\tcomplete={input_summary.complete_pct:.1f}->{processed_summary.complete_pct:.1f}"
+            f"\tsingle_copy={input_summary.single_copy_pct:.1f}->{processed_summary.single_copy_pct:.1f}"
+            f"\tduplicated={input_summary.duplicated_pct:.1f}->{processed_summary.duplicated_pct:.1f}"
+            f"\tfragmented={input_summary.fragmented_pct:.1f}->{processed_summary.fragmented_pct:.1f}"
+            f"\tmissing={input_summary.missing_pct:.1f}->{processed_summary.missing_pct:.1f}"
         )
     return lines
 
@@ -1174,13 +1173,13 @@ def run_busco_comparison(
     config_file: str | Path,
     *,
     lineage_dataset: str = "",
-    threads: Optional[int] = None,
+    threads: int | None = None,
     force: bool = False,
     clean_cache: bool = False,
-    auto_lineage: Optional[bool] = None,
+    auto_lineage: bool | None = None,
     auto_lineage_scope: str = "",
-    run_genome: Optional[bool] = None,
-    run_cds: Optional[bool] = None,
+    run_genome: bool | None = None,
+    run_cds: bool | None = None,
 ) -> BuscoArtifacts:
     config = load_config(config_file)
     busco = _resolved_busco_config(

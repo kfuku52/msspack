@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, List
 
 from .config import MSSPackConfig
 from .utils import write_text
@@ -24,7 +24,7 @@ def _rows_for_repeated_qualifiers(
     values: Iterable[str],
     *,
     entry: str = "",
-) -> List[str]:
+) -> list[str]:
     values = list(values)
     if not values:
         return []
@@ -35,7 +35,7 @@ def _rows_for_repeated_qualifiers(
 
 
 def _append_block(
-    lines: List[str],
+    lines: list[str],
     *,
     feature: str,
     qualifier: str,
@@ -45,7 +45,7 @@ def _append_block(
 
 
 def render_header(config: MSSPackConfig) -> str:
-    lines: List[str] = []
+    lines: list[str] = []
 
     lines.append(_row("COMMON", "DATE", "", "hold_date", config.submission.hold_date))
     lines.append(_row("", "DATATYPE", "", "type", config.submission.datatype))

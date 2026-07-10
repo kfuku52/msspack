@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict, deque
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Sequence
 from urllib.parse import unquote_to_bytes
 
 from .utils import MSSPackError, atomic_text_writer, ensure_dir
@@ -21,10 +21,10 @@ def _decode_attribute_component(value: str) -> str:
         raise ValueError(f"Invalid UTF-8 escape in GFF3 attribute: {value!r}") from exc
 
 
-def parse_attributes(text: str) -> Dict[str, str]:
+def parse_attributes(text: str) -> dict[str, str]:
     if text.strip() in ("", "."):
         return {}
-    attrs: Dict[str, str] = {}
+    attrs: dict[str, str] = {}
     for chunk in text.split(";"):
         chunk = chunk.strip()
         if not chunk:
@@ -55,10 +55,10 @@ class GFFRecord:
     strand: str
     phase: str
     attributes_text: str
-    attributes: Dict[str, str]
+    attributes: dict[str, str]
 
     @classmethod
-    def from_line(cls, line: str) -> "GFFRecord":
+    def from_line(cls, line: str) -> GFFRecord:
         fields = line.rstrip("\n").split("\t")
         if len(fields) != 9:
             raise ValueError(f"Expected 9 GFF columns, found {len(fields)}: {line!r}")
@@ -93,9 +93,9 @@ class GFFRecord:
 
 @dataclass
 class GFFDocument:
-    header_lines: List[str]
-    records: List[GFFRecord]
-    fasta_lines: List[str] = field(default_factory=list)
+    header_lines: list[str]
+    records: list[GFFRecord]
+    fasta_lines: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -106,9 +106,9 @@ class _SortEntry:
 
 
 def read_gff_document(path: str | Path) -> GFFDocument:
-    header_lines: List[str] = []
-    records: List[GFFRecord] = []
-    fasta_lines: List[str] = []
+    header_lines: list[str] = []
+    records: list[GFFRecord] = []
+    fasta_lines: list[str] = []
     in_fasta = False
     with Path(path).open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -157,7 +157,7 @@ def iter_gff_records(path: str | Path) -> Iterator[GFFRecord]:
             yield GFFRecord.from_line(line)
 
 
-def child_ids(value: str | None) -> List[str]:
+def child_ids(value: str | None) -> list[str]:
     if not value:
         return []
     return [item for item in value.split(",") if item]
@@ -177,12 +177,12 @@ def iter_records_by_type(
 
 
 def _sort_same_start_block(entries: Sequence[_SortEntry]) -> list[str]:
-    id_to_indices: Dict[str, list[int]] = defaultdict(list)
+    id_to_indices: dict[str, list[int]] = defaultdict(list)
     for index, entry in enumerate(entries):
         if entry.record_id:
             id_to_indices[entry.record_id].append(index)
 
-    children: Dict[int, list[int]] = defaultdict(list)
+    children: dict[int, list[int]] = defaultdict(list)
     indegree = [0] * len(entries)
     seen_edges: set[tuple[int, int]] = set()
     for child_index, entry in enumerate(entries):
@@ -225,7 +225,7 @@ def sort_gff_file_precise(
     pragma_lines: list[str] = []
     fasta_lines: list[str] = []
     chromosome_order: list[str] = []
-    blocks: Dict[str, Dict[int, list[_SortEntry]]] = defaultdict(lambda: defaultdict(list))
+    blocks: dict[str, dict[int, list[_SortEntry]]] = defaultdict(lambda: defaultdict(list))
     with source.open("r", encoding="utf-8") as handle:
         in_fasta = False
         for line_number, raw_line in enumerate(handle, start=1):

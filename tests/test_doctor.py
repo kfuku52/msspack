@@ -8,6 +8,18 @@ from msspack.doctor import doctor_succeeded, run_doctor
 
 
 class DoctorTests(unittest.TestCase):
+    def test_run_doctor_rejects_native_windows_for_validation(self) -> None:
+        with patch("msspack.doctor.platform.system", return_value="Windows"), patch(
+            "msspack.doctor.which", return_value="C:/tool.exe"
+        ), patch("msspack.doctor._importable", return_value=True), patch(
+            "msspack.doctor.list_installed", return_value={}
+        ):
+            checks = run_doctor()
+
+        by_name = {check.name: check for check in checks}
+        self.assertFalse(by_name["DDBJ validation platform"].ok)
+        self.assertTrue(by_name["DDBJ validation platform"].required)
+
     def test_run_doctor_marks_ume_optional(self) -> None:
         with patch(
             "msspack.doctor.which",

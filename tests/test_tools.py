@@ -19,6 +19,7 @@ from msspack.ddbj_tools import (
     install_component,
     list_installed,
     read_installation_metadata,
+    require_installed,
     resolve_latest_archives,
     run_parser,
 )
@@ -27,6 +28,11 @@ FAKE_ARCHIVE_SHA256 = hashlib.sha256(b"archive").hexdigest()
 
 
 class ToolResolutionTests(unittest.TestCase):
+    def test_install_component_rejects_native_windows(self) -> None:
+        with patch("msspack.ddbj_tools.platform.system", return_value="Windows"):
+            with self.assertRaisesRegex(MSSPackError, "Linux and macOS only"):
+                install_component("parser")
+
     def test_resolve_latest_archives(self) -> None:
         html = """
         <a href="Parser_V6.75.tar.gz">Parser_V6.75.tar.gz</a>
@@ -79,6 +85,15 @@ class ToolResolutionTests(unittest.TestCase):
             (root / "jParser.sh").write_text("#!/bin/sh\n", encoding="utf-8")
 
             self.assertNotIn("parser", list_installed(tmp_dir))
+
+    def test_require_installed_does_not_download_missing_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "msspack.ddbj_tools.install_component"
+        ) as install:
+            with self.assertRaisesRegex(MSSPackError, "msspack tools install parser"):
+                require_installed(["parser"], cache_dir=tmp_dir)
+
+        install.assert_not_called()
 
     def test_list_installed_rejects_tampered_tool_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

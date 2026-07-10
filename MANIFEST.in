@@ -1,0 +1,10 @@
+include CHANGELOG.md
+include CONTRIBUTING.md
+include RELEASE.md
+recursive-include docs *.svg
+recursive-include examples *.toml
+recursive-include scripts *.py
+recursive-include tests *.fa *.fasta *.gff3 *.py *.toml *.txt
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store

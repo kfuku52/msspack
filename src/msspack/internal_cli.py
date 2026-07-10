@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from typing import Callable
+from collections.abc import Callable
+from typing import cast
 
 from .internal_cli_handlers import (
     drop_duplicate_coordinate_gene_handler,
@@ -226,7 +227,10 @@ def add_internal_parser(subparsers: argparse._SubParsersAction[argparse.Argument
 
 
 def handle_internal(args: argparse.Namespace) -> int:
-    handler = getattr(args, "internal_handler", None)
+    handler = cast(
+        Callable[[argparse.Namespace], int] | None,
+        getattr(args, "internal_handler", None),
+    )
     if handler is None:
         raise MSSPackError("Unsupported internal command")
     return handler(args)

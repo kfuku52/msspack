@@ -5,10 +5,10 @@ import json
 import platform
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
 
 from . import __version__
 from .config import MSSPackConfig
@@ -74,7 +74,7 @@ class ManifestRecorder:
     stages: list[StageRecord] = field(default_factory=list)
     validation: dict[str, object] = field(default_factory=dict)
     status: str = "running"
-    error: Optional[str] = None
+    error: str | None = None
 
     def record_stage(
         self,
@@ -99,8 +99,8 @@ class ManifestRecorder:
         self,
         *,
         enabled: bool,
-        result_paths: Optional[dict[str, Path]] = None,
-        options: Optional[dict[str, object]] = None,
+        result_paths: dict[str, Path] | None = None,
+        options: dict[str, object] | None = None,
     ) -> None:
         payload: dict[str, object] = {"enabled": enabled}
         if options is not None:

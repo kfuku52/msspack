@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Protocol, cast
 
 from Bio.Data import CodonTable
 
@@ -22,7 +22,7 @@ class TranscriptModel:
     transcript_id: str
     seqid: str
     strand: str
-    cds_records: List[GFFRecord]
+    cds_records: list[GFFRecord]
 
 
 @dataclass
@@ -33,12 +33,16 @@ class _PaddingChoice:
     tailn: int
 
 
-def _resolve_codon_table(genetic_code: str | int):
+class _CodonTableLike(Protocol):
+    stop_codons: list[str]
+
+
+def _resolve_codon_table(genetic_code: str | int) -> _CodonTableLike:
     try:
         code = int(str(genetic_code))
     except ValueError:
-        return CodonTable.unambiguous_dna_by_name[str(genetic_code)]
-    return CodonTable.unambiguous_dna_by_id[code]
+        return cast(_CodonTableLike, CodonTable.unambiguous_dna_by_name[str(genetic_code)])
+    return cast(_CodonTableLike, CodonTable.unambiguous_dna_by_id[code])
 
 
 def _count_internal_stop_codons(seq: str, genetic_code: str | int) -> int:
@@ -58,8 +62,8 @@ def _get_padding_candidates(
     num_stop_input: int,
     num_missing: int,
     seqlen: int,
-) -> List[tuple[int, int]]:
-    candidates: List[tuple[int, int]] = []
+) -> list[tuple[int, int]]:
+    candidates: list[tuple[int, int]] = []
     if num_stop_input:
         if num_missing in (0, 3):
             candidates.extend([(0, 0), (1, 2), (2, 1)])
@@ -92,7 +96,7 @@ def _process_padding(
             "log": "",
         }
 
-    best: Optional[_PaddingChoice] = None
+    best: _PaddingChoice | None = None
     for headn, tailn in _get_padding_candidates(num_stop_input, num_missing, seqlen):
         if (headn == 0) and (tailn == num_missing):
             new_seq = tailpad_seq
@@ -121,10 +125,10 @@ def _process_padding(
     }
 
 
-def _build_transcript_models(gff_path: Path) -> List[TranscriptModel]:
-    transcript_records: Dict[str, GFFRecord] = {}
-    transcript_order: List[str] = []
-    cds_by_parent: Dict[str, List[GFFRecord]] = {}
+def _build_transcript_models(gff_path: Path) -> list[TranscriptModel]:
+    transcript_records: dict[str, GFFRecord] = {}
+    transcript_order: list[str] = []
+    cds_by_parent: dict[str, list[GFFRecord]] = {}
 
     for record in read_gff_document(gff_path).records:
         record_id = record.attributes.get("ID", "")
@@ -137,7 +141,7 @@ def _build_transcript_models(gff_path: Path) -> List[TranscriptModel]:
                 if parent_id not in transcript_records and parent_id not in transcript_order:
                     transcript_order.append(parent_id)
 
-    models: List[TranscriptModel] = []
+    models: list[TranscriptModel] = []
     for transcript_id in transcript_order:
         cds_records = cds_by_parent.get(transcript_id, [])
         if not cds_records:
@@ -176,7 +180,7 @@ def write_spliced_cds_fasta(
         str(output_path),
     ]
     models = _build_transcript_models(gff_path)
-    models_by_seqid: Dict[str, List[TranscriptModel]] = defaultdict(list)
+    models_by_seqid: dict[str, list[TranscriptModel]] = defaultdict(list)
     for model in models:
         models_by_seqid[model.seqid].append(model)
     written = 0
@@ -291,9 +295,9 @@ def write_padding_log_for_gff(
     log_path: Path,
     genetic_code: str | int = "1",
     padchar: str = "N",
-    extract_log_path: Optional[Path] = None,
-    extract_metrics_path: Optional[Path] = None,
-    metrics_path: Optional[Path] = None,
+    extract_log_path: Path | None = None,
+    extract_metrics_path: Path | None = None,
+    metrics_path: Path | None = None,
 ) -> None:
     extract_command = [
         "msspack",
@@ -315,13 +319,13 @@ def write_padding_log_for_gff(
     ]
     started_at = datetime.now()
     models = _build_transcript_models(gff_path)
-    models_by_seqid: Dict[str, List[TranscriptModel]] = defaultdict(list)
+    models_by_seqid: dict[str, list[TranscriptModel]] = defaultdict(list)
     for model in models:
         models_by_seqid[model.seqid].append(model)
 
     transcript_count = 0
     padded = 0
-    log_payload: List[str] = []
+    log_payload: list[str] = []
 
     for record in iter_fasta(fasta_path):
         seq_models = models_by_seqid.get(record.id)

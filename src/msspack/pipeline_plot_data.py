@@ -4,7 +4,6 @@ import json
 import re
 from itertools import combinations
 from pathlib import Path
-from typing import Optional
 
 from .pipeline_plot_models import (
     GENE_SET_SPECS,
@@ -30,7 +29,7 @@ STANDARD_LOG_FIELDS = {
 }
 
 
-def _parse_count(value: object | None) -> Optional[int]:
+def _parse_count(value: object | None) -> int | None:
     if value is None:
         return None
     if isinstance(value, int):
@@ -74,9 +73,9 @@ def parse_step_log(path: Path) -> ParsedStepRecord:
     text = path.read_text(encoding="utf-8")
     step = ""
     count_unit = ""
-    input_total: Optional[int] = None
-    changed_total: Optional[int] = None
-    output_total: Optional[int] = None
+    input_total: int | None = None
+    changed_total: int | None = None
+    output_total: int | None = None
     details: dict[str, object] = {}
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -125,7 +124,7 @@ def _load_step_record(log_dir: Path, stem: str) -> ParsedStepRecord:
     return parse_step_log(log_dir / f"{stem}.log")
 
 
-def _required_count(value: Optional[int], label: str, path: Path) -> int:
+def _required_count(value: int | None, label: str, path: Path) -> int:
     if value is None:
         raise MSSPackError(f"Missing {label} in {path}")
     return value
@@ -160,7 +159,7 @@ def _detail_count(
     return parsed
 
 
-def _detail_path(record: ParsedStepRecord, *keys: str) -> Optional[Path]:
+def _detail_path(record: ParsedStepRecord, *keys: str) -> Path | None:
     value = _detail_value(record, *keys)
     if value is None:
         return None

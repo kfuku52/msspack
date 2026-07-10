@@ -32,7 +32,7 @@ class ValidationTests(unittest.TestCase):
                 run_transchecker=False,
             )
 
-            with patch("msspack.validation.ensure_installed") as mocked:
+            with patch("msspack.validation.require_installed") as mocked:
                 result = run_validation(options=options, artifacts=artifacts)
 
             mocked.assert_not_called()
@@ -57,7 +57,7 @@ class ValidationTests(unittest.TestCase):
             )
 
             with patch(
-                "msspack.validation.ensure_installed",
+                "msspack.validation.require_installed",
                 return_value={
                     "parser": SimpleNamespace(
                         executable=base / "jParser.sh",

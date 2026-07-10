@@ -8,6 +8,9 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+Use Python 3.10 or newer. Recreate environments made for older `msspack` releases rather
+than reusing stale package and dependency metadata.
+
 ## Local checks
 
 ```bash
@@ -20,6 +23,7 @@ rm -rf build dist src/msspack.egg-info
 python -m build
 python scripts/check_distribution.py
 check-wheel-contents dist/*.whl
+twine check dist/*
 ```
 
 ## Regression checks

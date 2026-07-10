@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -10,15 +11,16 @@ import stat
 import tarfile
 import urllib.request
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkstemp
-from typing import Dict, Iterable, Optional, Tuple
 
 from .utils import MSSPackError, default_cache_dir, ensure_dir, run_command, write_text
 
 DDBJ_TOOL_INDEX = "https://ddbj.nig.ac.jp/public/ddbj-cib/MSS/"
+DDBJ_LICENSE_URL = "https://www.ddbj.nig.ac.jp/ddbj/mss-tool-e.html"
 TRUSTED_ARCHIVE_SHA256 = {
     "UME_unix_V1.66.zip": "62342c07396ee8670486e5d3b7043d839de3ad4158de5a893908eafed2e1c351",
     "Parser_V6.80.tar.gz": "c3ec1cf9f90e5dcf647be42e9cd46f30b83e4a7b58c1dd30b7acafc7b94fdd64",
@@ -32,7 +34,7 @@ class ToolInstallation:
     version: str
     archive_name: str
     root: Path
-    metadata: Optional[dict[str, object]] = None
+    metadata: dict[str, object] | None = None
 
     @property
     def executable(self) -> Path:
@@ -56,7 +58,7 @@ _PATTERNS = {
 }
 
 
-def _version_key(version: str) -> Tuple[int, ...]:
+def _version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
 
 
@@ -66,11 +68,12 @@ def _iso_utc_now() -> str:
 
 def fetch_index_html() -> str:
     with urllib.request.urlopen(DDBJ_TOOL_INDEX, timeout=30) as response:
-        return response.read().decode("utf-8")
+        payload: bytes = response.read()
+        return payload.decode("utf-8")
 
 
-def resolve_latest_archives(html: str) -> Dict[str, Tuple[str, str]]:
-    resolved: Dict[str, Tuple[str, str]] = {}
+def resolve_latest_archives(html: str) -> dict[str, tuple[str, str]]:
+    resolved: dict[str, tuple[str, str]] = {}
     for component, pattern in _PATTERNS.items():
         matches = [
             (match.group("version"), match.group(1))
@@ -83,7 +86,7 @@ def resolve_latest_archives(html: str) -> Dict[str, Tuple[str, str]]:
     return resolved
 
 
-def cache_root(path: Optional[str | Path] = None) -> Path:
+def cache_root(path: str | Path | None = None) -> Path:
     if path is None:
         return default_cache_dir()
     return Path(path).expanduser().resolve()
@@ -122,7 +125,7 @@ def _write_json(path: Path, payload: dict[str, object]) -> Path:
     return path
 
 
-def _read_json(path: Path) -> Optional[dict[str, object]]:
+def _read_json(path: Path) -> dict[str, object] | None:
     if not path.exists():
         return None
     try:
@@ -140,7 +143,7 @@ def _download(
     url: str,
     destination: Path,
     *,
-    expected_sha256: Optional[str] = None,
+    expected_sha256: str | None = None,
 ) -> Path:
     ensure_dir(destination.parent)
     descriptor, temporary_name = mkstemp(
@@ -224,12 +227,11 @@ def _is_valid_installation(root: Path, component: str) -> bool:
     metadata = read_installation_metadata(root)
     if metadata is None:
         return False
-    archive_name = metadata.get("archive_name")
-    match = (
-        _PATTERNS[component].fullmatch(archive_name)
-        if isinstance(archive_name, str)
-        else None
-    )
+    archive_name_value = metadata.get("archive_name")
+    if not isinstance(archive_name_value, str):
+        return False
+    archive_name = archive_name_value
+    match = _PATTERNS[component].fullmatch(archive_name)
     if (
         metadata.get("component") != component
         or metadata.get("version") != root.name
@@ -263,7 +265,7 @@ def _is_valid_installation(root: Path, component: str) -> bool:
     return True
 
 
-def read_installation_metadata(root: Path | ToolInstallation) -> Optional[dict[str, object]]:
+def read_installation_metadata(root: Path | ToolInstallation) -> dict[str, object] | None:
     metadata_path = root.metadata_path if isinstance(root, ToolInstallation) else root / ".msspack-install.json"
     return _read_json(metadata_path)
 
@@ -274,7 +276,7 @@ def _write_installation_metadata(
     version: str,
     archive_name: str,
     root: Path,
-    archive_path: Optional[Path],
+    archive_path: Path | None,
 ) -> dict[str, object]:
     installation = ToolInstallation(
         component=component,
@@ -332,9 +334,14 @@ def _unpack(archive_path: Path, destination: Path) -> Path:
 def install_component(
     component: str,
     *,
-    cache_dir: Optional[str | Path] = None,
+    cache_dir: str | Path | None = None,
     reinstall: bool = False,
 ) -> ToolInstallation:
+    if platform.system() == "Windows":
+        raise MSSPackError(
+            "Automated DDBJ validation-tool installation supports Linux and macOS only. "
+            "Use WSL on Windows, or install and run the DDBJ Windows tools separately."
+        )
     component = component.lower()
     if component not in _PATTERNS:
         raise MSSPackError(f"Unsupported component: {component}")
@@ -387,8 +394,8 @@ def install_component(
     return ToolInstallation(component, version, archive_name, root, metadata)
 
 
-def list_installed(cache_dir: Optional[str | Path] = None) -> Dict[str, ToolInstallation]:
-    installations: Dict[str, ToolInstallation] = {}
+def list_installed(cache_dir: str | Path | None = None) -> dict[str, ToolInstallation]:
+    installations: dict[str, ToolInstallation] = {}
     base = cache_root(cache_dir) / "ddbj-tools"
     if not base.exists():
         return installations
@@ -429,10 +436,10 @@ def list_installed(cache_dir: Optional[str | Path] = None) -> Dict[str, ToolInst
 def ensure_installed(
     components: Iterable[str],
     *,
-    cache_dir: Optional[str | Path] = None,
-) -> Dict[str, ToolInstallation]:
+    cache_dir: str | Path | None = None,
+) -> dict[str, ToolInstallation]:
     installed = list_installed(cache_dir)
-    result: Dict[str, ToolInstallation] = {}
+    result: dict[str, ToolInstallation] = {}
     for component in components:
         normalized = component.lower()
         if normalized in installed:
@@ -440,6 +447,24 @@ def ensure_installed(
         else:
             result[normalized] = install_component(normalized, cache_dir=cache_dir)
     return result
+
+
+def require_installed(
+    components: Iterable[str],
+    *,
+    cache_dir: str | Path | None = None,
+) -> dict[str, ToolInstallation]:
+    requested = [component.lower() for component in components]
+    installed = list_installed(cache_dir)
+    missing = [component for component in requested if component not in installed]
+    if missing:
+        component_args = " ".join(missing)
+        raise MSSPackError(
+            "Required DDBJ validation tools are not installed: "
+            f"{', '.join(missing)}. Review the DDBJ agreement at {DDBJ_LICENSE_URL}, "
+            f"then run: msspack tools install {component_args}"
+        )
+    return {component: installed[component] for component in requested}
 
 
 def _run_with_java(

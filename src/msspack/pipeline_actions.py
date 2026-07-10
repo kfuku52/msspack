@@ -4,7 +4,6 @@ import gzip
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from .config import MSSPackConfig
 from .fasta import iter_fasta_handle
@@ -38,8 +37,8 @@ def run_gapjust(
     gap_len: int,
     gap_just_min: int,
     gap_just_max: int,
-    input_gff: Optional[Path] = None,
-    output_gff: Optional[Path] = None,
+    input_gff: Path | None = None,
+    output_gff: Path | None = None,
     metrics_path: Path | None = None,
 ) -> None:
     normalize_gap_lengths(
@@ -421,7 +420,7 @@ def sort_gff(
     input_path: Path,
     output_path: Path,
     *,
-    command_override: Optional[str],
+    command_override: str | None,
     log_path: Path,
     metrics_path: Path | None = None,
 ) -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Optional
 
 from .core import ConversionOptions, convert_gff_to_mss
 from .render import format_event_summary
@@ -34,7 +33,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     options = ConversionOptions(
         fasta_path=Path(args.fasta).expanduser().resolve(),

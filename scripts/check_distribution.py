@@ -21,18 +21,38 @@ def _sdist_members(path: Path) -> set[str]:
 def verify_distribution(path: Path) -> None:
     if path.suffix == ".whl":
         members = _wheel_members(path)
+        required_suffixes = (
+            "LICENSE",
+            "THIRD_PARTY_NOTICES.md",
+            "msspack/py.typed",
+            "msspack/templates/msspack.example.toml",
+        )
     elif path.name.endswith(".tar.gz"):
         members = _sdist_members(path)
+        required_suffixes = (
+            "LICENSE",
+            "THIRD_PARTY_NOTICES.md",
+            "CHANGELOG.md",
+            "CONTRIBUTING.md",
+            "RELEASE.md",
+            "docs/assets/sample-busco-cds-comparison.svg",
+            "examples/msspack.example.toml",
+            "scripts/check_distribution.py",
+            "tests/fixtures/minimal_pack/config.toml",
+            "tests/fixtures/minimal_pack/expected.ann.txt",
+            "tests/fixtures/minimal_pack/expected.fasta",
+            "tests/fixtures/minimal_pack/input.fa",
+            "tests/fixtures/minimal_pack/input.gff3",
+        )
     else:
         raise ValueError(f"Unsupported distribution file: {path}")
-    required_suffixes = ("LICENSE", "THIRD_PARTY_NOTICES.md")
     missing = [
         suffix
         for suffix in required_suffixes
         if not any(member.endswith("/" + suffix) or member == suffix for member in members)
     ]
     if missing:
-        raise ValueError(f"{path} is missing required notices: {', '.join(missing)}")
+        raise ValueError(f"{path} is missing required files: {', '.join(missing)}")
 
 
 def main() -> int:

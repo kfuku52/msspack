@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .config import load_config
 from .pipeline_plots import run_pipeline_plots
@@ -48,7 +49,7 @@ def _format_int(value: object) -> str:
 
 
 def _format_seconds(value: object) -> str:
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return f"{value:.2f}s"
     return "n/a"
 
@@ -109,7 +110,7 @@ def _load_stage_metrics(logs_dir: Path) -> list[dict[str, object]]:
             pairs = []
             for key in sorted(details)[:4]:
                 value = details[key]
-                if isinstance(value, (list, dict)):
+                if isinstance(value, list | dict):
                     continue
                 pairs.append(f"{key}={value}")
             detail_preview = ", ".join(pairs)

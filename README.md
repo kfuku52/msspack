@@ -31,6 +31,9 @@ pip install git+https://github.com/kfuku52/msspack.git
 
 Using an isolated environment is recommended but not required.
 
+Python 3.10 is supported through its upstream security-support lifetime. A future
+minor release may require Python 3.11 or newer after Python 3.10 reaches end of life.
+
 If you use conda or mamba, you can install the external runtime tools at the same time:
 
 ```bash
@@ -41,6 +44,10 @@ pip install git+https://github.com/kfuku52/msspack.git
 
 `openjdk` provides the `java` command required by the DDBJ validation tools. `busco` is only needed when you run `msspack busco`; omit it if you do not need BUSCO comparison plots.
 
+The Python packaging pipeline is platform-independent, but automated installation and
+execution of the DDBJ `Parser` and `transChecker` currently supports Linux and macOS.
+On Windows, use WSL or install and run the DDBJ Windows tools separately.
+
 ## Quick Start
 
 Create a starter config:
@@ -49,17 +56,26 @@ Create a starter config:
 msspack init my_submission.toml
 ```
 
+`msspack init` refuses to replace an existing file. Pass `--force` only when you
+intentionally want to overwrite it.
+
 Edit the generated TOML file, then inspect your environment:
 
 ```bash
 msspack doctor --config my_submission.toml
 ```
 
-Install the latest DDBJ validation tools into the local cache:
+Install the latest DDBJ validation-tool versions reviewed by this `msspack` release
+into the local cache:
 
 ```bash
 msspack tools install
 ```
+
+The DDBJ tools are downloaded from DDBJ and are not distributed under the `msspack`
+MIT license. Review the [DDBJ validation-tool agreement](https://www.ddbj.nig.ac.jp/ddbj/mss-tool-e.html)
+before installing or using them. `msspack pack` does not download these tools implicitly;
+when validation is enabled, install them explicitly first.
 
 Run the packaging pipeline:
 
@@ -161,6 +177,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+If the repository already has an environment created for an older Python or `msspack`
+release, remove and recreate that environment before installing the current development
+dependencies.
 
 Run checks locally with:
 

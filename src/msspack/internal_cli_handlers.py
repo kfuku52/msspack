@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from .annotation_table import build_annotation_table
 from .fasta_steps import remove_trailing_ns_fasta, write_mss_fasta

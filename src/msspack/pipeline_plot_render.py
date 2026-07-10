@@ -419,7 +419,7 @@ def _sankey_layout(
         total_height = sum(heights) + max(0, len(heights) - 1) * node_gap
         cursor = top + (content_height - total_height) / 2.0
         x = left + stage_index * stage_gap
-        for node, node_height in zip(ordered_nodes, heights):
+        for node, node_height in zip(ordered_nodes, heights, strict=True):
             laid_out_nodes[node.id] = _LaidOutNode(
                 node=node,
                 x=x,

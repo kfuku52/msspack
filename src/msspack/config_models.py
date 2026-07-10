@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
 
 from .utils import default_cache_dir, expand_path
 
@@ -10,7 +9,7 @@ from .utils import default_cache_dir, expand_path
 @dataclass
 class ProjectConfig:
     name: str
-    output_dir: Optional[str] = None
+    output_dir: str | None = None
 
 
 @dataclass
@@ -39,13 +38,13 @@ class SubmissionConfig:
     hold_date: str
     bioproject: str
     biosample: str
-    sra: List[str] = field(default_factory=list)
-    keywords: List[str] = field(default_factory=lambda: ["WGS"])
+    sra: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=lambda: ["WGS"])
 
 
 @dataclass
 class SubmitterConfig:
-    ab_name: List[str]
+    ab_name: list[str]
     contact: str
     institute: str
     department: str
@@ -61,7 +60,7 @@ class SubmitterConfig:
 @dataclass
 class ReferenceConfig:
     title: str
-    ab_name: List[str]
+    ab_name: list[str]
     year: int
     status: str = "Unpublished"
 
@@ -86,7 +85,7 @@ class PipelineConfig:
     feature_with_gap: str = "misc_feature"
     min_assembly_gap: int = 50
     min_artificial_intron_size: int = 10
-    replace_product_patterns: List[str] = field(default_factory=list)
+    replace_product_patterns: list[str] = field(default_factory=list)
     replace_product_with: str = "hypothetical protein"
     validate_with_parser: bool = True
     validate_with_transchecker: bool = True
@@ -95,9 +94,9 @@ class PipelineConfig:
 
 @dataclass
 class ToolsConfig:
-    cache_dir: Optional[str] = None
+    cache_dir: str | None = None
     java: str = "java"
-    gff3sort: Optional[str] = None
+    gff3sort: str | None = None
     java_heap: str = "16G"
 
 

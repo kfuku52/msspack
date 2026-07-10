@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from Bio.Data import CodonTable
 
@@ -31,11 +30,11 @@ class ConversionOptions:
     organism_name: str
     strain: str = ""
     mol_type: str = "genomic DNA"
-    protein_id_path: Optional[Path] = None
+    protein_id_path: Path | None = None
     linkage_evidence: str = "paired-ends"
     genetic_code: str = "1"
     infer_boundary: bool = False
-    start_codons: Optional[tuple[str, ...]] = None
+    start_codons: tuple[str, ...] | None = None
     isolate: str = ""
     sex: str = ""
     country: str = ""

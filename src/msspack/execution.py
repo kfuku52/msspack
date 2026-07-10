@@ -3,10 +3,10 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
-from typing import Callable
 
 from .utils import MSSPackError, write_text
 
@@ -15,7 +15,7 @@ CACHE_SCHEMA_VERSION = 2
 _FILE_FINGERPRINT_CACHE: dict[tuple[str, int, int, int], dict[str, object]] = {}
 
 
-@lru_cache(maxsize=None)
+@cache
 def module_origin(module_name: str) -> Path:
     spec = importlib.util.find_spec(module_name)
     if spec is None or spec.origin is None:
@@ -28,7 +28,7 @@ def path_list(*items: object) -> list[Path]:
     for item in items:
         if item is None:
             continue
-        if isinstance(item, (list, tuple, set)):
+        if isinstance(item, list | tuple | set):
             paths.extend(path_list(*item))
         elif isinstance(item, Path):
             paths.append(item)
@@ -96,7 +96,8 @@ def _normalized_cache_key(cache_key: object | None) -> object | None:
     if cache_key is None:
         return None
     try:
-        return json.loads(json.dumps(cache_key, sort_keys=True))
+        normalized: object = json.loads(json.dumps(cache_key, sort_keys=True))
+        return normalized
     except (TypeError, ValueError) as exc:
         raise MSSPackError(f"Cache key is not JSON serializable: {cache_key!r}") from exc
 

@@ -23,7 +23,7 @@ class CliTests(unittest.TestCase):
                 main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "msspack 0.2.0")
+        self.assertEqual(stdout.getvalue().strip(), "msspack 0.3.0")
 
     def test_main_init_writes_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -36,6 +36,28 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(output.exists())
             self.assertEqual(stdout.getvalue().strip(), str(output.resolve()))
+            self.assertEqual(output.read_text(encoding="utf-8"), cli._example_config_text())
+
+    def test_main_init_refuses_to_overwrite_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "msspack.toml"
+            output.write_text("keep me\n", encoding="utf-8")
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                exit_code = main(["init", str(output)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(output.read_text(encoding="utf-8"), "keep me\n")
+
+    def test_main_init_force_overwrites_existing_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "msspack.toml"
+            output.write_text("replace me\n", encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(["init", str(output), "--force"])
+
+            self.assertEqual(exit_code, 0)
             self.assertEqual(output.read_text(encoding="utf-8"), cli._example_config_text())
 
     def test_main_doctor_returns_nonzero_for_required_failure(self) -> None:
@@ -295,6 +317,7 @@ class CliTests(unittest.TestCase):
 
     def test_tools_install_defaults_to_validation_components(self) -> None:
         stdout = io.StringIO()
+        stderr = io.StringIO()
 
         with patch(
             "msspack.cli.install_component",
@@ -302,7 +325,7 @@ class CliTests(unittest.TestCase):
                 "Install", (), {"component": component, "version": "1.0", "root": Path("/tmp")}
             )(),
         ) as mocked:
-            with contextlib.redirect_stdout(stdout):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 exit_code = main(["tools", "install"])
 
         self.assertEqual(exit_code, 0)
@@ -310,6 +333,7 @@ class CliTests(unittest.TestCase):
             [call.args[0] for call in mocked.call_args_list],
             ["parser", "transchecker"],
         )
+        self.assertIn("DDBJ agreement", stderr.getvalue())
 
     def test_main_internal_remove_trailing_ns_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

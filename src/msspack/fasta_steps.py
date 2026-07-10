@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 from .fasta import iter_fasta
 from .step_logging import write_step_log, write_step_metrics
@@ -24,8 +23,8 @@ def remove_trailing_ns_fasta(
     with input_path.open("r", encoding="utf-8") as in_handle, atomic_text_writer(
         output_path
     ) as out_handle:
-        header: Optional[str] = None
-        seq_lines: List[str] = []
+        header: str | None = None
+        seq_lines: list[str] = []
         for raw_line in in_handle:
             line = raw_line.rstrip("\n")
             if line.startswith(">"):

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from .fasta import iter_fasta
 from .gff import parse_attributes
@@ -17,10 +16,10 @@ def trim_gff_to_fasta_bounds(
     fasta_path: Path,
     output_path: Path,
     log_path: Path,
-    metrics_path: Optional[Path] = None,
+    metrics_path: Path | None = None,
 ) -> None:
     started_at = datetime.now()
-    seq_lengths: Dict[str, int] = {}
+    seq_lengths: dict[str, int] = {}
     for record in iter_fasta(fasta_path):
         seq_lengths[record.id] = len(record.sequence)
 
@@ -125,14 +124,14 @@ def drop_duplicate_coordinate_genes(
     input_path: Path,
     output_path: Path,
     log_path: Path,
-    removed_gene_ids_path: Optional[Path] = None,
-    metrics_path: Optional[Path] = None,
+    removed_gene_ids_path: Path | None = None,
+    metrics_path: Path | None = None,
 ) -> dict[str, object]:
     started_at = datetime.now()
-    lines: List[Tuple[bool, str, Optional[Tuple[str, int, int, str]], Optional[str], Optional[str]]] = []
-    parent_to_children: Dict[str, List[str]] = defaultdict(list)
-    coords_to_gene: Dict[Tuple[str, int, int, str], str] = {}
-    removed_gene_ids: List[str] = []
+    lines: list[tuple[bool, str, tuple[str, int, int, str] | None, str | None, str | None]] = []
+    parent_to_children: dict[str, list[str]] = defaultdict(list)
+    coords_to_gene: dict[tuple[str, int, int, str], str] = {}
+    removed_gene_ids: list[str] = []
     input_gene_total = 0
 
     with input_path.open("r", encoding="utf-8") as handle:
@@ -156,7 +155,7 @@ def drop_duplicate_coordinate_genes(
             attr = parse_attributes(fields[8])
             rec_id = attr.get("ID")
             parent = attr.get("Parent")
-            coord_key: Optional[Tuple[str, int, int, str]] = None
+            coord_key: tuple[str, int, int, str] | None = None
             if fields[2] == "gene" and rec_id is not None:
                 input_gene_total += 1
                 coord_key = (fields[0], int(fields[3]), int(fields[4]), fields[6])
@@ -226,15 +225,15 @@ def drop_duplicate_coordinate_genes(
     }
 
 
-def _fix_attributes(attribute_string: str) -> Tuple[str, bool, bool]:
+def _fix_attributes(attribute_string: str) -> tuple[str, bool, bool]:
     if attribute_string.strip() in ("", "."):
         return attribute_string, False, False
     trimmed_attr = attribute_string.rstrip(";")
     trailing_semicolons_removed = trimmed_attr != attribute_string
     parts = trimmed_attr.split(";")
-    new_attributes: List[str] = []
-    current_key: Optional[str] = None
-    current_value: List[str] = []
+    new_attributes: list[str] = []
+    current_key: str | None = None
+    current_value: list[str] = []
     semicolon_value_fixed = False
     for chunk in parts:
         if "=" in chunk:
@@ -260,7 +259,7 @@ def fix_gff_semicolons_file(
     input_path: Path,
     output_path: Path,
     log_path: Path,
-    metrics_path: Optional[Path] = None,
+    metrics_path: Path | None = None,
 ) -> None:
     started_at = datetime.now()
     input_total = 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Protocol
 
 from .models import FeatureRecord
 from .render import render_gap_feature
@@ -9,15 +10,19 @@ GapRegions = list[tuple[int, int]]
 GAP_PATTERN = re.compile("N+")
 
 
+class SequenceLike(Protocol):
+    seq: object
+
+
 def detect_gap_regions(
-    sequence: str | object,
+    sequence: str | SequenceLike,
     *,
     linkage_evidence: str,
     min_assembly_gap_size: int,
     gap_estimated_length: str,
 ) -> tuple[str, GapRegions]:
     if not isinstance(sequence, str):
-        sequence = str(getattr(sequence, "seq"))
+        sequence = str(sequence.seq)
     gap_regions: GapRegions = [
         (match.start() + 1, match.end())
         for match in GAP_PATTERN.finditer(sequence)
@@ -94,7 +99,12 @@ def compare_exon_to_gaps(
     if gap_count == 0:
         return [(exon_start, exon_end)], gap_flag, gap_start_flag, gap_end_flag
     gap_flag = True
-    return list(zip(map(int, new_starts), map(int, new_ends))), gap_flag, gap_start_flag, gap_end_flag
+    return (
+        list(zip(map(int, new_starts), map(int, new_ends), strict=True)),
+        gap_flag,
+        gap_start_flag,
+        gap_end_flag,
+    )
 
 
 def append_position(

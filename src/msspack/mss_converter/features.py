@@ -80,7 +80,9 @@ def build_mrna_text(
     cds_by_position = sorted(cds_features, key=lambda feature: feature.start)
     cds_by_transcript = list(reversed(cds_by_position)) if strand == "-" else cds_by_position
 
-    for genomic_feature, transcript_feature in zip(cds_by_position, cds_by_transcript):
+    for genomic_feature, transcript_feature in zip(
+        cds_by_position, cds_by_transcript, strict=True
+    ):
         count += 1
         position, joint_prefix, joint_suffix, out_gap_flag = append_position(
             genomic_feature,

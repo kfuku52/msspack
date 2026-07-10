@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import platform
 from dataclasses import dataclass
-from typing import List, Optional
 
 from .config import MSSPackConfig
 from .ddbj_tools import list_installed
@@ -35,12 +35,12 @@ def _input_checks(config: MSSPackConfig) -> list[Check]:
         fasta_ids: set[str] = set()
         duplicates: set[str] = set()
         empty_records: set[str] = set()
-        for record in iter_fasta(fasta_path):
-            if record.id in fasta_ids:
-                duplicates.add(record.id)
-            fasta_ids.add(record.id)
-            if not record.sequence:
-                empty_records.add(record.id)
+        for fasta_record in iter_fasta(fasta_path):
+            if fasta_record.id in fasta_ids:
+                duplicates.add(fasta_record.id)
+            fasta_ids.add(fasta_record.id)
+            if not fasta_record.sequence:
+                empty_records.add(fasta_record.id)
         checks.append(
             Check(
                 "FASTA records",
@@ -75,12 +75,13 @@ def _input_checks(config: MSSPackConfig) -> list[Check]:
                 fields = line.split("\t")
                 if len(fields) != 9:
                     raise ValueError(f"line {line_number} has {len(fields)} columns")
-                record = GFFRecord.from_line(line)
-                if record.start < 1 or record.end < record.start:
+                gff_record = GFFRecord.from_line(line)
+                if gff_record.start < 1 or gff_record.end < gff_record.start:
                     raise ValueError(
-                        f"line {line_number} has invalid coordinates {record.start}..{record.end}"
+                        f"line {line_number} has invalid coordinates "
+                        f"{gff_record.start}..{gff_record.end}"
                     )
-                gff_seqids.add(record.seqid)
+                gff_seqids.add(gff_record.seqid)
         missing = sorted(gff_seqids - fasta_ids)
         checks.append(
             Check(
@@ -96,13 +97,25 @@ def _input_checks(config: MSSPackConfig) -> list[Check]:
     return checks
 
 
-def run_doctor(config: Optional[MSSPackConfig] = None) -> List[Check]:
-    checks: List[Check] = []
+def run_doctor(config: MSSPackConfig | None = None) -> list[Check]:
+    checks: list[Check] = []
 
     java_cmd = config.tools.java if config else "java"
     busco_cmd = config.busco.command if config else "busco"
     validation_required = config is None or (
         config.pipeline.validate_with_parser or config.pipeline.validate_with_transchecker
+    )
+
+    supported_platform = platform.system() != "Windows"
+    checks.append(
+        Check(
+            "DDBJ validation platform",
+            supported_platform,
+            "Linux/macOS"
+            if supported_platform
+            else "native Windows is unsupported; use WSL or DDBJ Windows tools separately",
+            required=validation_required,
+        )
     )
 
     checks.append(
@@ -163,14 +176,14 @@ def run_doctor(config: Optional[MSSPackConfig] = None) -> List[Check]:
     return checks
 
 
-def doctor_succeeded(checks: List[Check]) -> bool:
+def doctor_succeeded(checks: list[Check]) -> bool:
     return all(check.ok or not check.required for check in checks)
 
 
 def render_doctor_report(
-    config: Optional[MSSPackConfig] = None,
+    config: MSSPackConfig | None = None,
     *,
-    checks: Optional[List[Check]] = None,
+    checks: list[Check] | None = None,
 ) -> str:
     checks = checks if checks is not None else run_doctor(config)
     lines = []

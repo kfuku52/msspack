@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import csv
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 from ..gff import child_ids, iter_gff_records
 
@@ -12,7 +13,7 @@ from ..gff import child_ids, iter_gff_records
 @dataclass(frozen=True)
 class AnnotationEntry:
     product_name: str
-    custom_locus_tag: Optional[str]
+    custom_locus_tag: str | None
 
 
 @dataclass(frozen=True)
@@ -135,7 +136,7 @@ def load_annotation_lookup(path: str | Path) -> tuple[dict[str, AnnotationEntry]
     return lookup, has_custom_locus_tag
 
 
-def load_protein_id_lookup(path: Optional[str | Path]) -> Optional[dict[str, str]]:
+def load_protein_id_lookup(path: str | Path | None) -> dict[str, str] | None:
     if not path:
         return None
     with Path(path).open("r", encoding="utf-8", newline="") as handle:

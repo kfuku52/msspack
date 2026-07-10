@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from .config import MSSPackConfig, load_config
-from .ddbj_tools import ensure_installed, run_parser, run_transchecker
+from .ddbj_tools import require_installed, run_parser, run_transchecker
 from .execution import (
     NamedJob,
     append_job_if_needed,
@@ -18,7 +17,7 @@ from .utils import ensure_dir
 
 @dataclass(frozen=True)
 class ValidationOptions:
-    cache_dir: Optional[Path]
+    cache_dir: Path | None
     heap: str
     parallel: bool
     java_cmd: str = "java"
@@ -26,7 +25,7 @@ class ValidationOptions:
     run_transchecker: bool = True
 
     @classmethod
-    def from_config(cls, config: Optional[MSSPackConfig]) -> "ValidationOptions":
+    def from_config(cls, config: MSSPackConfig | None) -> ValidationOptions:
         if config is None:
             return cls(
                 cache_dir=None,
@@ -44,7 +43,7 @@ class ValidationOptions:
         )
 
     @classmethod
-    def for_explicit_validate(cls, config: Optional[MSSPackConfig]) -> "ValidationOptions":
+    def for_explicit_validate(cls, config: MSSPackConfig | None) -> ValidationOptions:
         options = cls.from_config(config)
         return cls(
             cache_dir=options.cache_dir,
@@ -69,7 +68,7 @@ class ValidationArtifacts:
         *,
         ann_path: Path,
         fasta_path: Path,
-    ) -> "ValidationArtifacts":
+    ) -> ValidationArtifacts:
         base = ann_path.parent
         return cls(
             ann_path=ann_path,
@@ -123,7 +122,7 @@ def _build_validation_jobs(
     if not requested_components:
         return []
 
-    tools = ensure_installed(
+    tools = require_installed(
         requested_components,
         cache_dir=options.cache_dir,
     )
@@ -207,7 +206,7 @@ def run_validation(
 
 def validate_existing(
     *,
-    config_file: Optional[str | Path],
+    config_file: str | Path | None,
     ann_path: str | Path,
     fasta_path: str | Path,
 ) -> dict[str, Path]:

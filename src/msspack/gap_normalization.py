@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
 
 from .fasta import iter_fasta, write_fasta_record
 from .gff import GFFDocument, read_gff_document, write_gff_document
@@ -20,8 +20,8 @@ GapJustification = tuple[int, int]
 def _justify_gap(
     gap_length: int,
     target_length: int,
-    gap_just_min: Optional[int],
-    gap_just_max: Optional[int],
+    gap_just_min: int | None,
+    gap_just_max: int | None,
 ) -> bool:
     if gap_length == target_length:
         return False
@@ -38,14 +38,14 @@ def _apply_gapjust_to_sequence(
     seq: str,
     *,
     target_gap_length: int,
-    gap_just_min: Optional[int],
-    gap_just_max: Optional[int],
-) -> tuple[str, list[GapJustification], int, Optional[int], int]:
+    gap_just_min: int | None,
+    gap_just_max: int | None,
+) -> tuple[str, list[GapJustification], int, int | None, int]:
     justifications: list[GapJustification] = []
     rebuilt: list[str] = []
     cursor = 0
     num_justifications = 0
-    min_original_gap_length: Optional[int] = None
+    min_original_gap_length: int | None = None
     max_original_gap_length = 0
 
     for match in re.finditer("N+", seq.replace("n", "N")):
@@ -114,10 +114,10 @@ def normalize_gap_lengths(
     output_fasta_path: Path,
     log_path: Path,
     gap_len: int,
-    gap_just_min: Optional[int] = None,
-    gap_just_max: Optional[int] = None,
-    input_gff_path: Optional[Path] = None,
-    output_gff_path: Optional[Path] = None,
+    gap_just_min: int | None = None,
+    gap_just_max: int | None = None,
+    input_gff_path: Path | None = None,
+    output_gff_path: Path | None = None,
     metrics_path: Path | None = None,
 ) -> None:
     if gap_len < 0:
@@ -148,7 +148,7 @@ def normalize_gap_lengths(
     started_at = datetime.now()
     justifications_by_seq: dict[str, list[GapJustification]] = {}
     num_justifications = 0
-    min_original_gap_length: Optional[int] = None
+    min_original_gap_length: int | None = None
     max_original_gap_length = 0
     seen_ids: Counter[str] = Counter()
     records: list[tuple[str, str, str]] = []

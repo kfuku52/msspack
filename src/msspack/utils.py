@@ -3,13 +3,15 @@ from __future__ import annotations
 import gzip
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, Iterator, Mapping, Optional, Sequence, TextIO
+from typing import BinaryIO, TextIO
 
 
 class MSSPackError(RuntimeError):
@@ -19,10 +21,20 @@ class MSSPackError(RuntimeError):
 def default_cache_dir() -> Path:
     if platform.system() == "Darwin":
         return Path.home() / "Library" / "Caches" / "msspack"
+    if platform.system() == "Windows":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data).expanduser() / "msspack" / "Cache"
+        return Path.home() / "AppData" / "Local" / "msspack" / "Cache"
+    xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache_home:
+        xdg_cache_path = Path(xdg_cache_home).expanduser()
+        if xdg_cache_path.is_absolute():
+            return xdg_cache_path / "msspack"
     return Path.home() / ".cache" / "msspack"
 
 
-def expand_path(value: str, base_dir: Optional[Path] = None) -> Path:
+def expand_path(value: str, base_dir: Path | None = None) -> Path:
     path = Path(value).expanduser()
     if path.is_absolute():
         return path
@@ -37,15 +49,17 @@ def ensure_dir(path: Path) -> Path:
 
 
 def shell_join(command: Sequence[str]) -> str:
-    return " ".join(subprocess.list2cmdline([part]) for part in command)
+    if platform.system() == "Windows":
+        return subprocess.list2cmdline(command)
+    return shlex.join(command)
 
 
 def run_command(
     command: Sequence[str],
     *,
-    cwd: Optional[Path] = None,
-    log_path: Optional[Path] = None,
-    env: Optional[Mapping[str, str]] = None,
+    cwd: Path | None = None,
+    log_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> None:
     command = list(command)
     if command:
@@ -182,7 +196,7 @@ def atomic_binary_writer(path: Path) -> Iterator[BinaryIO]:
         raise
 
 
-def which(command: str) -> Optional[str]:
+def which(command: str) -> str | None:
     resolved = shutil.which(command)
     if resolved:
         return resolved

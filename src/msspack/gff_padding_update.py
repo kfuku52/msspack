@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, TypedDict
+from typing import TypedDict
 
 from .gff import child_ids, parse_attributes
 from .utils import write_text

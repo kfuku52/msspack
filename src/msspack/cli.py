@@ -8,7 +8,7 @@ from pathlib import Path
 from . import __version__
 from .busco import cleanup_busco_cache, run_busco_comparison, summarize_busco_artifacts
 from .config import load_config
-from .ddbj_tools import install_component, list_installed
+from .ddbj_tools import DDBJ_LICENSE_URL, install_component, list_installed
 from .doctor import doctor_succeeded, render_doctor_report, run_doctor
 from .internal_cli import add_internal_parser, handle_internal
 from .pipeline import run_pipeline
@@ -20,8 +20,9 @@ from .validation import validate_existing
 
 def _example_config_text() -> str:
     template = importlib.resources.files("msspack").joinpath("templates/msspack.example.toml")
-    return "# Copy values from examples/msspack.example.toml and edit them for your project.\n" + template.read_text(
-        encoding="utf-8"
+    return (
+        "# Replace the placeholder paths and submission metadata for your project.\n"
+        + template.read_text(encoding="utf-8")
     )
 
 
@@ -32,6 +33,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser("init", help="write a starter config")
     init_parser.add_argument("output", help="path to the new TOML config")
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing config file",
+    )
 
     doctor_parser = subparsers.add_parser("doctor", help="check runtime dependencies")
     doctor_parser.add_argument("--config", help="optional config TOML")
@@ -142,6 +148,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _handle_init(args: argparse.Namespace) -> int:
     output_path = Path(args.output).expanduser().resolve()
+    if output_path.exists() and not args.force:
+        raise MSSPackError(
+            f"Refusing to overwrite existing config: {output_path}. Pass --force to replace it."
+        )
     write_text(output_path, _example_config_text())
     print(output_path)
     return 0
@@ -156,6 +166,11 @@ def _handle_doctor(args: argparse.Namespace) -> int:
 
 def _handle_tools(args: argparse.Namespace) -> int:
     if args.tools_command == "install":
+        print(
+            "DDBJ validation tools are separately licensed; downloading or using them "
+            f"is subject to the DDBJ agreement: {DDBJ_LICENSE_URL}",
+            file=sys.stderr,
+        )
         for component in args.components:
             item = install_component(
                 component,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 - 2026-07-10
+
+- Include test fixtures, examples, scripts, and documentation assets in source distributions
+- Refuse to overwrite existing configs from `msspack init` unless `--force` is supplied
+- Require explicit DDBJ tool installation after showing the separate license and platform requirements
+- Test declared minimum development dependencies and harden GitHub Actions permissions and action pins
+- Modernize Python 3.10 type syntax, cache-directory handling, and command-log quoting
+
 ## 0.2.0 - 2026-07-10
 
 - Preserve non-mRNA annotations, comments, shared-parent features, and embedded FASTA sections during GFF processing

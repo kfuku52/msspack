@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Tuple, Type, Union
+from typing import Any
 
 try:
     import tomllib
@@ -22,7 +22,7 @@ from .config_models import (
     ToolsConfig,
 )
 
-ExpectedType = Union[Type[Any], Tuple[Type[Any], ...]]
+ExpectedType = type[Any] | tuple[type[Any], ...]
 
 
 SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
@@ -302,11 +302,14 @@ def load_busco_config(data: dict[str, Any]) -> BuscoConfig:
 
 def read_config_data(config_path: Path) -> dict[str, Any]:
     try:
-        return tomllib.loads(config_path.read_text(encoding="utf-8"))
+        payload: object = tomllib.loads(config_path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise ConfigError(f"Could not read config file {config_path}: {exc}") from exc
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"Invalid TOML in {config_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ConfigError(f"TOML root must be a table in {config_path}")
+    return payload
 
 
 def load_sections(data: dict[str, Any]) -> dict[str, Any]:

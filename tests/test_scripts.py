@@ -1,10 +1,31 @@
+import io
 import runpy
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
 
 class ScriptSafetyTests(unittest.TestCase):
+    def test_distribution_check_requires_sdist_test_data(self) -> None:
+        namespace = runpy.run_path(
+            str(Path(__file__).parents[1] / "scripts" / "check_distribution.py")
+        )
+        verify_distribution = namespace["verify_distribution"]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            archive_path = Path(tmp_dir) / "msspack-0.3.0.tar.gz"
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for name in (
+                    "msspack-0.3.0/LICENSE",
+                    "msspack-0.3.0/THIRD_PARTY_NOTICES.md",
+                ):
+                    info = tarfile.TarInfo(name)
+                    info.size = 0
+                    archive.addfile(info, io.BytesIO())
+
+            with self.assertRaisesRegex(ValueError, "tests/fixtures/minimal_pack/config.toml"):
+                verify_distribution(archive_path)
+
     def test_benchmark_refuses_to_remove_config_directory(self) -> None:
         namespace = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "benchmark_pack.py"))
         remove_output_dir = namespace["remove_output_dir"]
