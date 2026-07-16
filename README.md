@@ -1,3 +1,5 @@
+![msspack — Genome FASTA and GFF3 to validated DDBJ MSS submissions](docs/assets/msspack-header.png)
+
 # msspack
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
