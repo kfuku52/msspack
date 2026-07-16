@@ -3,12 +3,12 @@
 ## Development setup
 
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Use Python 3.10 or newer. Recreate environments made for older `msspack` releases rather
+Use Python 3.11 or newer. Recreate environments made for older `msspack` releases rather
 than reusing stale package and dependency metadata.
 
 ## Local checks

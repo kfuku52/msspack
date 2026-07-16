@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 - 2026-07-16
+
+- Require Python 3.11+ and remove the Python 3.10 `tomli` compatibility dependency
+- Use package-index-safe README image URLs and verify all README assets in source distributions
+
 ## 0.3.0 - 2026-07-10
 
 - Include test fixtures, examples, scripts, and documentation assets in source distributions

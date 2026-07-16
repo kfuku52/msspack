@@ -13,7 +13,7 @@ import urllib.request
 import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkstemp
 
@@ -63,7 +63,7 @@ def _version_key(version: str) -> tuple[int, ...]:
 
 
 def _iso_utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def fetch_index_html() -> str:

@@ -1,8 +1,8 @@
-![msspack — Genome FASTA and GFF3 to validated DDBJ MSS submissions](docs/assets/msspack-header.png)
+![msspack — Genome FASTA and GFF3 to validated DDBJ MSS submissions](https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/msspack-header.png)
 
 # msspack
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License MIT](https://img.shields.io/badge/license-MIT-green)
 ![CI](https://github.com/kfuku52/msspack/actions/workflows/ci.yml/badge.svg)
 ![Linted with Ruff](https://img.shields.io/badge/lint-ruff-46a2f1)
@@ -33,13 +33,12 @@ pip install git+https://github.com/kfuku52/msspack.git
 
 Using an isolated environment is recommended but not required.
 
-Python 3.10 is supported through its upstream security-support lifetime. A future
-minor release may require Python 3.11 or newer after Python 3.10 reaches end of life.
+Python 3.11 or newer is required. CI tests Python 3.11 through 3.14.
 
 If you use conda or mamba, you can install the external runtime tools at the same time:
 
 ```bash
-conda create -n msspack -c conda-forge -c bioconda "python>=3.10" pip openjdk busco
+conda create -n msspack -c conda-forge -c bioconda "python>=3.11" pip openjdk busco
 conda activate msspack
 pip install git+https://github.com/kfuku52/msspack.git
 ```
@@ -152,11 +151,11 @@ flowchart TD
 
 `msspack plot` renders a stage-wise Sankey diagram that summarizes how gene models move through the packaging pipeline.
 
-<img src="docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram">
+<img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram">
 
 `msspack busco` can render compact BUSCO comparison plots for GFF-derived CDS FASTA sets.
 
-<img src="docs/assets/sample-busco-cds-comparison.svg" alt="Example msspack BUSCO CDS comparison plot" width="360">
+<img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-busco-cds-comparison.svg" alt="Example msspack BUSCO CDS comparison plot" width="360">
 
 ## Configuration
 
@@ -175,7 +174,7 @@ For local development:
 ```bash
 git clone https://github.com/kfuku52/msspack.git
 cd msspack
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```

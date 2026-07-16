@@ -7,7 +7,7 @@ import sys
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import __version__
@@ -16,7 +16,7 @@ from .utils import ensure_dir, write_text
 
 
 def _iso_utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _file_info(path: Path) -> dict[str, object]:
@@ -27,7 +27,7 @@ def _file_info(path: Path) -> dict[str, object]:
             {
                 "exists": True,
                 "size": stat.st_size,
-                "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "mtime": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
             }
         )
     else:

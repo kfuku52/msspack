@@ -1,12 +1,8 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
 
 from .config_errors import ConfigError
 from .config_models import (

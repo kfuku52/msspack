@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Check out repository
@@ -76,7 +76,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install minimum compatible development dependencies
         run: |
@@ -87,7 +87,6 @@ jobs:
             "mypy==1.19.1" \
             "pip-audit==2.10.0" \
             "ruff==0.11.0" \
-            "tomli==2.2.1" \
             "twine==6.0.0"
 
       - name: Run minimum-dependency checks
@@ -106,13 +105,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install minimum runtime dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . --no-deps
-          python -m pip install "biopython==1.87" "tomli==1.1.0"
+          python -m pip install "biopython==1.87"
 
       - name: Run tests with minimum runtime dependencies
         run: PYTHONPATH=src python -m unittest discover -s tests -v
