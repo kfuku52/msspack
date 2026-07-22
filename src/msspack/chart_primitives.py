@@ -10,6 +10,139 @@ GRID_RGB = (229 / 255.0, 231 / 255.0, 235 / 255.0)
 CHART_FONT_SIZE_PT = 8
 SVG_FONT_SIZE = f"{CHART_FONT_SIZE_PT}pt"
 
+_HELVETICA_UPPERCASE_WIDTHS = (
+    667,
+    667,
+    722,
+    722,
+    667,
+    611,
+    778,
+    722,
+    278,
+    500,
+    667,
+    556,
+    833,
+    722,
+    778,
+    667,
+    778,
+    722,
+    667,
+    611,
+    722,
+    667,
+    944,
+    667,
+    667,
+    611,
+)
+_HELVETICA_LOWERCASE_WIDTHS = (
+    556,
+    556,
+    500,
+    556,
+    556,
+    278,
+    556,
+    556,
+    222,
+    222,
+    500,
+    222,
+    833,
+    556,
+    556,
+    556,
+    556,
+    333,
+    500,
+    278,
+    556,
+    500,
+    722,
+    500,
+    500,
+    500,
+)
+_HELVETICA_BOLD_UPPERCASE_WIDTHS = (
+    722,
+    722,
+    722,
+    722,
+    667,
+    611,
+    778,
+    722,
+    278,
+    556,
+    722,
+    611,
+    833,
+    722,
+    778,
+    667,
+    778,
+    722,
+    667,
+    611,
+    722,
+    722,
+    944,
+    722,
+    722,
+    611,
+)
+_HELVETICA_BOLD_LOWERCASE_WIDTHS = (
+    556,
+    611,
+    556,
+    611,
+    556,
+    333,
+    611,
+    611,
+    278,
+    278,
+    556,
+    278,
+    889,
+    611,
+    611,
+    611,
+    611,
+    389,
+    556,
+    333,
+    611,
+    556,
+    778,
+    556,
+    556,
+    500,
+)
+_HELVETICA_WIDTHS = {
+    **dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ", _HELVETICA_UPPERCASE_WIDTHS, strict=True)),
+    **dict(zip("abcdefghijklmnopqrstuvwxyz", _HELVETICA_LOWERCASE_WIDTHS, strict=True)),
+    **{digit: 556 for digit in "0123456789"},
+    " ": 278,
+    ",": 278,
+    "-": 333,
+    ".": 278,
+    "/": 278,
+}
+_HELVETICA_BOLD_WIDTHS = {
+    **dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ", _HELVETICA_BOLD_UPPERCASE_WIDTHS, strict=True)),
+    **dict(zip("abcdefghijklmnopqrstuvwxyz", _HELVETICA_BOLD_LOWERCASE_WIDTHS, strict=True)),
+    **{digit: 556 for digit in "0123456789"},
+    " ": 278,
+    ",": 278,
+    "-": 333,
+    ".": 278,
+    "/": 278,
+}
+
 
 def hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
     return (
@@ -21,6 +154,11 @@ def hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
 
 def pdf_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def pdf_helvetica_text_width(text: str, *, size: float, bold: bool = False) -> float:
+    widths = _HELVETICA_BOLD_WIDTHS if bold else _HELVETICA_WIDTHS
+    return sum(widths.get(character, 556) for character in text) * size / 1000.0
 
 
 def pdf_top_to_bottom(page_height: float, y_top: float, box_height: float = 0.0) -> float:

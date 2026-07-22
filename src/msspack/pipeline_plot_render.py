@@ -4,6 +4,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 from xml.sax.saxutils import escape
 
 from .chart_primitives import (
@@ -15,6 +16,7 @@ from .chart_primitives import (
     write_single_page_pdf,
 )
 from .chart_primitives import hex_to_rgb as _hex_to_rgb
+from .chart_primitives import pdf_helvetica_text_width as _pdf_helvetica_text_width
 from .chart_primitives import pdf_text_command as _pdf_text_command
 from .chart_primitives import pdf_top_to_bottom as _pdf_top_to_bottom
 from .pipeline_plot_models import (
@@ -24,43 +26,59 @@ from .pipeline_plot_models import (
     PipelineGeneSet,
     PipelinePlotArtifacts,
     PipelinePlotMetrics,
+    SankeyBuscoSummary,
     SankeyLink,
     SankeyNode,
 )
-from .utils import ensure_dir, write_text
+from .utils import MSSPackError, ensure_dir, write_text
 
 PDF_POINTS_PER_INCH = 72.0
 SANKEY_WIDTH_IN = 7.2
 SANKEY_WIDTH = SANKEY_WIDTH_IN * PDF_POINTS_PER_INCH
 SANKEY_HEIGHT = 288.0
+SANKEY_BUSCO_HEIGHT = 420.0
+SANKEY_BUSCO_COLORS = {
+    "single_copy": "#2ca25f",
+    "duplicated": "#3b82f6",
+    "fragmented": "#f59e0b",
+    "missing": "#ef4444",
+}
+SANKEY_BUSCO_LABELS = {
+    "single_copy": "Single-copy",
+    "duplicated": "Duplicated",
+    "fragmented": "Fragmented",
+    "missing": "Missing",
+}
 SANKEY_STAGE_LABELS = {
-    "Duplicate removal": "Dedup",
-    "Transcript choice": "Transcript",
-    "After transcript choice": "Selected",
-    "Frame correction": "Frame",
-    "After frame correction": "Framed",
-    "Padding analysis": "Padding",
-    "After padding": "Padded",
-    "Final feature fate": "Final",
+    "Input": "Input GFF",
+    "Duplicate removal": "Coordinate duplicate\nremoval",
+    "Transcript choice": "mRNA selection",
+    "Frame correction": "Frame\ncorrection",
+    "Padding analysis": "CDS boundary\nadjustment",
+    "Final feature fate": "Output ann.txt",
 }
 SANKEY_NODE_LABELS = {
     "start": "Input",
     "after_dedup": "Kept",
     "duplicate_removed": "Removed",
-    "transcript_changed": "Pruned",
-    "transcript_unchanged": "Unchanged",
-    "after_transcript": "Selected",
+    "transcript_changed": "Reduced to\none mRNA",
+    "transcript_unchanged": "Already one\nmRNA",
     "inframe_updated": "Frame fixed",
     "inframe_unchanged": "Frame OK",
-    "after_inframe": "Framed",
     "padding_updated": "Padded",
     "genes_with_stops": "Stops",
     "padding_unchanged": "No padding",
-    "after_padding": "Padded",
     "final_cds": "Final CDS",
     "final_misc": "Final misc",
 }
-SANKEY_UNLABELED_NODES = {"after_transcript", "after_inframe", "after_padding"}
+SANKEY_GENE_SET_METRICS = {
+    "duplicate_removed_genes": "duplicate_removed_genes",
+    "transcript_changed_genes": "transcript_changed_genes",
+    "inframe_updated_genes": "inframe_updated_genes",
+    "padding_updated_genes": "padding_updated_genes",
+    "genes_with_stops": "genes_with_stops",
+    "converted_to_misc_genes": "converted_to_misc_genes",
+}
 
 
 def build_plot_artifacts(output_root: Path) -> PipelinePlotArtifacts:
@@ -79,6 +97,103 @@ def build_plot_artifacts(output_root: Path) -> PipelinePlotArtifacts:
         overlap_svg=root / "pipeline-gene-overlap.svg",
         overlap_pdf=root / "pipeline-gene-overlap.pdf",
     )
+
+
+def _required_busco_count(
+    counts: dict[str, object],
+    *,
+    key: str,
+    summary_label: str,
+    comparison_path: Path,
+) -> int:
+    value = counts.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise MSSPackError(
+            f"BUSCO CDS summary has an invalid {key} count for {summary_label}: "
+            f"{comparison_path}"
+        )
+    return value
+
+
+def load_sankey_busco_summaries(output_root: Path) -> tuple[SankeyBuscoSummary, ...]:
+    comparison_path = output_root / "busco" / "cds" / "comparison.json"
+    if not comparison_path.exists():
+        return ()
+    try:
+        payload = json.loads(comparison_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MSSPackError(f"Could not read BUSCO CDS comparison: {comparison_path}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("summaries"), list):
+        raise MSSPackError(f"BUSCO CDS comparison has no summaries list: {comparison_path}")
+
+    stage_specs = {
+        "input": ("Input CDS", 0),
+        "processed": ("Adjusted CDS", 4),
+    }
+    summaries: dict[str, SankeyBuscoSummary] = {}
+    for raw_summary in payload["summaries"]:
+        if not isinstance(raw_summary, dict):
+            raise MSSPackError(f"BUSCO CDS comparison contains an invalid summary: {comparison_path}")
+        raw_label = raw_summary.get("label")
+        if not isinstance(raw_label, str) or raw_label not in stage_specs:
+            continue
+        counts = raw_summary.get("counts")
+        lineage_dataset = raw_summary.get("lineage_dataset")
+        if not isinstance(counts, dict) or not isinstance(lineage_dataset, str):
+            raise MSSPackError(f"BUSCO CDS summary is incomplete for {raw_label}: {comparison_path}")
+        typed_counts = cast(dict[str, object], counts)
+        label, stage = stage_specs[raw_label]
+        summary = SankeyBuscoSummary(
+            label=label,
+            stage=stage,
+            lineage_dataset=lineage_dataset,
+            total_buscos=_required_busco_count(
+                typed_counts,
+                key="total_buscos",
+                summary_label=raw_label,
+                comparison_path=comparison_path,
+            ),
+            single_copy=_required_busco_count(
+                typed_counts,
+                key="single_copy",
+                summary_label=raw_label,
+                comparison_path=comparison_path,
+            ),
+            duplicated=_required_busco_count(
+                typed_counts,
+                key="duplicated",
+                summary_label=raw_label,
+                comparison_path=comparison_path,
+            ),
+            fragmented=_required_busco_count(
+                typed_counts,
+                key="fragmented",
+                summary_label=raw_label,
+                comparison_path=comparison_path,
+            ),
+            missing=_required_busco_count(
+                typed_counts,
+                key="missing",
+                summary_label=raw_label,
+                comparison_path=comparison_path,
+            ),
+        )
+        if summary.total_buscos <= 0:
+            raise MSSPackError(f"BUSCO CDS total is zero for {raw_label}: {comparison_path}")
+        segment_total = sum(count for _, count in summary.segment_counts())
+        if segment_total != summary.total_buscos:
+            raise MSSPackError(
+                f"BUSCO CDS categories sum to {segment_total:,}, not {summary.total_buscos:,}, "
+                f"for {raw_label}: {comparison_path}"
+            )
+        summaries[raw_label] = summary
+
+    missing_labels = [label for label in stage_specs if label not in summaries]
+    if missing_labels:
+        raise MSSPackError(
+            f"BUSCO CDS comparison is missing {', '.join(missing_labels)}: {comparison_path}"
+        )
+    return tuple(summaries[label] for label in stage_specs)
 
 
 def _summary_rows(metrics: PipelinePlotMetrics) -> list[tuple[str, int, str, str]]:
@@ -155,100 +270,175 @@ def _summary_rows(metrics: PipelinePlotMetrics) -> list[tuple[str, int, str, str
     ]
 
 
-def build_sankey(metrics: PipelinePlotMetrics) -> tuple[list[str], list[SankeyNode], list[SankeyLink]]:
+def _validated_sankey_gene_id_sets(
+    metrics: PipelinePlotMetrics,
+    gene_sets: tuple[PipelineGeneSet, ...],
+) -> dict[str, set[str]]:
+    id_sets = {gene_set.key: set(gene_set.gene_ids) for gene_set in gene_sets}
+    for key, metric_name in SANKEY_GENE_SET_METRICS.items():
+        expected = int(getattr(metrics, metric_name))
+        identifiers = id_sets.get(key)
+        if identifiers is None:
+            raise MSSPackError(f"Gene-ID set required for Sankey transitions is missing: {key}")
+        if len(identifiers) != expected:
+            raise MSSPackError(
+                f"Gene-ID set '{key}' has {len(identifiers):,} IDs; expected {expected:,}"
+            )
+
+    active_total = metrics.genes_after_dedup
+    stage_totals = {
+        "representative transcript": (
+            metrics.transcript_changed_genes + metrics.transcript_unchanged_genes
+        ),
+        "frame correction": metrics.inframe_updated_genes + metrics.inframe_unchanged_genes,
+        "padding analysis": (
+            metrics.padding_updated_genes
+            + metrics.genes_with_stops
+            + metrics.padding_unchanged_genes
+        ),
+        "final feature fate": metrics.converted_to_misc_genes + metrics.final_cds_genes,
+    }
+    for stage, total in stage_totals.items():
+        if total != active_total:
+            raise MSSPackError(
+                f"Sankey stage '{stage}' contains {total:,} genes; expected {active_total:,}"
+            )
+
+    duplicate_ids = id_sets["duplicate_removed_genes"]
+    active_keys = tuple(key for key in SANKEY_GENE_SET_METRICS if key != "duplicate_removed_genes")
+    active_observed_ids = set().union(*(id_sets[key] for key in active_keys))
+    duplicate_overlap = duplicate_ids & active_observed_ids
+    if duplicate_overlap:
+        raise MSSPackError(
+            f"{len(duplicate_overlap):,} duplicate-removed genes also appear in later Sankey stages"
+        )
+    padding_overlap = id_sets["padding_updated_genes"] & id_sets["genes_with_stops"]
+    if padding_overlap:
+        raise MSSPackError(
+            f"{len(padding_overlap):,} genes occur in both padding-updated and stop-containing sets"
+        )
+    if len(active_observed_ids) > active_total:
+        raise MSSPackError(
+            f"Sankey gene-ID sets contain {len(active_observed_ids):,} active genes; "
+            f"only {active_total:,} are available"
+        )
+    return id_sets
+
+
+def build_sankey(
+    metrics: PipelinePlotMetrics,
+    gene_sets: tuple[PipelineGeneSet, ...],
+) -> tuple[list[str], list[SankeyNode], list[SankeyLink]]:
     stage_labels = [
         "Input",
         "Duplicate removal",
         "Transcript choice",
-        "After transcript choice",
         "Frame correction",
-        "After frame correction",
         "Padding analysis",
-        "After padding",
         "Final feature fate",
     ]
     nodes: list[SankeyNode] = [
         SankeyNode("start", "Input genes", 0, metrics.initial_genes, SANKEY_COLORS["start"]),
         SankeyNode("after_dedup", "After duplicate removal", 1, metrics.genes_after_dedup, SANKEY_COLORS["kept"]),
-        SankeyNode("after_transcript", "After single-mRNA selection", 3, metrics.genes_after_single_mrna, SANKEY_COLORS["merge"]),
-        SankeyNode("after_inframe", "After frame correction", 5, metrics.genes_after_inframe, SANKEY_COLORS["merge"]),
-        SankeyNode("after_padding", "After padding analysis", 7, metrics.genes_after_padding, SANKEY_COLORS["merge"]),
-        SankeyNode("final_cds", "Final CDS genes", 8, metrics.final_cds_genes, SANKEY_COLORS["final_cds"]),
+        SankeyNode("final_cds", "Final CDS genes", 5, metrics.final_cds_genes, SANKEY_COLORS["final_cds"]),
     ]
     if metrics.duplicate_removed_genes > 0:
         nodes.append(SankeyNode("duplicate_removed", "Duplicate genes removed", 1, metrics.duplicate_removed_genes, SANKEY_COLORS["removed"]))
     if metrics.transcript_changed_genes > 0:
-        nodes.append(SankeyNode("transcript_changed", "Genes with transcript pruning", 2, metrics.transcript_changed_genes, SANKEY_COLORS["transcript_changed"]))
+        nodes.append(SankeyNode("transcript_changed", "Reduced to one mRNA", 2, metrics.transcript_changed_genes, SANKEY_COLORS["transcript_changed"]))
     if metrics.transcript_unchanged_genes > 0:
-        nodes.append(SankeyNode("transcript_unchanged", "Genes unchanged by transcript choice", 2, metrics.transcript_unchanged_genes, SANKEY_COLORS["transcript_unchanged"]))
+        nodes.append(SankeyNode("transcript_unchanged", "Already one mRNA", 2, metrics.transcript_unchanged_genes, SANKEY_COLORS["transcript_unchanged"]))
     if metrics.inframe_updated_genes > 0:
-        nodes.append(SankeyNode("inframe_updated", "Genes updated to restore frame", 4, metrics.inframe_updated_genes, SANKEY_COLORS["inframe_updated"]))
+        nodes.append(SankeyNode("inframe_updated", "Frame fixed", 3, metrics.inframe_updated_genes, SANKEY_COLORS["inframe_updated"]))
     if metrics.inframe_unchanged_genes > 0:
-        nodes.append(SankeyNode("inframe_unchanged", "Genes unchanged by frame correction", 4, metrics.inframe_unchanged_genes, SANKEY_COLORS["inframe_unchanged"]))
+        nodes.append(SankeyNode("inframe_unchanged", "Frame OK", 3, metrics.inframe_unchanged_genes, SANKEY_COLORS["inframe_unchanged"]))
     if metrics.padding_updated_genes > 0:
-        nodes.append(SankeyNode("padding_updated", "Genes updated by padding", 6, metrics.padding_updated_genes, SANKEY_COLORS["padding_updated"]))
+        nodes.append(SankeyNode("padding_updated", "Padded", 4, metrics.padding_updated_genes, SANKEY_COLORS["padding_updated"]))
     if metrics.genes_with_stops > 0:
-        nodes.append(SankeyNode("genes_with_stops", "Genes with stops after padding", 6, metrics.genes_with_stops, SANKEY_COLORS["genes_with_stops"]))
+        nodes.append(SankeyNode("genes_with_stops", "Stops", 4, metrics.genes_with_stops, SANKEY_COLORS["genes_with_stops"]))
     if metrics.padding_unchanged_genes > 0:
-        nodes.append(SankeyNode("padding_unchanged", "Genes unchanged by padding", 6, metrics.padding_unchanged_genes, SANKEY_COLORS["padding_unchanged"]))
+        nodes.append(SankeyNode("padding_unchanged", "No padding", 4, metrics.padding_unchanged_genes, SANKEY_COLORS["padding_unchanged"]))
     if metrics.converted_to_misc_genes > 0:
-        nodes.append(SankeyNode("final_misc", "Final misc_feature genes", 8, metrics.converted_to_misc_genes, SANKEY_COLORS["final_misc"]))
+        nodes.append(SankeyNode("final_misc", "Final misc_feature genes", 5, metrics.converted_to_misc_genes, SANKEY_COLORS["final_misc"]))
 
     links: list[SankeyLink] = [SankeyLink("start", "after_dedup", metrics.genes_after_dedup, SANKEY_COLORS["kept"])]
     if metrics.duplicate_removed_genes > 0:
         links.append(SankeyLink("start", "duplicate_removed", metrics.duplicate_removed_genes, SANKEY_COLORS["removed"]))
     if metrics.transcript_changed_genes > 0:
-        links.extend(
-            [
-                SankeyLink("after_dedup", "transcript_changed", metrics.transcript_changed_genes, SANKEY_COLORS["transcript_changed"]),
-                SankeyLink("transcript_changed", "after_transcript", metrics.transcript_changed_genes, SANKEY_COLORS["transcript_changed"]),
-            ]
-        )
+        links.append(SankeyLink("after_dedup", "transcript_changed", metrics.transcript_changed_genes, SANKEY_COLORS["transcript_changed"]))
     if metrics.transcript_unchanged_genes > 0:
-        links.extend(
-            [
-                SankeyLink("after_dedup", "transcript_unchanged", metrics.transcript_unchanged_genes, SANKEY_COLORS["transcript_unchanged"]),
-                SankeyLink("transcript_unchanged", "after_transcript", metrics.transcript_unchanged_genes, SANKEY_COLORS["transcript_unchanged"]),
-            ]
-        )
-    if metrics.inframe_updated_genes > 0:
-        links.extend(
-            [
-                SankeyLink("after_transcript", "inframe_updated", metrics.inframe_updated_genes, SANKEY_COLORS["inframe_updated"]),
-                SankeyLink("inframe_updated", "after_inframe", metrics.inframe_updated_genes, SANKEY_COLORS["inframe_updated"]),
-            ]
-        )
-    if metrics.inframe_unchanged_genes > 0:
-        links.extend(
-            [
-                SankeyLink("after_transcript", "inframe_unchanged", metrics.inframe_unchanged_genes, SANKEY_COLORS["inframe_unchanged"]),
-                SankeyLink("inframe_unchanged", "after_inframe", metrics.inframe_unchanged_genes, SANKEY_COLORS["inframe_unchanged"]),
-            ]
-        )
-    if metrics.padding_updated_genes > 0:
-        links.extend(
-            [
-                SankeyLink("after_inframe", "padding_updated", metrics.padding_updated_genes, SANKEY_COLORS["padding_updated"]),
-                SankeyLink("padding_updated", "after_padding", metrics.padding_updated_genes, SANKEY_COLORS["padding_updated"]),
-            ]
-        )
-    if metrics.genes_with_stops > 0:
-        links.extend(
-            [
-                SankeyLink("after_inframe", "genes_with_stops", metrics.genes_with_stops, SANKEY_COLORS["genes_with_stops"]),
-                SankeyLink("genes_with_stops", "after_padding", metrics.genes_with_stops, SANKEY_COLORS["genes_with_stops"]),
-            ]
-        )
-    if metrics.padding_unchanged_genes > 0:
-        links.extend(
-            [
-                SankeyLink("after_inframe", "padding_unchanged", metrics.padding_unchanged_genes, SANKEY_COLORS["padding_unchanged"]),
-                SankeyLink("padding_unchanged", "after_padding", metrics.padding_unchanged_genes, SANKEY_COLORS["padding_unchanged"]),
-            ]
-        )
-    links.append(SankeyLink("after_padding", "final_cds", metrics.final_cds_genes, SANKEY_COLORS["final_cds"]))
-    if metrics.converted_to_misc_genes > 0:
-        links.append(SankeyLink("after_padding", "final_misc", metrics.converted_to_misc_genes, SANKEY_COLORS["final_misc"]))
+        links.append(SankeyLink("after_dedup", "transcript_unchanged", metrics.transcript_unchanged_genes, SANKEY_COLORS["transcript_unchanged"]))
+
+    id_sets = _validated_sankey_gene_id_sets(metrics, gene_sets)
+    observed_ids = set().union(
+        id_sets["transcript_changed_genes"],
+        id_sets["inframe_updated_genes"],
+        id_sets["padding_updated_genes"],
+        id_sets["genes_with_stops"],
+        id_sets["converted_to_misc_genes"],
+    )
+    residual_count = metrics.genes_after_dedup - len(observed_ids)
+    transcript_members = {
+        "transcript_unchanged": observed_ids - id_sets["transcript_changed_genes"],
+        "transcript_changed": id_sets["transcript_changed_genes"],
+    }
+    frame_members = {
+        "inframe_unchanged": observed_ids - id_sets["inframe_updated_genes"],
+        "inframe_updated": id_sets["inframe_updated_genes"],
+    }
+    padding_event_ids = id_sets["padding_updated_genes"] | id_sets["genes_with_stops"]
+    padding_members = {
+        "padding_unchanged": observed_ids - padding_event_ids,
+        "padding_updated": id_sets["padding_updated_genes"],
+        "genes_with_stops": id_sets["genes_with_stops"],
+    }
+    final_members = {
+        "final_cds": observed_ids - id_sets["converted_to_misc_genes"],
+        "final_misc": id_sets["converted_to_misc_genes"],
+    }
+    node_colors = {node.id: node.color for node in nodes}
+
+    def append_transitions(
+        source_members: dict[str, set[str]],
+        target_members: dict[str, set[str]],
+        *,
+        default_source: str,
+        default_target: str,
+    ) -> None:
+        transition_counts: dict[tuple[str, str], int] = {}
+        for source_id, source_ids in source_members.items():
+            if source_id not in node_colors:
+                continue
+            for target_id, target_ids in target_members.items():
+                if target_id not in node_colors:
+                    continue
+                count = len(source_ids & target_ids)
+                if count > 0:
+                    transition_counts[(source_id, target_id)] = count
+        if residual_count > 0:
+            key = (default_source, default_target)
+            transition_counts[key] = transition_counts.get(key, 0) + residual_count
+        for (source_id, target_id), count in transition_counts.items():
+            links.append(SankeyLink(source_id, target_id, count, node_colors[target_id]))
+
+    append_transitions(
+        transcript_members,
+        frame_members,
+        default_source="transcript_unchanged",
+        default_target="inframe_unchanged",
+    )
+    append_transitions(
+        frame_members,
+        padding_members,
+        default_source="inframe_unchanged",
+        default_target="padding_unchanged",
+    )
+    append_transitions(
+        padding_members,
+        final_members,
+        default_source="padding_unchanged",
+        default_target="final_cds",
+    )
     return stage_labels, sorted(nodes, key=lambda node: (node.stage, node.label)), links
 
 
@@ -358,13 +548,12 @@ def _sankey_node_label(node: SankeyNode) -> str:
     return SANKEY_NODE_LABELS.get(node.id, node.label)
 
 
-def _sankey_node_is_labeled(node: SankeyNode) -> bool:
-    return node.id not in SANKEY_UNLABELED_NODES
+def _sankey_label_lines(label: str) -> tuple[str, ...]:
+    return tuple(label.splitlines()) or (label,)
 
 
 def _format_gene_count(count: int) -> str:
-    suffix = "gene" if count == 1 else "genes"
-    return f"{count:,} {suffix}"
+    return f"{count:,}"
 
 
 def _sankey_layout(
@@ -389,33 +578,67 @@ def _sankey_layout(
     nodes_by_stage: dict[int, list[SankeyNode]] = {}
     for node in nodes:
         nodes_by_stage.setdefault(node.stage, []).append(node)
-    max_stage_total = max(totals_by_stage.values()) if totals_by_stage else 1
-    max_gap_total = max(
-        ((len(stage_nodes) - 1) * node_gap for stage_nodes in nodes_by_stage.values()),
-        default=0.0,
-    )
-    scale = max(0.1, (content_height - max_gap_total) / max_stage_total)
+    max_stage_total = max(totals_by_stage.values()) if totals_by_stage else 0
 
-    display_flow_heights: dict[tuple[str, str], float] = {}
-    for link in links:
-        display_flow_heights[(link.source, link.target)] = (
-            max(link.count * scale, flow_min_height) if link.count > 0 else 0.0
+    def scaled_geometry(
+        scale: float,
+    ) -> tuple[
+        dict[tuple[str, str], float],
+        dict[str, float],
+        dict[str, float],
+        dict[str, float],
+    ]:
+        display_flow_heights = {
+            (link.source, link.target): (
+                max(link.count * scale, flow_min_height) if link.count > 0 else 0.0
+            )
+            for link in links
+        }
+        outgoing_totals = {node.id: 0.0 for node in nodes}
+        incoming_totals = {node.id: 0.0 for node in nodes}
+        for link in links:
+            display_height = display_flow_heights[(link.source, link.target)]
+            outgoing_totals[link.source] += display_height
+            incoming_totals[link.target] += display_height
+        node_heights = {
+            node.id: max(
+                node.count * scale,
+                outgoing_totals[node.id],
+                incoming_totals[node.id],
+                node_min_height,
+            )
+            for node in nodes
+        }
+        return display_flow_heights, outgoing_totals, incoming_totals, node_heights
+
+    def fits(scale: float) -> bool:
+        *_, node_heights = scaled_geometry(scale)
+        return all(
+            sum(node_heights[node.id] for node in stage_nodes)
+            + max(0, len(stage_nodes) - 1) * node_gap
+            <= content_height
+            for stage_nodes in nodes_by_stage.values()
         )
 
-    outgoing_totals = {node.id: 0.0 for node in nodes}
-    incoming_totals = {node.id: 0.0 for node in nodes}
-    for link in links:
-        display_height = display_flow_heights[(link.source, link.target)]
-        outgoing_totals[link.source] += display_height
-        incoming_totals[link.target] += display_height
+    scale_low = 0.0
+    scale_high = content_height / max_stage_total if max_stage_total > 0 else 0.0
+    if fits(scale_high):
+        scale = scale_high
+    else:
+        for _ in range(60):
+            scale_mid = (scale_low + scale_high) / 2.0
+            if fits(scale_mid):
+                scale_low = scale_mid
+            else:
+                scale_high = scale_mid
+        scale = scale_low
+
+    display_flow_heights, outgoing_totals, incoming_totals, node_heights = scaled_geometry(scale)
 
     laid_out_nodes: dict[str, _LaidOutNode] = {}
     for stage_index, stage_nodes in nodes_by_stage.items():
         ordered_nodes = sorted(stage_nodes, key=lambda node: node.label)
-        heights = [
-            max(node.count * scale, outgoing_totals[node.id], incoming_totals[node.id], node_min_height)
-            for node in ordered_nodes
-        ]
+        heights = [node_heights[node.id] for node in ordered_nodes]
         total_height = sum(heights) + max(0, len(heights) - 1) * node_gap
         cursor = top + (content_height - total_height) / 2.0
         x = left + stage_index * stage_gap
@@ -478,45 +701,177 @@ def _sankey_label_anchor(node: _LaidOutNode, total_stages: int) -> tuple[float, 
     return node.x + node.width + 4.0, "start"
 
 
+def _svg_multiline_text(
+    *,
+    x: float,
+    y: float,
+    anchor: str,
+    css_class: str,
+    lines: tuple[str, ...],
+    line_height: float,
+) -> str:
+    tspans = [
+        f'<tspan x="{x:.2f}" dy="{0.0 if index == 0 else line_height:g}">{escape(line)}</tspan>'
+        for index, line in enumerate(lines)
+    ]
+    return (
+        f'<text x="{x:.2f}" y="{y:.2f}" text-anchor="{anchor}" class="{css_class}">'
+        + "".join(tspans)
+        + "</text>"
+    )
+
+
+def _sankey_stage_x(meta: dict[str, float], stage: int) -> float:
+    return meta["left"] + stage * meta["stage_gap"] + meta["node_width"] / 2.0
+
+
+def _busco_band_title(summaries: tuple[SankeyBuscoSummary, ...]) -> str:
+    lineages = {summary.lineage_dataset for summary in summaries}
+    totals = {summary.total_buscos for summary in summaries}
+    lineage = next(iter(lineages)) if len(lineages) == 1 else "mixed lineages"
+    total = f"n={next(iter(totals)):,}" if len(totals) == 1 else "different n"
+    return f"BUSCO results (CDS; {lineage}; {total})"
+
+
+def _svg_pie_wedge(
+    *,
+    cx: float,
+    cy: float,
+    radius: float,
+    start_angle: float,
+    end_angle: float,
+    color: str,
+) -> str:
+    start_x = cx + radius * math.cos(start_angle)
+    start_y = cy + radius * math.sin(start_angle)
+    end_x = cx + radius * math.cos(end_angle)
+    end_y = cy + radius * math.sin(end_angle)
+    large_arc = 1 if end_angle - start_angle > math.pi else 0
+    return (
+        f'<path d="M {cx:.2f} {cy:.2f} L {start_x:.2f} {start_y:.2f} '
+        f'A {radius:.2f} {radius:.2f} 0 {large_arc} 1 {end_x:.2f} {end_y:.2f} Z" '
+        f'fill="{color}" stroke="white" stroke-width="0.6"/>'
+    )
+
+
+def _append_busco_svg(
+    parts: list[str],
+    summaries: tuple[SankeyBuscoSummary, ...],
+    meta: dict[str, float],
+) -> None:
+    center_y = 350.0
+    radius = 25.0
+    parts.append('<line x1="16" y1="296" x2="502.4" y2="296" stroke="#cbd5e1" stroke-width="0.7"/>')
+    parts.append(
+        f'<text x="{SANKEY_WIDTH / 2.0:.2f}" y="309" text-anchor="middle" class="busco-title">'
+        f"{escape(_busco_band_title(summaries))}</text>"
+    )
+    for summary in summaries:
+        center_x = _sankey_stage_x(meta, summary.stage)
+        parts.append(
+            f'<line x1="{center_x:.2f}" y1="288" x2="{center_x:.2f}" y2="319" '
+            'stroke="#94a3b8" stroke-width="0.7" stroke-dasharray="2 2"/>'
+        )
+        angle = -math.pi / 2.0
+        for key, count in summary.segment_counts():
+            if count <= 0:
+                continue
+            next_angle = angle + 2.0 * math.pi * count / summary.total_buscos
+            parts.append(
+                _svg_pie_wedge(
+                    cx=center_x,
+                    cy=center_y,
+                    radius=radius,
+                    start_angle=angle,
+                    end_angle=next_angle,
+                    color=SANKEY_BUSCO_COLORS[key],
+                )
+            )
+            angle = next_angle
+        legend_x = center_x + radius + 7.0
+        for index, (key, count) in enumerate(summary.segment_counts()):
+            legend_y = 327.0 + index * 14.0
+            percentage = 100.0 * count / summary.total_buscos
+            parts.append(
+                f'<rect x="{legend_x:.2f}" y="{legend_y - 6.0:.2f}" width="6" height="6" '
+                f'rx="1" fill="{SANKEY_BUSCO_COLORS[key]}"/>'
+            )
+            parts.append(
+                f'<text x="{legend_x + 9.0:.2f}" y="{legend_y:.2f}" class="busco-legend">'
+                f"{SANKEY_BUSCO_LABELS[key]} {percentage:.1f}%</text>"
+            )
+        parts.append(
+            f'<text x="{center_x:.2f}" y="385" text-anchor="middle" class="busco-label">'
+            f"{escape(summary.label)}</text>"
+        )
+        parts.append(
+            f'<text x="{center_x:.2f}" y="399" text-anchor="middle" class="busco-value">'
+            f"Complete {summary.complete_pct:.1f}%</text>"
+        )
+
+
 def write_sankey_svg(
     stage_labels: list[str],
     nodes: list[SankeyNode],
     links: list[SankeyLink],
     output_path: Path,
+    *,
+    busco_summaries: tuple[SankeyBuscoSummary, ...] = (),
 ) -> Path:
     laid_out_nodes, laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
     width = float(meta["width"])
-    height = float(meta["height"])
+    height = SANKEY_BUSCO_HEIGHT if busco_summaries else float(meta["height"])
     svg_width = f"{width / PDF_POINTS_PER_INCH:g}in"
     svg_height = f"{height / PDF_POINTS_PER_INCH:g}in"
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_width}" height="{svg_height}" viewBox="0 0 {width:.2f} {height:.2f}">',
-        f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .stage{{font-size:{SVG_FONT_SIZE};font-weight:700;fill:#334155}} .label{{font-size:{SVG_FONT_SIZE}}} .count{{font-size:{SVG_FONT_SIZE};fill:#475569}}</style>',
+        f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .stage{{font-size:{SVG_FONT_SIZE};font-weight:700;fill:#334155}} .label{{font-size:{SVG_FONT_SIZE}}} .count{{font-size:{SVG_FONT_SIZE};fill:#475569}} .busco-title,.busco-label{{font-size:{SVG_FONT_SIZE};font-weight:700;fill:#334155}} .busco-legend,.busco-value{{font-size:{SVG_FONT_SIZE};fill:#475569}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
         '<text x="16" y="16" class="title">Stage-wise pipeline gene flow</text>',
-        '<text x="16" y="31" class="subtitle">Synthetic example; ribbons summarize stage counts.</text>',
+        '<text x="16" y="31" class="subtitle">Ribbon widths are proportional to gene counts; node values are genes.</text>',
     ]
     total_stages = len(stage_labels)
     for index, label in enumerate(stage_labels):
-        stage_x = meta["left"] + index * meta["stage_gap"] + meta["node_width"] / 2.0
+        stage_x = _sankey_stage_x(meta, index)
+        stage_label = _sankey_stage_label(label)
+        if not stage_label:
+            continue
+        stage_lines = _sankey_label_lines(stage_label)
         parts.append(
-            f'<text x="{stage_x:.2f}" y="58" text-anchor="middle" class="stage">{escape(_sankey_stage_label(label))}</text>'
+            _svg_multiline_text(
+                x=stage_x,
+                y=58.0 - (len(stage_lines) - 1) * 5.0,
+                anchor="middle",
+                css_class="stage",
+                lines=stage_lines,
+                line_height=10.0,
+            )
         )
     for link in laid_out_links:
         parts.append(f'<path d="{_sankey_link_path(link)}" fill="{link.link.color}" fill-opacity="0.55" stroke="none"/>')
     for node in laid_out_nodes.values():
         parts.append(f'<rect x="{node.x:.2f}" y="{node.y:.2f}" width="{node.width:.2f}" height="{node.height:.2f}" rx="4" fill="{node.node.color}" stroke="#0f172a" stroke-width="0.8"/>')
     for node in laid_out_nodes.values():
-        if not _sankey_node_is_labeled(node.node):
-            continue
         label_x, anchor = _sankey_label_anchor(node, total_stages)
         label_y = node.y + min(max(node.height / 2.0, 9.0), node.height - 2.0)
+        label_lines = _sankey_label_lines(_sankey_node_label(node.node))
+        label_line_height = 10.0 if len(label_lines) > 1 else 12.0
+        label_start_y = label_y - 4.0 - (len(label_lines) - 1) * label_line_height / 2.0
         parts.append(
-            f'<text x="{label_x:.2f}" y="{label_y - 4:.2f}" text-anchor="{anchor}" class="label">{escape(_sankey_node_label(node.node))}</text>'
+            _svg_multiline_text(
+                x=label_x,
+                y=label_start_y,
+                anchor=anchor,
+                css_class="label",
+                lines=label_lines,
+                line_height=label_line_height,
+            )
         )
         parts.append(
-            f'<text x="{label_x:.2f}" y="{label_y + 8:.2f}" text-anchor="{anchor}" class="count">{_format_gene_count(node.node.count)}</text>'
+            f'<text x="{label_x:.2f}" y="{label_start_y + len(label_lines) * label_line_height:.2f}" text-anchor="{anchor}" class="count">{_format_gene_count(node.node.count)}</text>'
         )
+    if busco_summaries:
+        _append_busco_svg(parts, busco_summaries, meta)
     parts.append("</svg>")
     return write_text(output_path, "\n".join(parts) + "\n")
 
@@ -540,15 +895,173 @@ def _sankey_pdf_path_commands(link: _LaidOutLink, page_height: float) -> str:
     )
 
 
+def _pdf_pie_wedge_commands(
+    *,
+    page_height: float,
+    cx: float,
+    cy: float,
+    radius: float,
+    start_angle: float,
+    end_angle: float,
+) -> str:
+    start_x = cx + radius * math.cos(start_angle)
+    start_y = cy + radius * math.sin(start_angle)
+    commands = [
+        f"{cx:.2f} {_pdf_top_to_bottom(page_height, cy):.2f} m",
+        f"{start_x:.2f} {_pdf_top_to_bottom(page_height, start_y):.2f} l",
+    ]
+    angle = start_angle
+    while angle < end_angle - 1e-12:
+        next_angle = min(end_angle, angle + math.pi / 2.0)
+        delta = next_angle - angle
+        tangent_scale = 4.0 / 3.0 * math.tan(delta / 4.0)
+        x1 = cx + radius * math.cos(angle)
+        y1 = cy + radius * math.sin(angle)
+        x2 = cx + radius * math.cos(next_angle)
+        y2 = cy + radius * math.sin(next_angle)
+        control1_x = x1 - tangent_scale * radius * math.sin(angle)
+        control1_y = y1 + tangent_scale * radius * math.cos(angle)
+        control2_x = x2 + tangent_scale * radius * math.sin(next_angle)
+        control2_y = y2 - tangent_scale * radius * math.cos(next_angle)
+        commands.append(
+            f"{control1_x:.2f} {_pdf_top_to_bottom(page_height, control1_y):.2f} "
+            f"{control2_x:.2f} {_pdf_top_to_bottom(page_height, control2_y):.2f} "
+            f"{x2:.2f} {_pdf_top_to_bottom(page_height, y2):.2f} c"
+        )
+        angle = next_angle
+    commands.append("h f")
+    return " ".join(commands)
+
+
+def _centered_pdf_text_command(
+    *,
+    page_height: float,
+    center_x: float,
+    y_top: float,
+    text: str,
+    font: str,
+    size: int,
+    color: tuple[float, float, float],
+    bold: bool = False,
+) -> str:
+    return _pdf_text_command(
+        page_height=page_height,
+        x=center_x - _pdf_helvetica_text_width(text, size=size, bold=bold) / 2.0,
+        y_top=y_top,
+        text=text,
+        font=font,
+        size=size,
+        color=color,
+    )
+
+
+def _append_busco_pdf(
+    commands: list[str],
+    summaries: tuple[SankeyBuscoSummary, ...],
+    meta: dict[str, float],
+    page_height: float,
+) -> None:
+    center_y = 350.0
+    radius = 25.0
+    separator_y = _pdf_top_to_bottom(page_height, 296.0)
+    commands.append(
+        f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 0.7 w "
+        f"16 {separator_y:.2f} m 502.4 {separator_y:.2f} l S"
+    )
+    commands.append(
+        _centered_pdf_text_command(
+            page_height=page_height,
+            center_x=SANKEY_WIDTH / 2.0,
+            y_top=309.0,
+            text=_busco_band_title(summaries),
+            font="F2",
+            size=CHART_FONT_SIZE_PT,
+            color=MUTED_RGB,
+            bold=True,
+        )
+    )
+    for summary in summaries:
+        center_x = _sankey_stage_x(meta, summary.stage)
+        connector_top = _pdf_top_to_bottom(page_height, 288.0)
+        connector_bottom = _pdf_top_to_bottom(page_height, 319.0)
+        commands.append(
+            f"0.58 0.64 0.72 RG 0.7 w [2 2] 0 d {center_x:.2f} {connector_top:.2f} m "
+            f"{center_x:.2f} {connector_bottom:.2f} l S [] 0 d"
+        )
+        angle = -math.pi / 2.0
+        for key, count in summary.segment_counts():
+            if count <= 0:
+                continue
+            next_angle = angle + 2.0 * math.pi * count / summary.total_buscos
+            red, green, blue = _hex_to_rgb(SANKEY_BUSCO_COLORS[key])
+            commands.append(f"{red:.3f} {green:.3f} {blue:.3f} rg")
+            commands.append(
+                _pdf_pie_wedge_commands(
+                    page_height=page_height,
+                    cx=center_x,
+                    cy=center_y,
+                    radius=radius,
+                    start_angle=angle,
+                    end_angle=next_angle,
+                )
+            )
+            angle = next_angle
+        legend_x = center_x + radius + 7.0
+        for index, (key, count) in enumerate(summary.segment_counts()):
+            legend_y = 327.0 + index * 14.0
+            percentage = 100.0 * count / summary.total_buscos
+            red, green, blue = _hex_to_rgb(SANKEY_BUSCO_COLORS[key])
+            rect_y = _pdf_top_to_bottom(page_height, legend_y - 6.0, 6.0)
+            commands.append(
+                f"{red:.3f} {green:.3f} {blue:.3f} rg {legend_x:.2f} {rect_y:.2f} 6 6 re f"
+            )
+            commands.append(
+                _pdf_text_command(
+                    page_height=page_height,
+                    x=legend_x + 9.0,
+                    y_top=legend_y,
+                    text=f"{SANKEY_BUSCO_LABELS[key]} {percentage:.1f}%",
+                    font="F1",
+                    size=CHART_FONT_SIZE_PT,
+                    color=MUTED_RGB,
+                )
+            )
+        commands.append(
+            _centered_pdf_text_command(
+                page_height=page_height,
+                center_x=center_x,
+                y_top=385.0,
+                text=summary.label,
+                font="F2",
+                size=CHART_FONT_SIZE_PT,
+                color=MUTED_RGB,
+                bold=True,
+            )
+        )
+        commands.append(
+            _centered_pdf_text_command(
+                page_height=page_height,
+                center_x=center_x,
+                y_top=399.0,
+                text=f"Complete {summary.complete_pct:.1f}%",
+                font="F1",
+                size=CHART_FONT_SIZE_PT,
+                color=MUTED_RGB,
+            )
+        )
+
+
 def write_sankey_pdf(
     stage_labels: list[str],
     nodes: list[SankeyNode],
     links: list[SankeyLink],
     output_path: Path,
+    *,
+    busco_summaries: tuple[SankeyBuscoSummary, ...] = (),
 ) -> Path:
     laid_out_nodes, laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
     width = float(meta["width"])
-    height = float(meta["height"])
+    height = SANKEY_BUSCO_HEIGHT if busco_summaries else float(meta["height"])
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
         _pdf_text_command(
@@ -564,7 +1077,7 @@ def write_sankey_pdf(
             page_height=height,
             x=16,
             y_top=31,
-            text="Synthetic example; ribbons summarize stage counts.",
+            text="Ribbon widths are proportional to gene counts; node values are genes.",
             font="F1",
             size=CHART_FONT_SIZE_PT,
             color=MUTED_RGB,
@@ -573,18 +1086,29 @@ def write_sankey_pdf(
     total_stages = len(stage_labels)
     for index, label in enumerate(stage_labels):
         stage_label = _sankey_stage_label(label)
-        stage_x = meta["left"] + index * meta["stage_gap"] + meta["node_width"] / 2.0
-        commands.append(
-            _pdf_text_command(
-                page_height=height,
-                x=stage_x - 2.1 * len(stage_label),
-                y_top=58,
-                text=stage_label,
-                font="F2",
-                size=CHART_FONT_SIZE_PT,
-                color=MUTED_RGB,
+        if not stage_label:
+            continue
+        stage_lines = _sankey_label_lines(stage_label)
+        stage_x = _sankey_stage_x(meta, index)
+        stage_start_y = 58.0 - (len(stage_lines) - 1) * 5.0
+        for line_index, stage_line in enumerate(stage_lines):
+            commands.append(
+                _pdf_text_command(
+                    page_height=height,
+                    x=stage_x
+                    - _pdf_helvetica_text_width(
+                        stage_line,
+                        size=CHART_FONT_SIZE_PT,
+                        bold=True,
+                    )
+                    / 2.0,
+                    y_top=stage_start_y + line_index * 10.0,
+                    text=stage_line,
+                    font="F2",
+                    size=CHART_FONT_SIZE_PT,
+                    color=MUTED_RGB,
+                )
             )
-        )
     for link in laid_out_links:
         r, g, b = _hex_to_rgb(link.link.color)
         commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg")
@@ -595,39 +1119,53 @@ def write_sankey_pdf(
         commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg {node.x:.2f} {rect_y:.2f} {node.width:.2f} {node.height:.2f} re f")
         commands.append(f"{TEXT_RGB[0]:.3f} {TEXT_RGB[1]:.3f} {TEXT_RGB[2]:.3f} RG 0.8 w {node.x:.2f} {rect_y:.2f} {node.width:.2f} {node.height:.2f} re S")
     for node in laid_out_nodes.values():
-        if not _sankey_node_is_labeled(node.node):
-            continue
         label_x, anchor = _sankey_label_anchor(node, total_stages)
         label_y = node.y + min(max(node.height / 2.0, 9.0), node.height - 2.0)
-        label = _sankey_node_label(node.node)
+        label_lines = _sankey_label_lines(_sankey_node_label(node.node))
+        label_line_height = 10.0 if len(label_lines) > 1 else 12.0
+        label_start_y = label_y - 4.0 - (len(label_lines) - 1) * label_line_height / 2.0
         count = _format_gene_count(node.node.count)
-        if anchor == "end":
-            label_x = max(10.0, label_x - 3.4 * len(label))
-        commands.append(
-            _pdf_text_command(
-                page_height=height,
-                x=label_x,
-                y_top=label_y - 4.0,
-                text=label,
-                font="F1",
-                size=CHART_FONT_SIZE_PT,
-                color=TEXT_RGB,
+        for line_index, label_line in enumerate(label_lines):
+            line_x = label_x
+            if anchor == "end":
+                line_x = max(
+                    10.0,
+                    label_x
+                    - _pdf_helvetica_text_width(
+                        label_line,
+                        size=CHART_FONT_SIZE_PT,
+                    ),
+                )
+            commands.append(
+                _pdf_text_command(
+                    page_height=height,
+                    x=line_x,
+                    y_top=label_start_y + line_index * label_line_height,
+                    text=label_line,
+                    font="F1",
+                    size=CHART_FONT_SIZE_PT,
+                    color=TEXT_RGB,
+                )
             )
-        )
         count_x = label_x
         if anchor == "end":
-            count_x = max(10.0, label_x - 3.4 * max(0, len(count) - len(label)))
+            count_x = max(
+                10.0,
+                label_x - _pdf_helvetica_text_width(count, size=CHART_FONT_SIZE_PT),
+            )
         commands.append(
             _pdf_text_command(
                 page_height=height,
                 x=count_x,
-                y_top=label_y + 8.0,
+                y_top=label_start_y + len(label_lines) * label_line_height,
                 text=count,
                 font="F1",
                 size=CHART_FONT_SIZE_PT,
                 color=MUTED_RGB,
             )
         )
+    if busco_summaries:
+        _append_busco_pdf(commands, busco_summaries, meta, height)
     return write_single_page_pdf(width=width, height=height, commands=commands, output_path=output_path)
 
 

@@ -195,6 +195,34 @@ class SankeyLink:
 
 
 @dataclass(frozen=True)
+class SankeyBuscoSummary:
+    label: str
+    stage: int
+    lineage_dataset: str
+    total_buscos: int
+    single_copy: int
+    duplicated: int
+    fragmented: int
+    missing: int
+
+    @property
+    def complete(self) -> int:
+        return self.single_copy + self.duplicated
+
+    @property
+    def complete_pct(self) -> float:
+        return 100.0 * self.complete / self.total_buscos
+
+    def segment_counts(self) -> tuple[tuple[str, int], ...]:
+        return (
+            ("single_copy", self.single_copy),
+            ("duplicated", self.duplicated),
+            ("fragmented", self.fragmented),
+            ("missing", self.missing),
+        )
+
+
+@dataclass(frozen=True)
 class EventCount:
     key: str
     label: str

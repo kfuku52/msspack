@@ -3,6 +3,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from msspack.chart_primitives import pdf_helvetica_text_width
+from msspack.pipeline_plot_models import PipelineGeneSet, PipelinePlotMetrics
+from msspack.pipeline_plot_render import (
+    SANKEY_HEIGHT,
+    _sankey_layout,
+    build_sankey,
+    load_sankey_busco_summaries,
+)
 from msspack.pipeline_plots import (
     parse_pipeline_plot_metrics,
     run_pipeline_plots,
@@ -89,7 +97,131 @@ def _write_id_file(path: Path, identifiers: list[str]) -> None:
     path.write_text("\n".join(identifiers) + ("\n" if identifiers else ""), encoding="utf-8")
 
 
+def _write_busco_comparison(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "comparison_name": "cds",
+                "summaries": [
+                    {
+                        "label": "input",
+                        "lineage_dataset": "embryophyta_odb12",
+                        "counts": {
+                            "single_copy": 70,
+                            "duplicated": 20,
+                            "fragmented": 5,
+                            "missing": 5,
+                            "total_buscos": 100,
+                        },
+                    },
+                    {
+                        "label": "processed",
+                        "lineage_dataset": "embryophyta_odb12",
+                        "counts": {
+                            "single_copy": 85,
+                            "duplicated": 5,
+                            "fragmented": 5,
+                            "missing": 5,
+                            "total_buscos": 100,
+                        },
+                    },
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _sankey_gene_sets(groups: dict[str, list[str]]) -> tuple[PipelineGeneSet, ...]:
+    keys = (
+        "duplicate_removed_genes",
+        "transcript_changed_genes",
+        "inframe_updated_genes",
+        "padding_updated_genes",
+        "genes_with_stops",
+        "converted_to_misc_genes",
+    )
+    return tuple(
+        PipelineGeneSet(
+            key=key,
+            label=key,
+            color="#000000",
+            path=Path(f"/tmp/{key}.txt"),
+            gene_ids=tuple(groups.get(key, [])),
+        )
+        for key in keys
+    )
+
+
 class PipelinePlotTests(unittest.TestCase):
+    def test_pdf_helvetica_text_width_uses_real_character_widths(self) -> None:
+        self.assertAlmostEqual(
+            pdf_helvetica_text_width("Input", size=8, bold=True),
+            19.552,
+        )
+
+    def test_sankey_layout_keeps_large_gene_flows_inside_plot_area(self) -> None:
+        metrics = PipelinePlotMetrics(
+            initial_genes=22_005,
+            duplicate_removed_genes=4,
+            genes_after_dedup=22_001,
+            transcript_changed_genes=4_220,
+            transcript_unchanged_genes=17_781,
+            removed_mrnas=4_220,
+            genes_after_single_mrna=22_001,
+            inframe_updated_genes=3,
+            inframe_unchanged_genes=21_998,
+            genes_after_inframe=22_001,
+            padding_updated_genes=0,
+            genes_with_stops=0,
+            padding_unchanged_genes=22_001,
+            genes_after_padding=22_001,
+            converted_to_misc_genes=0,
+            final_cds_genes=22_001,
+            total_cds_input=22_001,
+            total_cds_output=22_001,
+            misc_feature_output=0,
+            sources={},
+        )
+        gene_sets = _sankey_gene_sets(
+            {
+                "duplicate_removed_genes": [f"d{index}" for index in range(4)],
+                "transcript_changed_genes": [f"t{index}" for index in range(4_220)],
+                "inframe_updated_genes": [f"f{index}" for index in range(3)],
+            }
+        )
+        stage_labels, nodes, links = build_sankey(metrics, gene_sets)
+
+        laid_out_nodes, laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
+
+        self.assertEqual(len(stage_labels), 6)
+        plot_top = meta["top"]
+        plot_bottom = SANKEY_HEIGHT - 24.0
+        for node_id in ("after_transcript", "after_inframe", "after_padding"):
+            self.assertNotIn(node_id, laid_out_nodes)
+        for node in laid_out_nodes.values():
+            self.assertGreaterEqual(node.y, plot_top - 1e-6)
+            self.assertLessEqual(node.y + node.height, plot_bottom + 1e-6)
+        for link in laid_out_links:
+            self.assertGreaterEqual(link.source_y, link.source.y - 1e-6)
+            self.assertLessEqual(link.source_y + link.height, link.source.y + link.source.height + 1e-6)
+            self.assertGreaterEqual(link.target_y, link.target.y - 1e-6)
+            self.assertLessEqual(link.target_y + link.height, link.target.y + link.target.height + 1e-6)
+
+    def test_load_sankey_busco_summaries_maps_results_to_measured_stages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_root = Path(tmp_dir)
+            _write_busco_comparison(output_root / "busco" / "cds" / "comparison.json")
+
+            summaries = load_sankey_busco_summaries(output_root)
+
+        self.assertEqual([summary.label for summary in summaries], ["Input CDS", "Adjusted CDS"])
+        self.assertEqual([summary.stage for summary in summaries], [0, 4])
+        self.assertEqual(summaries[0].complete_pct, 90.0)
+
     def test_parse_pipeline_plot_metrics_extracts_stage_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_dir = Path(tmp_dir) / "logs"
@@ -370,22 +502,23 @@ class PipelinePlotTests(unittest.TestCase):
             )
             _write_id_file(
                 log_dir / "06.drop-duplicate-coordinate-gene.changed-gene-ids.txt",
-                ["g1", "g2", "g3", "g4", "g5"],
+                ["d1", "d2", "d3", "d4", "d5"],
             )
             _write_id_file(
                 log_dir / "07.select-one-mrna.changed-gene-ids.txt",
-                ["g4", "g5", "g6"],
+                [f"g{index}" for index in range(1, 21)],
             )
             _write_id_file(
                 log_dir / "09.update-gff-to-inframe.changed-gene-ids.txt",
-                ["g5", "g6", "g8"],
+                ["g18", "g19", "g21"],
             )
-            _write_id_file(intermediate_dir / "11.gff.updated-genes.txt", ["g6", "g8", "g9"])
-            _write_id_file(intermediate_dir / "11.gff.genes-with-stops.txt", ["g10"])
+            _write_id_file(intermediate_dir / "11.gff.updated-genes.txt", ["g19", "g21", "g22"])
+            _write_id_file(intermediate_dir / "11.gff.genes-with-stops.txt", ["g23"])
             _write_id_file(
                 log_dir / "16.mss-cds-to-misc.changed-gene-ids.txt",
-                ["g10"],
+                ["g23"],
             )
+            _write_busco_comparison(output_root / "busco" / "cds" / "comparison.json")
 
             artifacts = run_pipeline_plots(config_path)
             summary_lines = summarize_pipeline_plots(artifacts)
@@ -402,6 +535,11 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertTrue(artifacts.overlap_tsv.exists())
             self.assertTrue(artifacts.overlap_svg.exists())
             self.assertTrue(artifacts.overlap_pdf.exists())
+            gene_flow_tsv = artifacts.gene_flow_tsv.read_text(encoding="utf-8")
+            self.assertNotIn("after_transcript", gene_flow_tsv)
+            self.assertNotIn("after_inframe", gene_flow_tsv)
+            self.assertNotIn("after_padding", gene_flow_tsv)
+            self.assertIn("transcript_changed\tinframe_updated", gene_flow_tsv)
             svg_texts = [
                 artifacts.gene_flow_svg.read_text(encoding="utf-8"),
                 artifacts.event_counts_svg.read_text(encoding="utf-8"),
@@ -414,10 +552,37 @@ class PipelinePlotTests(unittest.TestCase):
                 "Stage-wise pipeline gene flow",
                 svg_texts[0],
             )
+            self.assertIn(">mRNA selection</tspan>", svg_texts[0])
+            self.assertNotIn(">One mRNA</tspan>", svg_texts[0])
+            self.assertIn(">Frame</tspan>", svg_texts[0])
+            self.assertIn(">correction</tspan>", svg_texts[0])
+            self.assertIn(">Input GFF</tspan>", svg_texts[0])
+            self.assertIn(">Coordinate duplicate</tspan>", svg_texts[0])
+            self.assertIn(">removal</tspan>", svg_texts[0])
+            self.assertIn(">CDS boundary</tspan>", svg_texts[0])
+            self.assertIn(">adjustment</tspan>", svg_texts[0])
+            self.assertIn(">Output ann.txt</tspan>", svg_texts[0])
+            self.assertEqual(svg_texts[0].count('class="stage"'), 6)
+            self.assertIn(">Already one</tspan>", svg_texts[0])
+            self.assertIn(">Reduced to</tspan>", svg_texts[0])
+            self.assertNotIn(">Selected<", svg_texts[0])
+            self.assertNotIn(">Framed<", svg_texts[0])
+            self.assertNotIn(">Pruned<", svg_texts[0])
             self.assertIn('width="7.2in"', svg_texts[0])
-            self.assertIn('viewBox="0 0 518.40 288.00"', svg_texts[0])
+            self.assertIn('viewBox="0 0 518.40 420.00"', svg_texts[0])
+            self.assertIn("BUSCO results (CDS; embryophyta_odb12; n=100)", svg_texts[0])
+            self.assertIn("Single-copy 70.0%", svg_texts[0])
+            self.assertIn(">Input CDS</text>", svg_texts[0])
+            self.assertIn(">Adjusted CDS</text>", svg_texts[0])
             gene_flow_pdf = artifacts.gene_flow_pdf.read_bytes().decode("latin-1")
-            self.assertIn("/MediaBox [0 0 518.40 288.00]", gene_flow_pdf)
+            self.assertIn("/MediaBox [0 0 518.40 420.00]", gene_flow_pdf)
+            self.assertIn("(mRNA selection)", gene_flow_pdf)
+            self.assertIn("(Coordinate duplicate)", gene_flow_pdf)
+            self.assertIn("(CDS boundary)", gene_flow_pdf)
+            self.assertIn("(Output ann.txt)", gene_flow_pdf)
+            self.assertIn("(Adjusted CDS)", gene_flow_pdf)
+            self.assertIn("(Already one)", gene_flow_pdf)
+            self.assertIn("(Reduced to)", gene_flow_pdf)
             self.assertIn(
                 "Pipeline event counts",
                 svg_texts[1],

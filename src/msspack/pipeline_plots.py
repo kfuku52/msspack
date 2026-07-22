@@ -14,6 +14,7 @@ from .pipeline_plot_render import (
     build_event_counts,
     build_plot_artifacts,
     build_sankey,
+    load_sankey_busco_summaries,
     summarize_pipeline_plots,
     update_plot_manifest,
     write_event_counts_pdf,
@@ -77,8 +78,11 @@ def run_pipeline_plots(
                 path.unlink()
 
     bundle = collect_pipeline_plot_data(output_root, log_dir)
-    stage_labels, nodes, links = build_sankey(bundle.metrics)
+    stage_labels, nodes, links = build_sankey(bundle.metrics, bundle.gene_sets)
+    busco_summaries = load_sankey_busco_summaries(output_root)
     events = build_event_counts(bundle.metrics)
+    busco_comparison_path = output_root / "busco" / "cds" / "comparison.json"
+    busco_dependencies = [busco_comparison_path] if busco_comparison_path.exists() else []
     dependency_paths = [
         *required_logs,
         *(record.path for record in bundle.records.values()),
@@ -105,13 +109,35 @@ def run_pipeline_plots(
     )
     run_if_needed(
         outputs=[artifacts.gene_flow_svg],
-        dependencies=[artifacts.summary_json, artifacts.gene_flow_tsv, *module_paths],
-        action=lambda: write_sankey_svg(stage_labels, nodes, links, artifacts.gene_flow_svg),
+        dependencies=[
+            artifacts.summary_json,
+            artifacts.gene_flow_tsv,
+            *busco_dependencies,
+            *module_paths,
+        ],
+        action=lambda: write_sankey_svg(
+            stage_labels,
+            nodes,
+            links,
+            artifacts.gene_flow_svg,
+            busco_summaries=busco_summaries,
+        ),
     )
     run_if_needed(
         outputs=[artifacts.gene_flow_pdf],
-        dependencies=[artifacts.summary_json, artifacts.gene_flow_tsv, *module_paths],
-        action=lambda: write_sankey_pdf(stage_labels, nodes, links, artifacts.gene_flow_pdf),
+        dependencies=[
+            artifacts.summary_json,
+            artifacts.gene_flow_tsv,
+            *busco_dependencies,
+            *module_paths,
+        ],
+        action=lambda: write_sankey_pdf(
+            stage_labels,
+            nodes,
+            links,
+            artifacts.gene_flow_pdf,
+            busco_summaries=busco_summaries,
+        ),
     )
     run_if_needed(
         outputs=[artifacts.event_counts_svg],

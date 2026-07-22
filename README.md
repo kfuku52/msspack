@@ -149,7 +149,7 @@ flowchart TD
 
 ## Example Outputs
 
-`msspack plot` renders a stage-wise Sankey diagram that summarizes how gene models move through the packaging pipeline.
+`msspack plot` renders a stage-wise Sankey diagram that summarizes how gene models move through the packaging pipeline. When CDS BUSCO results are available, the input and adjusted-CDS compositions are shown at the stages where they were measured.
 
 <img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram">
 
