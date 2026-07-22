@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-07-22
+
+- Add stage-aligned BUSCO composition summaries to pipeline gene-flow Sankey plots
+- Improve plot sizing, spacing, label alignment, and omission of zero-count Sankey branches
+- Clarify pipeline-stage terminology and optional BUSCO-to-plot workflow documentation
+
 ## 0.4.0 - 2026-07-16
 
 - Require Python 3.11+ and remove the Python 3.10 `tomli` compatibility dependency

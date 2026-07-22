@@ -8,7 +8,10 @@
 ![Linted with Ruff](https://img.shields.io/badge/lint-ruff-46a2f1)
 ![Type checked with mypy](https://img.shields.io/badge/type%20check-mypy-2a6db2)
 
-`msspack` builds DDBJ MSS submission files from genome FASTA and GFF3 inputs. It renders MSS headers from a TOML config, runs the packaging pipeline, executes the official DDBJ validation tools, and can generate BUSCO comparisons, pipeline plots, and an HTML run report.
+`msspack` converts genome FASTA and GFF3 files into a DDBJ MSS submission package.
+From a single TOML config, it cleans and transforms gene models, renders MSS headers
+and annotation records, runs the official DDBJ validation tools, and can generate
+BUSCO comparisons, pipeline plots, and an HTML run report.
 
 For the official submission workflow and file requirements, see the DDBJ [MSS - Mass Submission System](https://www.ddbj.nig.ac.jp/ddbj/mss-e.html) documentation.
 
@@ -20,7 +23,7 @@ For the official submission workflow and file requirements, see the DDBJ [MSS - 
 - Reuse unchanged intermediate files on rerun
 - Write build logs, metrics, and `build-manifest.json`
 - Run BUSCO comparisons for GFF-derived CDS sets, with optional genome FASTA comparison
-- Render pipeline Sankey, event-count, and changed-gene overlap plots
+- Render stage-wise gene-flow, event-count, and changed-gene overlap plots
 - Render an HTML report that links outputs, validation, BUSCO results, plots, and metrics
 
 ## Installation
@@ -92,7 +95,9 @@ msspack plot --config my_submission.toml
 msspack report --config my_submission.toml
 ```
 
-The species-specific configs in [`examples/`](examples/) are sanitized templates for schema and workflow reference. Replace placeholder input paths and submitter details before using them for a real submission.
+The species-specific configs in [`examples/`](examples/) are sanitized templates that
+illustrate the schema and workflow. Replace all placeholder input paths and submitter
+details before using one for a real submission.
 
 ## Command Workflow
 
@@ -127,6 +132,7 @@ flowchart TD
   FinalFiles --> BuscoCmd["msspack busco"]
   Inputs --> BuscoCmd
   BuscoCmd --> Busco
+  Busco -. optional .-> Plot
   FinalFiles --> ReportCmd["msspack report"]
   Logs --> ReportCmd
   Manifest --> ReportCmd
@@ -143,17 +149,29 @@ flowchart TD
 | `msspack tools install` | DDBJ download page | Cached `Parser` and `transChecker` |
 | `msspack pack --config my_submission.toml` | Config, genome FASTA, GFF3, validation tools | `final/*.ann.txt`, `final/*.fasta`, logs, metrics, manifest |
 | `msspack validate --config my_submission.toml --ann final/*.ann.txt --fasta final/*.fasta` | Existing MSS files and validation tools | Parser/transChecker logs |
-| `msspack busco --config my_submission.toml` | Existing `pack` outputs and CDS FASTA sets | BUSCO summaries and comparison plots |
-| `msspack plot --config my_submission.toml` | Existing `pack` logs, metrics, and manifest | Pipeline plots under `plots/` |
+| `msspack busco --config my_submission.toml` | Existing `pack` genome and GFF artifacts | BUSCO summaries and comparison plots |
+| `msspack plot --config my_submission.toml` | Existing `pack` logs and metrics; optional CDS BUSCO comparison | Pipeline plots under `plots/` |
 | `msspack report --config my_submission.toml` | Outputs, logs, metrics, validation, BUSCO, and plots | `report/index.html` |
 
 ## Example Outputs
 
-`msspack plot` renders a stage-wise Sankey diagram that summarizes how gene models move through the packaging pipeline. When CDS BUSCO results are available, the input and adjusted-CDS compositions are shown at the stages where they were measured.
+`msspack plot` turns the pipeline logs and changed-gene ID sets into three complementary
+figures:
 
-<img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram">
+- a stage-wise Sankey diagram of gene-model flow;
+- a horizontal chart of event counts, with genes and transcripts labeled separately; and
+- an UpSet-style view of exclusive overlaps among changed-gene sets.
 
-`msspack busco` can render compact BUSCO comparison plots for GFF-derived CDS FASTA sets.
+When `busco/cds/comparison.json` is available, the Sankey diagram also shows BUSCO
+compositions for CDS models derived from the input GFF and the GFF after CDS boundary
+adjustment. Each pie is aligned with the stage where its CDS set was measured. Zero-count
+branches are omitted from the Sankey diagram to avoid implying nonzero flow; their
+values remain explicit in the event-count plot and TSV outputs.
+
+<img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram with BUSCO summaries">
+
+`msspack busco` also writes a standalone comparison plot for the two GFF-derived CDS
+FASTA sets.
 
 <img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-busco-cds-comparison.svg" alt="Example msspack BUSCO CDS comparison plot" width="360">
 
@@ -161,7 +179,10 @@ flowchart TD
 
 See [`examples/msspack.example.toml`](examples/msspack.example.toml) for the current schema. `msspack init` writes the same template bundled with the package.
 
-The optional `[busco]` section controls `msspack busco`. By default, BUSCO runs on CDS FASTA files extracted from the input GFF and the final processed GFF. Set `busco.run_genome = true` or pass `--genome` to include genome FASTA comparisons.
+The optional `[busco]` section controls `msspack busco`. By default, BUSCO evaluates
+CDS FASTA sets extracted from the input GFF and the processed GFF after CDS boundary
+adjustment. Set `busco.run_genome = true` or pass `--genome` to add a genome FASTA
+comparison.
 
 Older configs may still contain `tools.gff3sort`; that setting is ignored because `msspack` now sorts GFF internally.
 
