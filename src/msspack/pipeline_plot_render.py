@@ -444,12 +444,12 @@ def build_sankey(
 
 def build_event_counts(metrics: PipelinePlotMetrics) -> list[EventCount]:
     return [
-        EventCount("duplicate_removed_genes", "Duplicate genes removed", metrics.duplicate_removed_genes, "genes", SANKEY_COLORS["removed"]),
-        EventCount("transcript_changed_genes", "Genes with transcript pruning", metrics.transcript_changed_genes, "genes", SANKEY_COLORS["transcript_changed"]),
+        EventCount("duplicate_removed_genes", "Coordinate duplicates removed", metrics.duplicate_removed_genes, "genes", SANKEY_COLORS["removed"]),
+        EventCount("transcript_changed_genes", "Genes changed by mRNA selection", metrics.transcript_changed_genes, "genes", SANKEY_COLORS["transcript_changed"]),
         EventCount("removed_mrnas", "Removed mRNAs", metrics.removed_mrnas, "transcripts", "#7c2d12"),
-        EventCount("inframe_updated_genes", "Genes updated to restore frame", metrics.inframe_updated_genes, "genes", SANKEY_COLORS["inframe_updated"]),
-        EventCount("padding_updated_genes", "Genes updated by padding", metrics.padding_updated_genes, "genes", SANKEY_COLORS["padding_updated"]),
-        EventCount("genes_with_stops", "Genes with stops after padding", metrics.genes_with_stops, "genes", SANKEY_COLORS["genes_with_stops"]),
+        EventCount("inframe_updated_genes", "Genes changed by frame correction", metrics.inframe_updated_genes, "genes", SANKEY_COLORS["inframe_updated"]),
+        EventCount("padding_updated_genes", "CDS boundary-adjusted genes", metrics.padding_updated_genes, "genes", SANKEY_COLORS["padding_updated"]),
+        EventCount("genes_with_stops", "Genes with stops", metrics.genes_with_stops, "genes", SANKEY_COLORS["genes_with_stops"]),
         EventCount("converted_to_misc_genes", "Genes converted to misc_feature", metrics.converted_to_misc_genes, "genes", SANKEY_COLORS["final_misc"]),
     ]
 
@@ -1169,82 +1169,190 @@ def write_sankey_pdf(
     return write_single_page_pdf(width=width, height=height, commands=commands, output_path=output_path)
 
 
+def _nice_axis_max(max_count: int) -> int:
+    if max_count <= 0:
+        return 1
+    step = 10 ** max(0, math.floor(math.log10(max_count / 4.0)))
+    return int(math.ceil(max_count / step) * step)
+
+
+def _event_chart_geometry(events: list[EventCount]) -> tuple[float, ...]:
+    width = SANKEY_WIDTH
+    left = 190.0
+    top = 78.0
+    bar_height = 16.0
+    row_gap = 31.0
+    bar_width = 273.0
+    height = top + max(0, len(events) - 1) * row_gap + bar_height + 18.0
+    return width, height, left, top, bar_height, row_gap, bar_width
+
+
+def _event_ticks(axis_max: int) -> tuple[float, ...]:
+    return tuple(axis_max * fraction / 4.0 for fraction in range(5))
+
+
+def _format_axis_tick(value: float) -> str:
+    return f"{int(value):,}" if value.is_integer() else f"{value:,.1f}"
+
+
 def write_event_counts_svg(events: list[EventCount], output_path: Path) -> Path:
-    width = 1200
-    height = 140 + len(events) * 72
-    left = 360
-    top = 110
-    bar_height = 26
-    bar_gap = 72
-    bar_width = 740
-    max_count = max((event.count for event in events), default=1)
-    axis_max = max(1, int(math.ceil(max_count / 5.0) * 5))
-    ticks = [0, axis_max / 4.0, axis_max / 2.0, axis_max * 3.0 / 4.0, axis_max]
+    width, height, left, top, bar_height, row_gap, bar_width = _event_chart_geometry(events)
+    max_count = max((event.count for event in events), default=0)
+    axis_max = _nice_axis_max(max_count)
+    grid_top = top - 8.0
+    grid_bottom = height - 18.0
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width / PDF_POINTS_PER_INCH:g}in" height="{height / PDF_POINTS_PER_INCH:g}in" viewBox="0 0 {width:.2f} {height:.2f}">',
         f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .label{{font-size:{SVG_FONT_SIZE};font-weight:700}} .unit{{font-size:{SVG_FONT_SIZE};fill:#64748b}} .value{{font-size:{SVG_FONT_SIZE};fill:#334155}} .tick{{font-size:{SVG_FONT_SIZE};fill:#6b7280}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
-        '<text x="40" y="40" class="title">Pipeline event counts</text>',
-        '<text x="40" y="62" class="subtitle">Step-level counts from the packaging logs. Labels include the unit for each metric because removed mRNAs are transcript counts while the other bars are gene counts.</text>',
+        '<text x="16" y="16" class="title">Pipeline event counts</text>',
+        '<text x="16" y="31" class="subtitle">Step-level counts from packaging logs. Removed mRNAs are transcript counts; the other bars are gene counts.</text>',
     ]
-    for tick in ticks:
-        x = left + (bar_width * tick / axis_max if axis_max else 0.0)
-        parts.append(f'<line x1="{x:.2f}" y1="{top - 24}" x2="{x:.2f}" y2="{height - 32}" stroke="#e5e7eb"/>')
-        parts.append(f'<text x="{x:.2f}" y="{top - 30}" text-anchor="middle" class="tick">{int(tick) if float(tick).is_integer() else f"{tick:.1f}"}</text>')
+    for tick in _event_ticks(axis_max):
+        x = left + bar_width * tick / axis_max
+        parts.append(
+            f'<line x1="{x:.2f}" y1="{grid_top:.2f}" x2="{x:.2f}" y2="{grid_bottom:.2f}" '
+            'stroke="#e2e8f0" stroke-width="0.7"/>'
+        )
+        parts.append(
+            f'<text x="{x:.2f}" y="62" text-anchor="middle" class="tick">'
+            f"{_format_axis_tick(tick)}</text>"
+        )
     for index, event in enumerate(events):
-        y = top + index * bar_gap
-        bar_len = 0.0 if axis_max == 0 else bar_width * event.count / axis_max
-        color = event.color if event.count > 0 else "#cbd5e1"
-        parts.append(f'<text x="40" y="{y + 12}" class="label">{escape(event.label)}</text>')
-        parts.append(f'<text x="40" y="{y + 28}" class="unit">{escape(event.unit)}</text>')
-        parts.append(f'<rect x="{left}" y="{y}" width="{bar_width}" height="{bar_height}" rx="4" fill="#f8fafc" stroke="#cbd5e1"/>')
+        y = top + index * row_gap
+        bar_len = bar_width * event.count / axis_max
+        parts.append(f'<text x="16" y="{y + 7.0:.2f}" class="label">{escape(event.label)}</text>')
+        parts.append(f'<text x="16" y="{y + 20.0:.2f}" class="unit">{escape(event.unit)}</text>')
+        parts.append(
+            f'<rect x="{left:.2f}" y="{y:.2f}" width="{bar_width:.2f}" height="{bar_height:.2f}" '
+            'rx="2" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.7"/>'
+        )
         if event.count > 0:
-            parts.append(f'<rect x="{left}" y="{y}" width="{bar_len:.2f}" height="{bar_height}" rx="4" fill="{color}"/>')
-        parts.append(f'<text x="{left + bar_width + 16}" y="{y + 18}" class="value">{event.count:,}</text>')
+            if bar_len >= 1.2:
+                parts.append(
+                    f'<rect x="{left:.2f}" y="{y:.2f}" width="{bar_len:.2f}" '
+                    f'height="{bar_height:.2f}" rx="1" fill="{event.color}"/>'
+                )
+            else:
+                marker_x = left + bar_len
+                parts.append(
+                    f'<line x1="{marker_x:.2f}" y1="{y:.2f}" x2="{marker_x:.2f}" '
+                    f'y2="{y + bar_height:.2f}" stroke="{event.color}" stroke-width="1.2"/>'
+                )
+        parts.append(
+            f'<text x="{left + bar_width + 8.0:.2f}" y="{y + 11.0:.2f}" class="value">'
+            f"{event.count:,}</text>"
+        )
     parts.append("</svg>")
     return write_text(output_path, "\n".join(parts) + "\n")
 
 
 def write_event_counts_pdf(events: list[EventCount], output_path: Path) -> Path:
-    width = 1200.0
-    height = float(140 + len(events) * 72)
-    left = 360.0
-    top = 110.0
-    bar_height = 26.0
-    bar_gap = 72.0
-    bar_width = 740.0
-    max_count = max((event.count for event in events), default=1)
-    axis_max = max(1, int(math.ceil(max_count / 5.0) * 5))
-    ticks = [0, axis_max / 4.0, axis_max / 2.0, axis_max * 3.0 / 4.0, axis_max]
+    width, height, left, top, bar_height, row_gap, bar_width = _event_chart_geometry(events)
+    max_count = max((event.count for event in events), default=0)
+    axis_max = _nice_axis_max(max_count)
+    grid_top = top - 8.0
+    grid_bottom = height - 18.0
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
-        _pdf_text_command(page_height=height, x=40, y_top=40, text="Pipeline event counts", font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB),
-        _pdf_text_command(page_height=height, x=40, y_top=62, text="Step-level counts from packaging logs. Removed mRNAs are transcript counts; the other bars are gene counts.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB),
+        _pdf_text_command(page_height=height, x=16, y_top=16, text="Pipeline event counts", font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB),
+        _pdf_text_command(page_height=height, x=16, y_top=31, text="Step-level counts from packaging logs. Removed mRNAs are transcript counts; the other bars are gene counts.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB),
     ]
-    for tick in ticks:
-        x = left + (bar_width * tick / axis_max if axis_max else 0.0)
-        y1 = _pdf_top_to_bottom(height, top - 24)
-        y2 = _pdf_top_to_bottom(height, height - 32)
-        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 1 w {x:.2f} {y1:.2f} m {x:.2f} {y2:.2f} l S")
-        tick_text = str(int(tick) if float(tick).is_integer() else round(tick, 1))
-        commands.append(_pdf_text_command(page_height=height, x=x - 8, y_top=top - 30, text=tick_text, font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+    for tick in _event_ticks(axis_max):
+        x = left + bar_width * tick / axis_max
+        y1 = _pdf_top_to_bottom(height, grid_top)
+        y2 = _pdf_top_to_bottom(height, grid_bottom)
+        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 0.7 w {x:.2f} {y1:.2f} m {x:.2f} {y2:.2f} l S")
+        tick_text = _format_axis_tick(tick)
+        commands.append(
+            _centered_pdf_text_command(
+                page_height=height,
+                center_x=x,
+                y_top=62.0,
+                text=tick_text,
+                font="F1",
+                size=CHART_FONT_SIZE_PT,
+                color=MUTED_RGB,
+            )
+        )
     for index, event in enumerate(events):
-        y = top + index * bar_gap
-        bar_len = 0.0 if axis_max == 0 else bar_width * event.count / axis_max
+        y = top + index * row_gap
+        bar_len = bar_width * event.count / axis_max
         bg_y = _pdf_top_to_bottom(height, y, bar_height)
-        commands.append(_pdf_text_command(page_height=height, x=40, y_top=y + 12, text=event.label, font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB))
-        commands.append(_pdf_text_command(page_height=height, x=40, y_top=y + 28, text=event.unit, font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=16, y_top=y + 7.0, text=event.label, font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=16, y_top=y + 20.0, text=event.unit, font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
         commands.append(f"0.973 0.980 0.988 rg {left:.2f} {bg_y:.2f} {bar_width:.2f} {bar_height:.2f} re f")
-        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG {left:.2f} {bg_y:.2f} {bar_width:.2f} {bar_height:.2f} re S")
+        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 0.7 w {left:.2f} {bg_y:.2f} {bar_width:.2f} {bar_height:.2f} re S")
         if event.count > 0:
-            r, g, b = _hex_to_rgb(event.color)
-            commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg {left:.2f} {bg_y:.2f} {bar_len:.2f} {bar_height:.2f} re f")
-        commands.append(_pdf_text_command(page_height=height, x=left + bar_width + 16, y_top=y + 18, text=f"{event.count:,}", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+            red, green, blue = _hex_to_rgb(event.color)
+            if bar_len >= 1.2:
+                commands.append(f"{red:.3f} {green:.3f} {blue:.3f} rg {left:.2f} {bg_y:.2f} {bar_len:.2f} {bar_height:.2f} re f")
+            else:
+                marker_x = left + bar_len
+                commands.append(f"{red:.3f} {green:.3f} {blue:.3f} RG 1.2 w {marker_x:.2f} {bg_y:.2f} m {marker_x:.2f} {bg_y + bar_height:.2f} l S")
+        commands.append(_pdf_text_command(page_height=height, x=left + bar_width + 8.0, y_top=y + 11.0, text=f"{event.count:,}", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     return write_single_page_pdf(width=width, height=height, commands=commands, output_path=output_path)
 
 
 def _overlap_rows_for_plot(overlap_rows: tuple[GeneOverlapRow, ...]) -> list[GeneOverlapRow]:
     return list(overlap_rows[:12])
+
+
+OVERLAP_COLUMN_LABELS = {
+    "duplicate_removed_genes": "Coordinate\nduplicate\nremoval",
+    "transcript_changed_genes": "mRNA\nselection",
+    "inframe_updated_genes": "Frame\ncorrection",
+    "padding_updated_genes": "CDS\nboundary\nadjustment",
+    "genes_with_stops": "Genes\nwith\nstops",
+    "converted_to_misc_genes": "Converted to\nmisc_feature",
+}
+
+
+def _overlap_column_lines(gene_set: PipelineGeneSet) -> tuple[str, ...]:
+    return _sankey_label_lines(OVERLAP_COLUMN_LABELS.get(gene_set.key, gene_set.label))
+
+
+def _overlap_chart_geometry(
+    gene_sets: tuple[PipelineGeneSet, ...],
+    plot_rows: list[GeneOverlapRow],
+) -> tuple[float, ...]:
+    width = SANKEY_WIDTH
+    matrix_left = 34.0
+    matrix_width = 232.0
+    column_gap = matrix_width / max(1, len(gene_sets) - 1)
+    matrix_top = 101.0
+    marker_radius = 4.0
+    row_gap = 26.0
+    bar_left = 306.0
+    bar_width = 159.0
+    height = matrix_top + max(0, len(plot_rows) - 1) * row_gap + marker_radius + 20.0
+    return (
+        width,
+        height,
+        matrix_left,
+        column_gap,
+        matrix_top,
+        marker_radius,
+        row_gap,
+        bar_left,
+        bar_width,
+    )
+
+
+def _pdf_circle_path(*, page_height: float, cx: float, cy: float, radius: float) -> str:
+    center_y = _pdf_top_to_bottom(page_height, cy)
+    tangent = radius * 0.5522847498
+    return (
+        f"{cx + radius:.2f} {center_y:.2f} m "
+        f"{cx + radius:.2f} {center_y + tangent:.2f} "
+        f"{cx + tangent:.2f} {center_y + radius:.2f} {cx:.2f} {center_y + radius:.2f} c "
+        f"{cx - tangent:.2f} {center_y + radius:.2f} "
+        f"{cx - radius:.2f} {center_y + tangent:.2f} {cx - radius:.2f} {center_y:.2f} c "
+        f"{cx - radius:.2f} {center_y - tangent:.2f} "
+        f"{cx - tangent:.2f} {center_y - radius:.2f} {cx:.2f} {center_y - radius:.2f} c "
+        f"{cx + tangent:.2f} {center_y - radius:.2f} "
+        f"{cx + radius:.2f} {center_y - tangent:.2f} {cx + radius:.2f} {center_y:.2f} c h"
+    )
 
 
 def write_overlap_svg(
@@ -1253,42 +1361,65 @@ def write_overlap_svg(
     output_path: Path,
 ) -> Path:
     plot_rows = _overlap_rows_for_plot(overlap_rows)
-    width = 1280
-    row_height = 38
-    matrix_left = 420
-    matrix_top = 170
-    marker_size = 14
-    column_gap = 82
-    bar_left = matrix_left + max(1, len(gene_sets) - 1) * column_gap + 90
-    bar_width = max(200, width - bar_left - 110)
-    height = 220 + max(1, len(plot_rows)) * row_height
-    max_count = max((row.count for row in plot_rows), default=1)
+    (
+        width,
+        height,
+        matrix_left,
+        column_gap,
+        matrix_top,
+        marker_radius,
+        row_gap,
+        bar_left,
+        bar_width,
+    ) = _overlap_chart_geometry(gene_sets, plot_rows)
+    max_count = max((row.count for row in plot_rows), default=0)
+    denominator = max(1, max_count)
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .axis{{font-size:{SVG_FONT_SIZE};fill:#475569}} .count{{font-size:{SVG_FONT_SIZE};fill:#334155}} .label{{font-size:{SVG_FONT_SIZE};fill:#334155}}</style>',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width / PDF_POINTS_PER_INCH:g}in" height="{height / PDF_POINTS_PER_INCH:g}in" viewBox="0 0 {width:.2f} {height:.2f}">',
+        f'<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .header{{font-size:{SVG_FONT_SIZE};font-weight:700;fill:#475569}} .count{{font-size:{SVG_FONT_SIZE};fill:#334155}}</style>',
         '<rect width="100%" height="100%" fill="white"/>',
-        '<text x="40" y="40" class="title">Changed-gene overlap</text>',
-        '<text x="40" y="62" class="subtitle">Exclusive intersections across stage-emitted changed-gene ID sets. Filled squares mark the stages included in each overlap row.</text>',
+        '<text x="16" y="16" class="title">Changed-gene overlap</text>',
+        '<text x="16" y="31" class="subtitle">Exclusive intersections across stage-emitted changed-gene ID sets. Filled markers indicate included sets.</text>',
     ]
     for column, gene_set in enumerate(gene_sets):
-        x = matrix_left + column * column_gap + marker_size / 2.0
-        parts.append(f'<text x="{x:.2f}" y="128" text-anchor="start" transform="rotate(-35 {x:.2f} 128)" class="label">{escape(gene_set.label)}</text>')
-    parts.append(f'<text x="{bar_left:.2f}" y="128" class="label">Exclusive genes</text>')
+        x = matrix_left + column * column_gap
+        lines = _overlap_column_lines(gene_set)
+        parts.append(
+            _svg_multiline_text(
+                x=x,
+                y=68.0 - (len(lines) - 1) * 5.0,
+                anchor="middle",
+                css_class="header",
+                lines=lines,
+                line_height=10.0,
+            )
+        )
+    parts.append(f'<text x="{bar_left + bar_width / 2.0:.2f}" y="68" text-anchor="middle" class="header">Exclusive genes</text>')
     for row_index, row in enumerate(plot_rows):
-        y = matrix_top + row_index * row_height
-        parts.append(f'<line x1="40" y1="{y + marker_size / 2.0:.2f}" x2="{width - 40}" y2="{y + marker_size / 2.0:.2f}" stroke="#f1f5f9"/>')
+        y = matrix_top + row_index * row_gap
+        parts.append(f'<line x1="16" y1="{y:.2f}" x2="{width - 16.0:.2f}" y2="{y:.2f}" stroke="#f1f5f9" stroke-width="0.7"/>')
         included = set(row.member_keys)
+        included_columns = [column for column, gene_set in enumerate(gene_sets) if gene_set.key in included]
+        if len(included_columns) > 1:
+            start_x = matrix_left + min(included_columns) * column_gap
+            end_x = matrix_left + max(included_columns) * column_gap
+            parts.append(f'<line x1="{start_x:.2f}" y1="{y:.2f}" x2="{end_x:.2f}" y2="{y:.2f}" stroke="#475569" stroke-width="1.2"/>')
         for column, gene_set in enumerate(gene_sets):
             x = matrix_left + column * column_gap
             fill = gene_set.color if gene_set.key in included else "#ffffff"
-            stroke = gene_set.color if gene_set.key in included else "#cbd5e1"
-            parts.append(f'<rect x="{x:.2f}" y="{y:.2f}" width="{marker_size}" height="{marker_size}" rx="3" fill="{fill}" stroke="{stroke}" stroke-width="1.2"/>')
-        bar_len = 0.0 if max_count == 0 else bar_width * row.count / max_count
-        parts.append(f'<rect x="{bar_left:.2f}" y="{y - 2:.2f}" width="{bar_width:.2f}" height="{marker_size + 4}" rx="4" fill="#f8fafc" stroke="#cbd5e1"/>')
-        parts.append(f'<rect x="{bar_left:.2f}" y="{y - 2:.2f}" width="{bar_len:.2f}" height="{marker_size + 4}" rx="4" fill="#1d4ed8"/>')
-        parts.append(f'<text x="{bar_left + bar_width + 16:.2f}" y="{y + 10:.2f}" class="count">{row.count:,}</text>')
+            stroke = "#475569" if gene_set.key in included else "#cbd5e1"
+            parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{marker_radius:.2f}" fill="{fill}" stroke="{stroke}" stroke-width="0.8"/>')
+        bar_len = bar_width * row.count / denominator
+        parts.append(f'<rect x="{bar_left:.2f}" y="{y - 6.0:.2f}" width="{bar_width:.2f}" height="12" rx="2" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.7"/>')
+        if row.count > 0:
+            if bar_len >= 1.2:
+                parts.append(f'<rect x="{bar_left:.2f}" y="{y - 6.0:.2f}" width="{bar_len:.2f}" height="12" rx="1" fill="#1d4ed8"/>')
+            else:
+                marker_x = bar_left + bar_len
+                parts.append(f'<line x1="{marker_x:.2f}" y1="{y - 6.0:.2f}" x2="{marker_x:.2f}" y2="{y + 6.0:.2f}" stroke="#1d4ed8" stroke-width="1.2"/>')
+        parts.append(f'<text x="{bar_left + bar_width + 8.0:.2f}" y="{y + 3.0:.2f}" class="count">{row.count:,}</text>')
     if not plot_rows:
-        parts.append('<text x="40" y="170" class="label">No non-empty exclusive overlaps were available for plotting.</text>')
+        parts.append('<text x="16" y="101" class="subtitle">No non-empty exclusive overlaps were available for plotting.</text>')
     parts.append("</svg>")
     return write_text(output_path, "\n".join(parts) + "\n")
 
@@ -1299,45 +1430,87 @@ def write_overlap_pdf(
     output_path: Path,
 ) -> Path:
     plot_rows = _overlap_rows_for_plot(overlap_rows)
-    width = 1280.0
-    row_height = 38.0
-    matrix_left = 420.0
-    matrix_top = 170.0
-    marker_size = 14.0
-    column_gap = 82.0
-    bar_left = matrix_left + max(1, len(gene_sets) - 1) * column_gap + 90.0
-    bar_width = max(200.0, width - bar_left - 110.0)
-    height = 220.0 + max(1, len(plot_rows)) * row_height
-    max_count = max((row.count for row in plot_rows), default=1)
+    (
+        width,
+        height,
+        matrix_left,
+        column_gap,
+        matrix_top,
+        marker_radius,
+        row_gap,
+        bar_left,
+        bar_width,
+    ) = _overlap_chart_geometry(gene_sets, plot_rows)
+    max_count = max((row.count for row in plot_rows), default=0)
+    denominator = max(1, max_count)
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
-        _pdf_text_command(page_height=height, x=40, y_top=40, text="Changed-gene overlap", font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB),
-        _pdf_text_command(page_height=height, x=40, y_top=62, text="Exclusive intersections across stage-emitted changed-gene ID sets.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB),
+        _pdf_text_command(page_height=height, x=16, y_top=16, text="Changed-gene overlap", font="F2", size=CHART_FONT_SIZE_PT, color=TEXT_RGB),
+        _pdf_text_command(page_height=height, x=16, y_top=31, text="Exclusive intersections across stage-emitted changed-gene ID sets. Filled markers indicate included sets.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB),
     ]
     for column, gene_set in enumerate(gene_sets):
         x = matrix_left + column * column_gap
-        commands.append(_pdf_text_command(page_height=height, x=x, y_top=128, text=gene_set.label, font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
-    commands.append(_pdf_text_command(page_height=height, x=bar_left, y_top=128, text="Exclusive genes", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+        lines = _overlap_column_lines(gene_set)
+        start_y = 68.0 - (len(lines) - 1) * 5.0
+        for line_index, line in enumerate(lines):
+            commands.append(
+                _centered_pdf_text_command(
+                    page_height=height,
+                    center_x=x,
+                    y_top=start_y + line_index * 10.0,
+                    text=line,
+                    font="F2",
+                    size=CHART_FONT_SIZE_PT,
+                    color=MUTED_RGB,
+                    bold=True,
+                )
+            )
+    commands.append(
+        _centered_pdf_text_command(
+            page_height=height,
+            center_x=bar_left + bar_width / 2.0,
+            y_top=68.0,
+            text="Exclusive genes",
+            font="F2",
+            size=CHART_FONT_SIZE_PT,
+            color=MUTED_RGB,
+            bold=True,
+        )
+    )
     for row_index, row in enumerate(plot_rows):
-        y = matrix_top + row_index * row_height
-        line_y = _pdf_top_to_bottom(height, y + marker_size / 2.0)
-        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 1 w 40 {line_y:.2f} m {width - 40:.2f} {line_y:.2f} l S")
+        y = matrix_top + row_index * row_gap
+        line_y = _pdf_top_to_bottom(height, y)
+        commands.append(f"0.945 0.961 0.976 RG 0.7 w 16 {line_y:.2f} m {width - 16.0:.2f} {line_y:.2f} l S")
         included = set(row.member_keys)
+        included_columns = [column for column, gene_set in enumerate(gene_sets) if gene_set.key in included]
+        if len(included_columns) > 1:
+            start_x = matrix_left + min(included_columns) * column_gap
+            end_x = matrix_left + max(included_columns) * column_gap
+            commands.append(f"{MUTED_RGB[0]:.3f} {MUTED_RGB[1]:.3f} {MUTED_RGB[2]:.3f} RG 1.2 w {start_x:.2f} {line_y:.2f} m {end_x:.2f} {line_y:.2f} l S")
         for column, gene_set in enumerate(gene_sets):
             x = matrix_left + column * column_gap
-            marker_y = _pdf_top_to_bottom(height, y, marker_size)
+            circle_path = _pdf_circle_path(page_height=height, cx=x, cy=y, radius=marker_radius)
             if gene_set.key in included:
-                r, g, b = _hex_to_rgb(gene_set.color)
-                commands.append(f"{r:.3f} {g:.3f} {b:.3f} rg {x:.2f} {marker_y:.2f} {marker_size:.2f} {marker_size:.2f} re f")
-            commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG {x:.2f} {marker_y:.2f} {marker_size:.2f} {marker_size:.2f} re S")
-        bar_len = 0.0 if max_count == 0 else bar_width * row.count / max_count
-        bg_y = _pdf_top_to_bottom(height, y - 2.0, marker_size + 4.0)
-        commands.append(f"0.973 0.980 0.988 rg {bar_left:.2f} {bg_y:.2f} {bar_width:.2f} {marker_size + 4.0:.2f} re f")
-        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG {bar_left:.2f} {bg_y:.2f} {bar_width:.2f} {marker_size + 4.0:.2f} re S")
-        commands.append(f"0.114 0.306 0.847 rg {bar_left:.2f} {bg_y:.2f} {bar_len:.2f} {marker_size + 4.0:.2f} re f")
-        commands.append(_pdf_text_command(page_height=height, x=bar_left + bar_width + 16.0, y_top=y + 10.0, text=f"{row.count:,}", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+                red, green, blue = _hex_to_rgb(gene_set.color)
+                commands.append(f"{red:.3f} {green:.3f} {blue:.3f} rg {circle_path} f")
+                marker_stroke = MUTED_RGB
+            else:
+                commands.append(f"1 1 1 rg {circle_path} f")
+                marker_stroke = GRID_RGB
+            commands.append(f"{marker_stroke[0]:.3f} {marker_stroke[1]:.3f} {marker_stroke[2]:.3f} RG 0.8 w {circle_path} S")
+        bar_len = bar_width * row.count / denominator
+        bg_y = _pdf_top_to_bottom(height, y - 6.0, 12.0)
+        commands.append(f"0.973 0.980 0.988 rg {bar_left:.2f} {bg_y:.2f} {bar_width:.2f} 12 re f")
+        commands.append(f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 0.7 w {bar_left:.2f} {bg_y:.2f} {bar_width:.2f} 12 re S")
+        if row.count > 0:
+            if bar_len >= 1.2:
+                commands.append(f"0.114 0.306 0.847 rg {bar_left:.2f} {bg_y:.2f} {bar_len:.2f} 12 re f")
+            else:
+                marker_x = bar_left + bar_len
+                commands.append(f"0.114 0.306 0.847 RG 1.2 w {marker_x:.2f} {bg_y:.2f} m {marker_x:.2f} {bg_y + 12.0:.2f} l S")
+        commands.append(_pdf_text_command(page_height=height, x=bar_left + bar_width + 8.0, y_top=y + 3.0, text=f"{row.count:,}", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     if not plot_rows:
-        commands.append(_pdf_text_command(page_height=height, x=40, y_top=170, text="No non-empty exclusive overlaps were available for plotting.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
+        commands.append(_pdf_text_command(page_height=height, x=16, y_top=101, text="No non-empty exclusive overlaps were available for plotting.", font="F1", size=CHART_FONT_SIZE_PT, color=MUTED_RGB))
     return write_single_page_pdf(width=width, height=height, commands=commands, output_path=output_path)
 
 

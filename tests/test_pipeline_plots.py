@@ -207,9 +207,13 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertLessEqual(node.y + node.height, plot_bottom + 1e-6)
         for link in laid_out_links:
             self.assertGreaterEqual(link.source_y, link.source.y - 1e-6)
-            self.assertLessEqual(link.source_y + link.height, link.source.y + link.source.height + 1e-6)
+            self.assertLessEqual(
+                link.source_y + link.height, link.source.y + link.source.height + 1e-6
+            )
             self.assertGreaterEqual(link.target_y, link.target.y - 1e-6)
-            self.assertLessEqual(link.target_y + link.height, link.target.y + link.target.height + 1e-6)
+            self.assertLessEqual(
+                link.target_y + link.height, link.target.y + link.target.height + 1e-6
+            )
 
     def test_load_sankey_busco_summaries_maps_results_to_measured_stages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -420,7 +424,9 @@ class PipelinePlotTests(unittest.TestCase):
                 output_total=95,
                 details={
                     "removed_mrnas": 23,
-                    "changed_gene_ids_path": str(log_dir / "07.select-one-mrna.changed-gene-ids.txt"),
+                    "changed_gene_ids_path": str(
+                        log_dir / "07.select-one-mrna.changed-gene-ids.txt"
+                    ),
                 },
             )
             _write_step_log(
@@ -442,7 +448,9 @@ class PipelinePlotTests(unittest.TestCase):
                 details={
                     "unchanged_gene_models": 92,
                     "removed_features": 0,
-                    "updated_gene_ids_path": str(log_dir / "09.update-gff-to-inframe.changed-gene-ids.txt"),
+                    "updated_gene_ids_path": str(
+                        log_dir / "09.update-gff-to-inframe.changed-gene-ids.txt"
+                    ),
                 },
             )
             _write_step_log(
@@ -497,7 +505,9 @@ class PipelinePlotTests(unittest.TestCase):
                     "cds_input": 95,
                     "cds_output": 94,
                     "misc_feature_output": 1,
-                    "converted_gene_ids_path": str(log_dir / "16.mss-cds-to-misc.changed-gene-ids.txt"),
+                    "converted_gene_ids_path": str(
+                        log_dir / "16.mss-cds-to-misc.changed-gene-ids.txt"
+                    ),
                 },
             )
             _write_id_file(
@@ -587,10 +597,22 @@ class PipelinePlotTests(unittest.TestCase):
                 "Pipeline event counts",
                 svg_texts[1],
             )
+            self.assertIn("CDS boundary-adjusted genes", svg_texts[1])
+            self.assertIn('width="7.2in"', svg_texts[1])
+            self.assertIn('viewBox="0 0 518.40 298.00"', svg_texts[1])
             self.assertIn(
                 "Changed-gene overlap",
                 svg_texts[2],
             )
+            self.assertIn(">Coordinate</tspan>", svg_texts[2])
+            self.assertIn(">duplicate</tspan>", svg_texts[2])
+            self.assertIn("<circle", svg_texts[2])
+            self.assertIn('width="7.2in"', svg_texts[2])
+            self.assertIn('viewBox="0 0 518.40 281.00"', svg_texts[2])
+            event_counts_pdf = artifacts.event_counts_pdf.read_bytes().decode("latin-1")
+            self.assertIn("/MediaBox [0 0 518.40 298.00]", event_counts_pdf)
+            overlap_pdf = artifacts.overlap_pdf.read_bytes().decode("latin-1")
+            self.assertIn("/MediaBox [0 0 518.40 281.00]", overlap_pdf)
             payload = json.loads(artifacts.summary_json.read_text(encoding="utf-8"))
             self.assertEqual(payload["metrics"]["converted_to_misc_genes"], 1)
             self.assertEqual(payload["metrics"]["final_cds_genes"], 94)
