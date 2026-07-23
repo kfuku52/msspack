@@ -60,6 +60,26 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(output.read_text(encoding="utf-8"), cli._example_config_text())
 
+    def test_main_demo_writes_bundled_dataset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "demo"
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["demo", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue((output / "genome.fa").is_file())
+            self.assertTrue((output / "annotation.gff3").is_file())
+            self.assertEqual(
+                stdout.getvalue().splitlines(),
+                [
+                    str(output.resolve()),
+                    str(output.resolve() / "config.toml"),
+                    str(output.resolve() / "config.functional.toml"),
+                ],
+            )
+
     def test_main_doctor_returns_nonzero_for_required_failure(self) -> None:
         stdout = io.StringIO()
         checks = [Check("required", False, "missing", required=True)]

@@ -9,6 +9,7 @@ from . import __version__
 from .busco import cleanup_busco_cache, run_busco_comparison, summarize_busco_artifacts
 from .config import load_config
 from .ddbj_tools import DDBJ_LICENSE_URL, install_component, list_installed
+from .demo import write_demo_dataset
 from .doctor import doctor_succeeded, render_doctor_report, run_doctor
 from .internal_cli import add_internal_parser, handle_internal
 from .pipeline import run_pipeline
@@ -37,6 +38,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="overwrite an existing config file",
+    )
+
+    demo_parser = subparsers.add_parser(
+        "demo",
+        help="write the bundled not-for-submission demonstration dataset",
+    )
+    demo_parser.add_argument(
+        "--output",
+        default="msspack-demo",
+        help="destination directory (default: msspack-demo)",
+    )
+    demo_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite bundled demo files already present in the destination",
     )
 
     doctor_parser = subparsers.add_parser("doctor", help="check runtime dependencies")
@@ -157,6 +173,14 @@ def _handle_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_demo(args: argparse.Namespace) -> int:
+    output_root = write_demo_dataset(args.output, force=args.force)
+    print(output_root)
+    print(output_root / "config.toml")
+    print(output_root / "config.functional.toml")
+    return 0
+
+
 def _handle_doctor(args: argparse.Namespace) -> int:
     config = load_config(args.config) if args.config else None
     checks = run_doctor(config)
@@ -263,6 +287,7 @@ def _handle_validate(args: argparse.Namespace) -> int:
 def _dispatch(args: argparse.Namespace) -> int:
     handlers = {
         "init": _handle_init,
+        "demo": _handle_demo,
         "doctor": _handle_doctor,
         "tools": _handle_tools,
         "pack": _handle_pack,

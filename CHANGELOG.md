@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `msspack demo` with a compact pseudonymized genome/GFF fixture, deliberately
+  invalid submission metadata, deterministic pipeline-event coverage, and an optional
+  offline local-reference DIAMOND configuration.
 - Resolve the input scientific name through NCBI Taxonomy, cross-check configured or
   auto-selected BUSCO lineages, and preserve a cached taxonomy provenance artifact.
 - Preserve UniProt/UniRef subject TaxIDs and organisms, weight description consensus by

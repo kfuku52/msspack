@@ -9,7 +9,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-msspack = ["py.typed", "templates/*.toml"]
+msspack = ["py.typed", "templates/*.toml", "demo_data/*"]
 
 [project]
 name = "msspack"

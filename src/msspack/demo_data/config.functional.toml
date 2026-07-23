@@ -1,0 +1,87 @@
+# MSSPACK DEMONSTRATION DATA ONLY — NOT FOR SUBMISSION.
+# This optional configuration requires DIAMOND but downloads no annotation database.
+
+[project]
+name = "MSSPackDemoFunctional"
+output_dir = "build/MSSPackDemoFunctional"
+
+[inputs]
+fasta = "genome.fa"
+gff = "annotation.gff3"
+
+[sample]
+locus_tag = "MSSPACK_TEST_GENE"
+locus_tag_digits = 4
+scientific_name = "Msspackia fictitia"
+strain = ""
+isolate = "NOT_FOR_SUBMISSION"
+geo_loc_name = "Test location"
+collection_date = "2000-01-01"
+sex = ""
+linkage_evidence = "paired-ends"
+genetic_code = "1"
+
+[submission]
+datatype = "WGS"
+hold_date = "20991231"
+bioproject = "PRJDB_MSSPACK_TEST_ONLY"
+biosample = "SAMD_MSSPACK_TEST_ONLY"
+sra = ["DRR_MSSPACK_TEST_ONLY"]
+keywords = ["WGS"]
+
+[submitter]
+ab_name = ["Tester,T."]
+contact = "Test User"
+institute = "Test Institute"
+department = "Test Department"
+country = "Japan"
+state = "Test State"
+city = "Test City"
+street = "NOT FOR SUBMISSION"
+zip = "000-0000"
+phone = "00-0000-0000"
+email = "not-for-submission@example.invalid"
+
+[reference]
+title = "MSSPack demonstration dataset"
+ab_name = ["Tester,T."]
+year = 2000
+status = "Unpublished"
+
+[st_comment]
+tagset_id = "Genome-Assembly-Data"
+assembly_method = "msspack demo"
+assembly_name = "MSSPACK_NOT_FOR_SUBMISSION"
+genome_coverage = "1X"
+sequencing_technology = "test data"
+
+[pipeline]
+run_gapjust = false
+gap_assembly = "unknown"
+infer_complete = true
+feature_with_gap = "misc_feature"
+min_assembly_gap = 50
+min_artificial_intron_size = 10
+replace_product_patterns = ["hypothetical protein"]
+validate_with_parser = false
+validate_with_transchecker = false
+
+[tools]
+java_heap = "1G"
+
+[functional_annotation]
+enabled = true
+diamond_command = "diamond"
+threads = 1
+reference_proteins = "reference.faa"
+reference_name = "demo-reference"
+swissprot_enabled = false
+uniref90_enabled = false
+pfam_enabled = false
+cdd_enabled = false
+
+[functional_annotation.taxonomy]
+enabled = false
+
+[functional_annotation.consistency]
+enabled = true

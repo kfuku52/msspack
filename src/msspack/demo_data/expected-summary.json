@@ -1,0 +1,13 @@
+{
+  "metrics": {
+    "converted_to_misc_genes": 1,
+    "duplicate_removed_genes": 1,
+    "final_cds_genes": 8,
+    "genes_with_stops": 1,
+    "inframe_updated_genes": 1,
+    "initial_genes": 10,
+    "padding_updated_genes": 1,
+    "removed_mrnas": 3,
+    "transcript_changed_genes": 1
+  }
+}

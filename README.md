@@ -26,6 +26,7 @@ documentation.
   and CDD
 - Compare BUSCO results before and after CDS-boundary adjustment
 - Generate a stage-wise pipeline Sankey, supporting figures, and a linked HTML report
+- Ship a compact, deliberately non-submittable demonstration dataset
 
 ## Installation
 
@@ -64,6 +65,21 @@ msspack init my_submission.toml
 
 `msspack init` refuses to replace an existing file. Pass `--force` only when you
 intentionally want to overwrite it.
+
+To try the complete core workflow without preparing input data:
+
+```bash
+msspack demo --output msspack-demo
+cd msspack-demo
+msspack pack --config config.toml --no-validate
+msspack report --config config.toml
+```
+
+The bundled demo uses a fictional organism, fictional sequence and locus IDs, and
+deliberately invalid BioProject, BioSample, and SRA accessions. It is suitable for
+testing, but its MSS output must not be submitted. The optional
+`config.functional.toml` uses the included local protein reference and DIAMOND
+without downloading external annotation databases.
 
 Install the DDBJ validation-tool versions reviewed for this `msspack` release:
 
@@ -124,6 +140,7 @@ creates or reuses the required `pack` intermediates.
 | Command | Purpose |
 | --- | --- |
 | `msspack init my_submission.toml` | Write a starter TOML config |
+| `msspack demo --output msspack-demo` | Write the bundled not-for-submission test dataset |
 | `msspack doctor --config my_submission.toml` | Check the config, inputs, and required tools |
 | `msspack tools install` | Download the reviewed DDBJ validation tools |
 | `msspack pack --config my_submission.toml` | Build and validate the MSS files |
