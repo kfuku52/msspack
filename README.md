@@ -20,6 +20,8 @@ documentation.
 ## Features
 
 - Clean gene models and render MSS annotation and FASTA files with `COMMON` records
+- Preserve mixed GFF3 annotations, including coding transcripts, non-coding RNAs,
+  pseudogenes, repeats, regulatory regions, and other INSDC feature types
 - Run the official DDBJ `Parser` and `transChecker`
 - Reuse unchanged intermediates while recording logs, metrics, and a build manifest
 - Optionally assign conservative protein products from Swiss-Prot, UniRef90, Pfam,
@@ -113,6 +115,32 @@ supporting figures are needed without an HTML report.
 
 The species-specific configs in [`examples/`](examples/) are sanitized schema
 examples. Replace every placeholder path and submitter field before use.
+
+### GFF3 feature handling
+
+CDS boundary adjustment is restricted to the targeted coding transcript. Its exon,
+start/stop codon, UTR, and intron rows are synchronized afterward; other transcripts
+and non-coding genes are not adjusted. Every adjusted model is checked for parent-child
+containment, three-base terminal codons, and UTR/CDS overlap before the next stage.
+
+The MSS converter emits CDS by default. For a coding transcript, it emits mRNA and
+its exon/intron/UTR structure only when the mature transcript adds information beyond
+the CDS—for example UTR sequence, non-coding exons, or alternative isoforms. A model
+whose exon coverage is identical to its CDS is rendered as CDS alone. Transcripts
+without a CDS remain explicit mRNA features.
+
+rRNA, tRNA, tmRNA, ncRNA, repeat, regulatory, mobile-element, peptide, and other
+recognized INSDC features are retained. Pseudogenes are encoded as DDBJ-compatible
+`misc_feature` records with `locus_tag`, `gene`, and controlled `pseudogene`
+qualifiers because the current DDBJ MSS Parser forbids the INSDC `gene` key for new
+submissions. Common Sequence Ontology aliases such as `miRNA`, `promoter`,
+`tandem_repeat`, and `transposable_element` are mapped to their corresponding INSDC
+feature and controlled qualifier. A non-structural GFF3 type without a direct INSDC
+mapping is retained as `misc_feature` with its original type in `note`; it is never
+silently discarded. GFF3 `start_codon` and `stop_codon` rows remain synchronized
+structural metadata because they are represented by the CDS location rather than
+independent MSS feature keys. See the official
+[DDBJ feature-key definitions](https://www.ddbj.nig.ac.jp/ddbj/features-e.html).
 
 ## Command Workflow
 

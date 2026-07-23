@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ class FeatureRecord:
     name: str
     rna_type: str
     anticodon: str
+    attributes: Mapping[str, str]
 
 
 def _is_missing(value: Any) -> bool:
@@ -55,6 +56,41 @@ def feature_from_row(row: Any) -> FeatureRecord:
     else:
         def getter(key: str, default: Any = None) -> Any:
             return getattr(row, key, default)
+    raw_attributes = getter("attributes", {})
+    if isinstance(raw_attributes, Mapping):
+        attributes = {
+            _normalize_text(key): _normalize_text(value)
+            for key, value in raw_attributes.items()
+            if not _is_missing(value)
+        }
+    else:
+        attributes = {}
+    for key in (
+        "ID",
+        "Parent",
+        "Name",
+        "Type",
+        "anticodon",
+        "product",
+        "gene",
+        "gene_name",
+        "Note",
+        "note",
+        "description",
+        "Dbxref",
+        "Alias",
+        "ncRNA_class",
+        "regulatory_class",
+        "pseudogene",
+        "pseudo",
+        "rpt_type",
+        "rpt_family",
+        "rpt_unit_seq",
+        "mobile_element_type",
+    ):
+        value = getter(key)
+        if not _is_missing(value) and _normalize_text(value):
+            attributes.setdefault(key, _normalize_text(value))
     return FeatureRecord(
         seq_id=_normalize_text(getter("seq_id")),
         type=_normalize_text(getter("type")),
@@ -67,6 +103,7 @@ def feature_from_row(row: Any) -> FeatureRecord:
         name=_normalize_text(getter("Name", "")),
         rna_type=_normalize_text(getter("Type", "")),
         anticodon=_normalize_text(getter("anticodon", "")),
+        attributes=attributes,
     )
 
 
@@ -91,6 +128,18 @@ def build_gff_indexes(
     return gene_lookup, parent_lookup
 
 
+def build_seq_index(rows: Iterable[Any]) -> dict[str, list[FeatureRecord]]:
+    seq_lookup: dict[str, list[FeatureRecord]] = {}
+    for row in rows:
+        feature = feature_from_row(row)
+        seq_lookup.setdefault(feature.seq_id, []).append(feature)
+    for seq_id in seq_lookup:
+        seq_lookup[seq_id].sort(
+            key=lambda feature: (feature.start, feature.end, feature.type, feature.id)
+        )
+    return seq_lookup
+
+
 def load_gff_features(path: str | Path) -> list[FeatureRecord]:
     features: list[FeatureRecord] = []
     for record in iter_gff_records(path):
@@ -107,6 +156,7 @@ def load_gff_features(path: str | Path) -> list[FeatureRecord]:
                 name=record.attributes.get("Name", ""),
                 rna_type=record.attributes.get("Type", ""),
                 anticodon=record.attributes.get("anticodon", ""),
+                attributes=dict(record.attributes),
             )
         )
     features.sort(key=lambda feature: feature.start)

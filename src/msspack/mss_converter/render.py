@@ -29,7 +29,7 @@ def render_source_feature(
     if sex:
         out += f"\t\t\tsex\t{sex}\n"
     if country:
-        out += f"\t\t\tcountry\t{country}\n"
+        out += f"\t\t\tgeo_loc_name\t{country}\n"
     if collection_date:
         out += f"\t\t\tcollection_date\t{collection_date}\n"
     out += "\t\t\tsubmitter_seqid\t@@[entry]@@\n"
@@ -89,9 +89,12 @@ def render_rrna_feature(name: str, position: str) -> str:
         "ITS2": "\tmisc_RNA\t{position}\tnote\tinternal transcribed spacer 2\n",
     }
     template = mapping.get(name)
-    if template is None:
-        raise ValueError(f"Unsupported rRNA type: {name}")
-    return template.format(position=position)
+    if template is not None:
+        return template.format(position=position)
+    product = name.strip() or "ribosomal RNA"
+    if product.lower() != "ribosomal rna" and not product.lower().endswith("rrna"):
+        product += " rRNA"
+    return f"\trRNA\t{position}\tproduct\t{product}\n"
 
 
 def render_trna_feature(
@@ -113,6 +116,23 @@ def render_trna_feature(
     return out
 
 
+def render_generic_feature(
+    *,
+    feature_key: str,
+    position: str,
+    qualifiers: Iterable[tuple[str, str]],
+) -> str:
+    qualifier_rows = [(key, value) for key, value in qualifiers if key]
+    out = f"\t{feature_key}\t{position}"
+    if not qualifier_rows:
+        return out + "\n"
+    first_key, first_value = qualifier_rows[0]
+    out += f"\t{first_key}\t{first_value}\n"
+    for key, value in qualifier_rows[1:]:
+        out += f"\t\t\t{key}\t{value}\n"
+    return out
+
+
 def format_event_summary(event_counts: dict[str, int], prefix: str) -> str:
     labels = [
         ("start_codon_missing", "start codon missing"),
@@ -120,6 +140,8 @@ def format_event_summary(event_counts: dict[str, int], prefix: str) -> str:
         ("small_introns", "small introns"),
         ("gap_artificial_location", "gap -> artificial_location"),
         ("gap_misc_feature", "gap -> misc_feature"),
+        ("non_cds_features", "non-CDS features rendered"),
+        ("unknown_features", "unknown GFF types -> misc_feature"),
     ]
     parts = [
         f"{label}={event_counts[key]}"

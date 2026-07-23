@@ -7,8 +7,12 @@ from pathlib import Path
 from typing import TypedDict
 
 from .gff import child_ids, parse_attributes
+from .gff_feature_sync import (
+    synchronize_transcript_children,
+    validate_parent_child_containment,
+)
 from .step_logging import write_id_list, write_step_log, write_step_metrics
-from .utils import atomic_text_writer
+from .utils import MSSPackError, atomic_text_writer
 
 
 @dataclass
@@ -16,6 +20,7 @@ class _MrnaModel:
     line: list[str]
     exons: list[list[str]] = field(default_factory=list)
     cdss: list[list[str]] = field(default_factory=list)
+    children: list[list[str]] = field(default_factory=list)
 
 
 @dataclass
@@ -28,6 +33,7 @@ class InframeFixSummary(TypedDict):
     updated_gene_models: int
     unchanged_gene_models: int
     removed_features: int
+    synchronized_features: int
     updated_gene_ids: list[str]
 
 
@@ -44,7 +50,7 @@ def _compute_mrna_boundaries(exons: list[list[str]]) -> tuple[int | None, int | 
 
 
 def _compute_total_cds_length(cdss: list[list[str]]) -> int:
-    return sum((int(cds[4]) - int(cds[3]) + 1) for cds in cdss)
+    return sum(max(0, int(cds[4]) - int(cds[3]) + 1) for cds in cdss)
 
 
 def _find_terminal_cds(cdss: list[list[str]], strand: str, *, first: bool) -> list[str] | None:
@@ -162,13 +168,11 @@ def _remove_cds_and_matching_exons(
     cdss: list[list[str]],
     exons: list[list[str]],
     cds_line: list[str],
-    removed_ids: set[str],
+    removed_row_ids: set[int],
 ) -> None:
     if cds_line in cdss:
         cdss.remove(cds_line)
-    cds_id = parse_attributes(cds_line[8]).get("ID")
-    if cds_id:
-        removed_ids.add(cds_id)
+    removed_row_ids.add(id(cds_line))
 
     cds_start = int(cds_line[3])
     cds_end = int(cds_line[4])
@@ -182,9 +186,7 @@ def _remove_cds_and_matching_exons(
     ]
     for exon in matching_exons:
         exons.remove(exon)
-        exon_id = parse_attributes(exon[8]).get("ID")
-        if exon_id:
-            removed_ids.add(exon_id)
+        removed_row_ids.add(id(exon))
 
 
 def fix_gff_to_inframe(
@@ -255,67 +257,107 @@ def fix_gff_to_inframe(
         mrna_map = gene_data.mrnas
         for mrna_id, mrna_data in mrna_map.items():
             for child in children_of.get(mrna_id, []):
+                mrna_data.children.append(child)
                 if child[2] == "exon":
                     mrna_data.exons.append(child)
                 elif child[2] == "CDS":
                     mrna_data.cdss.append(child)
 
-    removed_ids: set[str] = set()
+    removed_row_ids: set[int] = set()
     num_updated = 0
     num_unchanged = 0
+    synchronized_features = 0
     updated_gene_ids: list[str] = []
+    adjusted_parent_ids: set[str] = set()
 
     for gene_id, gene_data in genes.items():
         gene_changed = False
         mrna_map = gene_data.mrnas
         for mrna_data in mrna_map.values():
+            transcript_changed = False
             exons = mrna_data.exons
             cdss = mrna_data.cdss
             mrna_line = mrna_data.line
             if not cdss:
                 continue
+            if _compute_total_cds_length(cdss) < 3:
+                continue
             strand = mrna_line[6]
 
-            if _adjust_first_cds_frame(cdss, strand, exons):
-                gene_changed = True
+            while cdss:
+                adjusted_bases = _adjust_first_cds_frame(cdss, strand, exons)
+                if not adjusted_bases:
+                    break
+                transcript_changed = True
+                invalid_first_cdss = [cds for cds in cdss if int(cds[3]) > int(cds[4])]
+                if not invalid_first_cdss:
+                    break
+                for invalid_cds in invalid_first_cdss:
+                    _remove_cds_and_matching_exons(
+                        cdss,
+                        exons,
+                        invalid_cds,
+                        removed_row_ids,
+                    )
 
             remainder, last_cds = _truncate_last_cds_to_multiple_of_three(cdss, strand, exons)
             if remainder:
-                gene_changed = True
+                transcript_changed = True
                 if last_cds is not None and int(last_cds[3]) > int(last_cds[4]):
-                    _remove_cds_and_matching_exons(cdss, exons, last_cds, removed_ids)
+                    _remove_cds_and_matching_exons(cdss, exons, last_cds, removed_row_ids)
 
-            new_start, new_end = _compute_mrna_boundaries(exons)
+            new_start, new_end = _compute_mrna_boundaries(exons or cdss)
             if new_start is None or new_end is None:
                 continue
             if new_start != int(mrna_line[3]) or new_end != int(mrna_line[4]):
-                gene_changed = True
+                transcript_changed = True
             mrna_line[3] = str(new_start)
             mrna_line[4] = str(new_end)
+            if transcript_changed:
+                transcript_id = parse_attributes(mrna_line[8]).get("ID", "")
+                if transcript_id:
+                    adjusted_parent_ids.add(transcript_id)
+                synchronized_features += synchronize_transcript_children(
+                    transcript_row=mrna_line,
+                    child_rows=mrna_data.children,
+                    removed_row_ids=removed_row_ids,
+                )
+                gene_changed = True
 
         if gene_changed:
             exon_starts: list[int] = []
             exon_ends: list[int] = []
             for mrna_data in mrna_map.values():
-                for exon_line in mrna_data.exons:
+                for exon_line in mrna_data.exons or mrna_data.cdss:
+                    if id(exon_line) in removed_row_ids:
+                        continue
                     exon_starts.append(int(exon_line[3]))
                     exon_ends.append(int(exon_line[4]))
             if exon_starts and exon_ends:
                 gene_line = gene_data.line
                 gene_line[3] = str(min(exon_starts))
                 gene_line[4] = str(max(exon_ends))
+                adjusted_parent_ids.add(gene_id)
             num_updated += 1
             updated_gene_ids.append(gene_id)
         else:
             num_unchanged += 1
+
+    hierarchy_issues = validate_parent_child_containment(
+        feature_lines,
+        scope_parent_ids=adjusted_parent_ids,
+        removed_row_ids=removed_row_ids,
+    )
+    if hierarchy_issues:
+        issue_text = "; ".join(issue.message for issue in hierarchy_issues[:5])
+        raise MSSPackError(f"Coordinate adjustment produced an invalid GFF hierarchy: {issue_text}")
 
     with atomic_text_writer(Path(output_path)) as handle:
         for item in all_lines:
             if isinstance(item, str):
                 handle.write(item + "\n")
                 continue
-            feature_identifier = parse_attributes(item[8]).get("ID")
-            if feature_identifier and feature_identifier in removed_ids:
+            if id(item) in removed_row_ids:
                 continue
             handle.write("\t".join(item) + "\n")
 
@@ -330,7 +372,8 @@ def fix_gff_to_inframe(
         output_total=len(genes),
         details=[
             f"Number of unchanged gene models: {num_unchanged:,}",
-            f"Removed features: {len(removed_ids):,}",
+            f"Removed features: {len(removed_row_ids):,}",
+            f"Synchronized dependent features: {synchronized_features:,}",
         ],
     )
     if updated_gene_ids_path is not None:
@@ -345,7 +388,8 @@ def fix_gff_to_inframe(
             output_total=len(genes),
             details={
                 "unchanged_gene_models": num_unchanged,
-                "removed_features": len(removed_ids),
+                "removed_features": len(removed_row_ids),
+                "synchronized_features": synchronized_features,
                 "updated_gene_ids_path": str(updated_gene_ids_path) if updated_gene_ids_path else "",
             },
         )
@@ -353,6 +397,7 @@ def fix_gff_to_inframe(
     return {
         "updated_gene_models": num_updated,
         "unchanged_gene_models": num_unchanged,
-        "removed_features": len(removed_ids),
+        "removed_features": len(removed_row_ids),
+        "synchronized_features": synchronized_features,
         "updated_gene_ids": updated_gene_ids,
     }

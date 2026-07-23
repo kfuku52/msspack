@@ -13,6 +13,7 @@ from .gaps import detect_gap_regions
 from .models import (
     FeatureRecord,
     build_gff_indexes,
+    build_seq_index,
     load_annotation_lookup,
     load_gff_features,
     load_protein_id_lookup,
@@ -84,6 +85,7 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
     protein_lookup = load_protein_id_lookup(options.protein_id_path)
     gff_features = load_gff_features(options.gff_path)
     gene_lookup, parent_lookup = build_gff_feature_indexes(gff_features)
+    seq_lookup = build_seq_index(gff_features)
     overall_counts: Counter[str] = Counter()
     contig_summaries: list[ContigSummary] = []
     locus_tag_counter = 0
@@ -123,6 +125,7 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
             locus_tag_counter, cds_text = convert_contig_features(
                 gene_lookup=gene_lookup,
                 parent_lookup=parent_lookup,
+                seq_lookup=seq_lookup,
                 contig_name=record.id,
                 locus_tag_prefix=options.locus_tag_prefix,
                 locus_tag_counter=locus_tag_counter,

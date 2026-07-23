@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import TypedDict
 
 from .gff import child_ids, parse_attributes
-from .utils import write_text
+from .gff_feature_sync import (
+    synchronize_transcript_children,
+    validate_parent_child_containment,
+)
+from .utils import MSSPackError, write_text
 
 
 def _safe_phase(value: str) -> int:
@@ -43,13 +47,20 @@ def _parse_padding_log(log_path: str | Path) -> dict[str, dict[str, int]]:
 
 def _group_gene_records(
     gff_path: str | Path,
-) -> tuple[list[str], OrderedDict[str, list[list[str]]], dict[str, str], list[str]]:
+) -> tuple[
+    list[str],
+    OrderedDict[str, list[list[str]]],
+    dict[str, str],
+    list[list[str]],
+    list[str],
+]:
     header_lines: list[str] = []
     fasta_lines: list[str] = []
     feature_rows: list[tuple[list[str], dict[str, str]]] = []
     gene_dict: OrderedDict[str, list[list[str]]] = OrderedDict()
     transcript_to_gene: dict[str, str] = {}
     gene_order: list[str] = []
+    ungrouped_records: list[list[str]] = []
 
     with Path(gff_path).open("r", encoding="utf-8") as handle:
         in_fasta = False
@@ -105,12 +116,14 @@ def _group_gene_records(
                     seen_gene_ids.add(gene_id)
         for gene_id in matched_gene_ids:
             gene_dict.setdefault(gene_id, []).append(fields)
+        if not matched_gene_ids:
+            ungrouped_records.append(fields)
 
     ordered_gene_dict = OrderedDict((gene_id, gene_dict[gene_id]) for gene_id in gene_order)
     for gene_id, records in gene_dict.items():
         if gene_id not in ordered_gene_dict:
             ordered_gene_dict[gene_id] = records
-    return header_lines, ordered_gene_dict, transcript_to_gene, fasta_lines
+    return header_lines, ordered_gene_dict, transcript_to_gene, ungrouped_records, fasta_lines
 
 
 @dataclass
@@ -125,6 +138,8 @@ class PaddingUpdateSummary(TypedDict):
     genes_with_stops: list[str]
     updated_genes: list[str]
     forced_first_cds_warnings: list[str]
+    removed_features: int
+    synchronized_features: int
 
 
 def _length_of_feature(start: int, end: int) -> int:
@@ -210,22 +225,31 @@ def apply_padding_to_gff(
     updated_genes_path: str | Path,
 ) -> PaddingUpdateSummary:
     padding_entries = _parse_padding_log(padding_log_path)
-    header_lines, gene_dict, transcript_to_gene, fasta_lines = _group_gene_records(gff_path)
-    gene_info: dict[str, dict[str, int]] = {}
+    (
+        header_lines,
+        gene_dict,
+        transcript_to_gene,
+        ungrouped_records,
+        fasta_lines,
+    ) = _group_gene_records(gff_path)
+    gene_info: dict[str, tuple[str, dict[str, int]]] = {}
     for record_id, padding_info in padding_entries.items():
         gene_id = transcript_to_gene.get(record_id, record_id)
-        gene_info[gene_id] = padding_info
+        gene_info[gene_id] = (record_id, padding_info)
 
     genes_with_stops: list[str] = []
     updated_genes: list[str] = []
     final_lines: list[str] = list(header_lines)
     forced_first_cds_warnings: list[str] = []
+    removed_feature_count = 0
+    synchronized_features = 0
 
     for gene_id, raw_records in gene_dict.items():
-        info = gene_info.get(gene_id)
-        if info is None:
+        target_info = gene_info.get(gene_id)
+        if target_info is None:
             final_lines.extend("\t".join(rec) for rec in raw_records)
             continue
+        target_record_id, info = target_info
 
         if info["new_num_stop"] > 0:
             genes_with_stops.append(gene_id)
@@ -263,46 +287,74 @@ def apply_padding_to_gff(
                 cdss.append(item)
             else:
                 others.append(item)
+        all_transcript_ids = {
+            parse_attributes(item.rec[8]).get("ID", "")
+            for item in mrna_structs
+            if parse_attributes(item.rec[8]).get("ID", "")
+        }
+        target_transcript_ids = (
+            {target_record_id}
+            if target_record_id in transcript_to_gene
+            else set(all_transcript_ids)
+        )
+        target_parent_ids = target_transcript_ids or {gene_id}
+
+        def belongs_to_target(
+            item: _FeatureSpan,
+            parent_ids: frozenset[str] = frozenset(target_parent_ids),
+        ) -> bool:
+            parents = set(child_ids(parse_attributes(item.rec[8]).get("Parent")))
+            return bool(parents & parent_ids)
+
+        target_exons = [item for item in exons if belongs_to_target(item)]
+        target_cdss = [item for item in cdss if belongs_to_target(item)]
+        original_adjustable_row_ids = {
+            id(item.rec) for item in target_exons + target_cdss
+        }
 
         def sorter(item: _FeatureSpan) -> tuple[int, int]:
             return item.start, item.end
 
-        exons.sort(key=sorter, reverse=(strand == "-"))
-        cdss.sort(key=sorter, reverse=(strand == "-"))
+        target_exons.sort(key=sorter, reverse=(strand == "-"))
+        target_cdss.sort(key=sorter, reverse=(strand == "-"))
 
         head_trim = (3 - info["head_padding"]) % 3
         tail_trim = (3 - info["tail_padding"]) % 3
 
         if head_trim > 0:
             if strand == "+":
-                _clip_from_5prime_plus(exons, head_trim)
-                _clip_from_5prime_plus(cdss, head_trim)
+                _clip_from_5prime_plus(target_exons, head_trim)
+                _clip_from_5prime_plus(target_cdss, head_trim)
             else:
-                _clip_from_5prime_minus(exons, head_trim)
-                _clip_from_5prime_minus(cdss, head_trim)
+                _clip_from_5prime_minus(target_exons, head_trim)
+                _clip_from_5prime_minus(target_cdss, head_trim)
         if tail_trim > 0:
             if strand == "+":
-                _clip_from_3prime_plus(exons, tail_trim)
-                _clip_from_3prime_plus(cdss, tail_trim)
+                _clip_from_3prime_plus(target_exons, tail_trim)
+                _clip_from_3prime_plus(target_cdss, tail_trim)
             else:
-                _clip_from_3prime_minus(exons, tail_trim)
-                _clip_from_3prime_minus(cdss, tail_trim)
+                _clip_from_3prime_minus(target_exons, tail_trim)
+                _clip_from_3prime_minus(target_cdss, tail_trim)
 
-        exons = _remove_zero_length(exons)
-        cdss = _remove_zero_length(cdss)
-        if not cdss:
+        target_exons = _remove_zero_length(target_exons)
+        target_cdss = _remove_zero_length(target_cdss)
+        if not target_cdss:
             forced_first_cds_warnings.append(
                 f"Gene {gene_id}: padding adjustment would remove every CDS; model was left unchanged."
             )
             final_lines.extend("\t".join(rec) for rec in raw_records)
             continue
+        removed_row_ids = original_adjustable_row_ids - {
+            id(item.rec) for item in target_exons + target_cdss
+        }
+        removed_feature_count += len(removed_row_ids)
         updated_genes.append(gene_id)
-        exons.sort(key=sorter)
-        cdss.sort(key=sorter)
+        target_exons.sort(key=sorter)
+        target_cdss.sort(key=sorter)
 
-        if cdss:
-            if len(cdss) == 1:
-                cds = cdss[0]
+        if target_cdss:
+            if len(target_cdss) == 1:
+                cds = target_cdss[0]
                 new_phase = _update_phase(int(cds.rec[3]), cds.start, _safe_phase(cds.rec[7]))
                 if new_phase != 0:
                     forced_first_cds_warnings.append(
@@ -311,7 +363,7 @@ def apply_padding_to_gff(
                     new_phase = 0
                 cds.phase = str(new_phase)
             else:
-                first_cds = cdss[0]
+                first_cds = target_cdss[0]
                 first_phase = _update_phase(
                     int(first_cds.rec[3]),
                     first_cds.start,
@@ -324,7 +376,7 @@ def apply_padding_to_gff(
                     first_phase = 0
                 first_cds.phase = str(first_phase)
 
-                last_cds = cdss[-1]
+                last_cds = target_cdss[-1]
                 last_cds.phase = str(
                     _update_phase(
                         int(last_cds.rec[3]),
@@ -333,14 +385,6 @@ def apply_padding_to_gff(
                     )
                 )
 
-        boundary_features = exons or cdss
-        min_start = min(feature.start for feature in boundary_features)
-        max_end = max(feature.end for feature in boundary_features)
-        for feature in gene_structs + mrna_structs:
-            feature.start = min_start
-            feature.end = max_end
-            feature.rec[3] = str(min_start)
-            feature.rec[4] = str(max_end)
         for feature in exons:
             feature.rec[3] = str(feature.start)
             feature.rec[4] = str(feature.end)
@@ -349,7 +393,59 @@ def apply_padding_to_gff(
             feature.rec[4] = str(feature.end)
             feature.rec[7] = feature.phase
 
-        updated_records = [*gene_structs, *mrna_structs, *exons, *cdss, *others]
+        transcript_ids: set[str] = set()
+        for transcript in mrna_structs:
+            transcript_id = parse_attributes(transcript.rec[8]).get("ID", "")
+            if not transcript_id:
+                continue
+            if transcript_id not in target_transcript_ids:
+                continue
+            transcript_ids.add(transcript_id)
+            children = [
+                rec
+                for rec in raw_records
+                if transcript_id in child_ids(parse_attributes(rec[8]).get("Parent"))
+            ]
+            synchronized_features += synchronize_transcript_children(
+                transcript_row=transcript.rec,
+                child_rows=children,
+                removed_row_ids=removed_row_ids,
+            )
+            transcript.start = int(transcript.rec[3])
+            transcript.end = int(transcript.rec[4])
+
+        boundary_features = [
+            feature
+            for feature in mrna_structs
+            if id(feature.rec) not in removed_row_ids
+        ] or [
+            feature for feature in (exons or cdss) if id(feature.rec) not in removed_row_ids
+        ]
+        min_start = min(feature.start for feature in boundary_features)
+        max_end = max(feature.end for feature in boundary_features)
+        for feature in gene_structs:
+            feature.start = min_start
+            feature.end = max_end
+            feature.rec[3] = str(min_start)
+            feature.rec[4] = str(max_end)
+
+        scope_parent_ids = {gene_id, *transcript_ids}
+        hierarchy_issues = validate_parent_child_containment(
+            raw_records,
+            scope_parent_ids=scope_parent_ids,
+            removed_row_ids=removed_row_ids,
+        )
+        if hierarchy_issues:
+            issue_text = "; ".join(issue.message for issue in hierarchy_issues[:5])
+            raise MSSPackError(
+                f"Padding adjustment produced an invalid GFF hierarchy: {issue_text}"
+            )
+
+        updated_records = [
+            feature
+            for feature in [*gene_structs, *mrna_structs, *exons, *cdss, *others]
+            if id(feature.rec) not in removed_row_ids
+        ]
         rank_map = {"gene": 0, "mRNA": 1, "transcript": 1, "exon": 2, "CDS": 3}
         updated_records.sort(
             key=lambda feature: (
@@ -359,6 +455,7 @@ def apply_padding_to_gff(
         )
         final_lines.extend("\t".join(feature.rec) for feature in updated_records)
 
+    final_lines.extend("\t".join(rec) for rec in ungrouped_records)
     final_lines.extend(fasta_lines)
 
     write_text(Path(output_path), "\n".join(final_lines) + "\n")
@@ -374,4 +471,6 @@ def apply_padding_to_gff(
         "genes_with_stops": genes_with_stops,
         "updated_genes": updated_genes,
         "forced_first_cds_warnings": forced_first_cds_warnings,
+        "removed_features": removed_feature_count,
+        "synchronized_features": synchronized_features,
     }

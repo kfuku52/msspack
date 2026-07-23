@@ -252,6 +252,7 @@ def run_fix_gff_to_inframe(
         details=[
             f"Number of unchanged gene models: {summary['unchanged_gene_models']:,}",
             f"Removed features: {summary['removed_features']:,}",
+            f"Synchronized dependent features: {summary['synchronized_features']:,}",
             f"Summary log: {summary_log_path}",
         ],
     )
@@ -279,6 +280,8 @@ def run_apply_padding_to_gff(
     lines = [
         f"Number of genes with stops (new_num_stop>0): {len(summary['genes_with_stops']):,}",
         f"Number of updated genes (new_num_stop=0): {len(summary['updated_genes']):,}",
+        f"Removed dependent features: {summary['removed_features']:,}",
+        f"Synchronized dependent features: {summary['synchronized_features']:,}",
     ]
     warnings = summary["forced_first_cds_warnings"]
     if warnings:
@@ -311,6 +314,8 @@ def run_apply_padding_to_gff(
                 "genes_with_stops": len(summary["genes_with_stops"]),
                 "updated_genes": len(summary["updated_genes"]),
                 "forced_first_cds_warnings": summary["forced_first_cds_warnings"],
+                "removed_features": summary["removed_features"],
+                "synchronized_features": summary["synchronized_features"],
                 "genes_with_stops_path": str(genes_with_stops_path),
                 "updated_genes_path": str(updated_genes_path),
             },

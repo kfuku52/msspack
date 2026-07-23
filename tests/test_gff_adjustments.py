@@ -6,6 +6,113 @@ from msspack.gff_adjustments import apply_padding_to_gff, fix_gff_to_inframe
 
 
 class GffAdjustmentTests(unittest.TestCase):
+    def test_fix_gff_to_inframe_synchronizes_explicit_terminal_codons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            output_gff = base / "output.gff3"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t8\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t8\t.\t+\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t8\t.\t+\t.\tID=e1;Parent=t1",
+                        "chr1\tsrc\tCDS\t1\t8\t.\t+\t1\tID=c1;Parent=t1",
+                        "chr1\tsrc\tstart_codon\t1\t3\t.\t+\t0\tID=s1;Parent=t1",
+                        "chr1\tsrc\tstop_codon\t6\t8\t.\t+\t0\tID=p1;Parent=t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            summary = fix_gff_to_inframe(
+                input_path=input_gff,
+                output_path=output_gff,
+                log_path=base / "summary.log",
+            )
+
+            text = output_gff.read_text(encoding="utf-8")
+            self.assertIn("gene\t2\t7", text)
+            self.assertIn("mRNA\t2\t7", text)
+            self.assertIn("exon\t2\t7", text)
+            self.assertIn("CDS\t2\t7\t.\t+\t0", text)
+            self.assertIn("start_codon\t2\t4\t.\t+\t0", text)
+            self.assertIn("stop_codon\t5\t7\t.\t+\t0", text)
+            self.assertGreaterEqual(summary["synchronized_features"], 2)
+
+    def test_inframe_removes_exhausted_terminal_segment_and_stale_intron(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            output_gff = base / "output.gff3"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t14\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t14\t.\t+\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t1\t.\t+\t.\tID=e1;Parent=t1",
+                        "chr1\tsrc\texon\t10\t14\t.\t+\t.\tID=e2;Parent=t1",
+                        "chr1\tsrc\tCDS\t1\t1\t.\t+\t2\tID=c1;Parent=t1",
+                        "chr1\tsrc\tCDS\t10\t14\t.\t+\t0\tID=c2;Parent=t1",
+                        "chr1\tsrc\tintron\t2\t9\t.\t+\t.\tID=i1;Parent=t1",
+                        "chr1\tsrc\tstart_codon\t1\t1\t.\t+\t0\tID=s1;Parent=t1",
+                        "chr1\tsrc\tstart_codon\t10\t11\t.\t+\t0\tID=s2;Parent=t1",
+                        "chr1\tsrc\tstop_codon\t12\t14\t.\t+\t0\tID=p1;Parent=t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            fix_gff_to_inframe(
+                input_path=input_gff,
+                output_path=output_gff,
+                log_path=base / "summary.log",
+            )
+
+            text = output_gff.read_text(encoding="utf-8")
+            self.assertIn("gene\t10\t12", text)
+            self.assertIn("mRNA\t10\t12", text)
+            self.assertIn("CDS\t10\t12", text)
+            self.assertNotIn("ID=c1", text)
+            self.assertNotIn("ID=e1", text)
+            self.assertNotIn("\tintron\t", text)
+            self.assertEqual(text.count("\tstart_codon\t"), 1)
+            self.assertIn("start_codon\t10\t12", text)
+            self.assertIn("stop_codon\t10\t12", text)
+
+    def test_inframe_synchronizes_terminal_codons_on_minus_strand(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            output_gff = base / "output.gff3"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t8\t.\t-\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t8\t.\t-\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t8\t.\t-\t.\tID=e1;Parent=t1",
+                        "chr1\tsrc\tCDS\t1\t8\t.\t-\t1\tID=c1;Parent=t1",
+                        "chr1\tsrc\tstart_codon\t6\t8\t.\t-\t0\tID=s1;Parent=t1",
+                        "chr1\tsrc\tstop_codon\t1\t3\t.\t-\t0\tID=p1;Parent=t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            fix_gff_to_inframe(
+                input_path=input_gff,
+                output_path=output_gff,
+                log_path=base / "summary.log",
+            )
+
+            text = output_gff.read_text(encoding="utf-8")
+            self.assertIn("CDS\t2\t7\t.\t-\t0", text)
+            self.assertIn("start_codon\t5\t7\t.\t-\t0", text)
+            self.assertIn("stop_codon\t2\t4\t.\t-\t0", text)
+
     def test_fix_gff_to_inframe_updates_boundaries_and_phase(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -83,6 +190,120 @@ class GffAdjustmentTests(unittest.TestCase):
             self.assertIn("mRNA\t2\t9", text)
             self.assertIn("exon\t2\t9", text)
             self.assertIn("CDS\t2\t9\t.\t+\t0", text)
+
+    def test_apply_padding_to_gff_synchronizes_explicit_terminal_codons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t9\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t9\t.\t+\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t9\t.\t+\t.\tID=e1;Parent=t1",
+                        "chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=c1;Parent=t1",
+                        "chr1\tsrc\tstart_codon\t1\t3\t.\t+\t0\tID=s1;Parent=t1",
+                        "chr1\tsrc\tstop_codon\t7\t9\t.\t+\t0\tID=p1;Parent=t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (base / "padding.log").write_text(
+                "t1, original_seqlen=9, head_padding=2, tail_padding=3, "
+                "original_num_stop=1, new_num_stop=0\n",
+                encoding="utf-8",
+            )
+
+            summary = apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=base / "padding.log",
+                output_path=base / "output.gff3",
+                genes_with_stops_path=base / "stops.txt",
+                updated_genes_path=base / "updated.txt",
+            )
+
+            text = (base / "output.gff3").read_text(encoding="utf-8")
+            self.assertIn("start_codon\t2\t4\t.\t+\t0", text)
+            self.assertIn("stop_codon\t7\t9\t.\t+\t0", text)
+            self.assertGreaterEqual(summary["synchronized_features"], 1)
+
+    def test_padding_clips_utrs_and_preserves_standalone_non_cds_features(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t12\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t12\t.\t+\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t12\t.\t+\t.\tID=e1;Parent=t1",
+                        "chr1\tsrc\tCDS\t3\t10\t.\t+\t0\tID=c1;Parent=t1",
+                        "chr1\tsrc\tfive_prime_UTR\t1\t2\t.\t+\t.\tID=u5;Parent=t1",
+                        "chr1\tsrc\tthree_prime_UTR\t11\t12\t.\t+\t.\tID=u3;Parent=t1",
+                        "chr1\tsrc\trepeat_region\t20\t30\t.\t+\t.\tID=rep1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (base / "padding.log").write_text(
+                "t1, original_seqlen=8, head_padding=2, tail_padding=3, "
+                "original_num_stop=1, new_num_stop=0\n",
+                encoding="utf-8",
+            )
+
+            apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=base / "padding.log",
+                output_path=base / "output.gff3",
+                genes_with_stops_path=base / "stops.txt",
+                updated_genes_path=base / "updated.txt",
+            )
+
+            text = (base / "output.gff3").read_text(encoding="utf-8")
+            self.assertIn("five_prime_UTR\t2\t2", text)
+            self.assertIn("three_prime_UTR\t11\t12", text)
+            self.assertIn("repeat_region\t20\t30", text)
+
+    def test_padding_changes_only_the_target_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_gff = base / "input.gff3"
+            input_gff.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t28\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t9\t.\t+\t.\tID=t1;Parent=g1",
+                        "chr1\tsrc\texon\t1\t9\t.\t+\t.\tID=e1;Parent=t1",
+                        "chr1\tsrc\tCDS\t1\t9\t.\t+\t0\tID=c1;Parent=t1",
+                        "chr1\tsrc\tmRNA\t20\t28\t.\t+\t.\tID=t2;Parent=g1",
+                        "chr1\tsrc\texon\t20\t28\t.\t+\t.\tID=e2;Parent=t2",
+                        "chr1\tsrc\tCDS\t20\t28\t.\t+\t0\tID=c2;Parent=t2",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (base / "padding.log").write_text(
+                "t1, original_seqlen=9, head_padding=2, tail_padding=3, "
+                "original_num_stop=1, new_num_stop=0\n",
+                encoding="utf-8",
+            )
+
+            apply_padding_to_gff(
+                gff_path=input_gff,
+                padding_log_path=base / "padding.log",
+                output_path=base / "output.gff3",
+                genes_with_stops_path=base / "stops.txt",
+                updated_genes_path=base / "updated.txt",
+            )
+
+            text = (base / "output.gff3").read_text(encoding="utf-8")
+            self.assertIn("mRNA\t2\t9\t.\t+\t.\tID=t1", text)
+            self.assertIn("CDS\t2\t9\t.\t+\t0\tID=c1", text)
+            self.assertIn("mRNA\t20\t28\t.\t+\t.\tID=t2", text)
+            self.assertIn("CDS\t20\t28\t.\t+\t0\tID=c2", text)
 
     def test_apply_padding_to_gff_keeps_gene_with_stops_unmodified(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
