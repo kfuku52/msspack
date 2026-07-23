@@ -8,24 +8,24 @@
 ![Linted with Ruff](https://img.shields.io/badge/lint-ruff-46a2f1)
 ![Type checked with mypy](https://img.shields.io/badge/type%20check-mypy-2a6db2)
 
-`msspack` converts genome FASTA and GFF3 files into a DDBJ MSS submission package.
-From a single TOML config, it cleans and transforms gene models, renders MSS headers
-and annotation records, runs the official DDBJ validation tools, and can generate
-BUSCO comparisons, pipeline plots, and an HTML run report.
+`msspack` converts a genome FASTA and GFF3 annotation into validated DDBJ MSS
+`.ann.txt` and `.fasta` files. A single TOML config controls gene-model cleanup,
+submission metadata, optional functional annotation, BUSCO comparisons, plots, and
+an HTML run report.
 
-For the official submission workflow and file requirements, see the DDBJ [MSS - Mass Submission System](https://www.ddbj.nig.ac.jp/ddbj/mss-e.html) documentation.
+For submission requirements, see the DDBJ
+[MSS - Mass Submission System](https://www.ddbj.nig.ac.jp/ddbj/mss-e.html)
+documentation.
 
 ## Features
 
-- Build final MSS annotation and FASTA files from genome FASTA + GFF3 inputs
-- Render `COMMON` header sections from a project TOML config
-- Download and run DDBJ `Parser` and `transChecker`
-- Reuse unchanged intermediate files on rerun
-- Write build logs, metrics, and `build-manifest.json`
-- Optionally assign conservative protein products with Swiss-Prot, UniRef90, Pfam, and CDD
-- Run BUSCO comparisons for GFF-derived CDS sets, with optional genome FASTA comparison
-- Render stage-wise gene-flow, event-count, and changed-gene overlap plots
-- Render an HTML report that links outputs, validation, BUSCO results, plots, and metrics
+- Clean gene models and render MSS annotation and FASTA files with `COMMON` records
+- Run the official DDBJ `Parser` and `transChecker`
+- Reuse unchanged intermediates while recording logs, metrics, and a build manifest
+- Optionally assign conservative protein products from Swiss-Prot, UniRef90, Pfam,
+  and CDD
+- Compare BUSCO results before and after CDS-boundary adjustment
+- Generate a stage-wise pipeline Sankey, supporting figures, and a linked HTML report
 
 ## Installation
 
@@ -35,11 +35,10 @@ Install `msspack` directly from GitHub:
 pip install git+https://github.com/kfuku52/msspack.git
 ```
 
-Using an isolated environment is recommended but not required.
+Python 3.11 or newer is required; an isolated environment is recommended. CI tests
+Python 3.11 through 3.14.
 
-Python 3.11 or newer is required. CI tests Python 3.11 through 3.14.
-
-If you use conda or mamba, you can install the external runtime tools at the same time:
+With conda or mamba, install the external runtime tools in the same environment:
 
 ```bash
 conda create -n msspack -c conda-forge -c bioconda "python>=3.11" pip openjdk busco diamond hmmer
@@ -47,17 +46,17 @@ conda activate msspack
 pip install git+https://github.com/kfuku52/msspack.git
 ```
 
-`openjdk` provides the `java` command required by the DDBJ validation tools. `busco`
-is only needed when you run `msspack busco`. DIAMOND and HMMER are only needed when
-functional annotation is enabled; omit optional tools for features you do not use.
+`openjdk` provides the `java` command used by the DDBJ validation tools. BUSCO,
+DIAMOND, and HMMER are optional. CDD annotation additionally requires `rpsblast` and
+`rpsbproc`; `msspack doctor` reports which tools are needed for the enabled features.
 
-The Python packaging pipeline is platform-independent, but automated installation and
-execution of the DDBJ `Parser` and `transChecker` currently supports Linux and macOS.
-On Windows, use WSL or install and run the DDBJ Windows tools separately.
+The core pipeline is platform-independent, but automated installation and execution
+of the DDBJ `Parser` and `transChecker` currently support Linux and macOS. On Windows,
+use WSL or run the DDBJ Windows tools separately.
 
 ## Quick Start
 
-Create a starter config:
+Create and edit a starter config:
 
 ```bash
 msspack init my_submission.toml
@@ -66,251 +65,167 @@ msspack init my_submission.toml
 `msspack init` refuses to replace an existing file. Pass `--force` only when you
 intentionally want to overwrite it.
 
-Edit the generated TOML file, then inspect your environment:
-
-```bash
-msspack doctor --config my_submission.toml
-```
-
-Install the latest DDBJ validation-tool versions reviewed by this `msspack` release
-into the local cache:
+Install the DDBJ validation-tool versions reviewed for this `msspack` release:
 
 ```bash
 msspack tools install
 ```
 
 The DDBJ tools are downloaded from DDBJ and are not distributed under the `msspack`
-MIT license. Review the [DDBJ validation-tool agreement](https://www.ddbj.nig.ac.jp/ddbj/mss-tool-e.html)
-before installing or using them. `msspack pack` does not download these tools implicitly;
-when validation is enabled, install them explicitly first.
+MIT license. Review the
+[DDBJ validation-tool agreement](https://www.ddbj.nig.ac.jp/ddbj/mss-tool-e.html)
+before installing or using them. `msspack pack` does not download these tools
+implicitly; when validation is enabled, install them explicitly first.
 
-Run the packaging pipeline:
+Check the completed config and runtime environment, then run the pipeline:
 
 ```bash
+msspack doctor --config my_submission.toml
 msspack pack --config my_submission.toml
 ```
 
-Generate optional downstream outputs:
+BUSCO and the HTML report are optional:
 
 ```bash
 msspack busco --config my_submission.toml
-msspack plot --config my_submission.toml
 msspack report --config my_submission.toml
 ```
 
-The species-specific configs in [`examples/`](examples/) are sanitized templates that
-illustrate the schema and workflow. Replace all placeholder input paths and submitter
-details before using one for a real submission.
+`report` creates or reuses the pipeline plots. Run
+`msspack plot --config my_submission.toml` only when the standalone Sankey and
+supporting figures are needed without an HTML report.
+
+The species-specific configs in [`examples/`](examples/) are sanitized schema
+examples. Replace every placeholder path and submitter field before use.
 
 ## Command Workflow
 
 ```mermaid
-flowchart TD
-  Config["TOML config"]
-  Inputs["Genome FASTA + GFF3"]
-  Tools["DDBJ Parser + transChecker"]
-  FinalFiles["Final MSS files"]
-  Logs["Logs and metrics"]
-  Manifest["build-manifest.json"]
-  Validation["Validation outputs"]
-  Plots["Pipeline plots"]
-  Busco["BUSCO comparisons"]
-  Report["HTML report"]
-
-  Init["msspack init"] --> Config
-  Config --> Doctor["msspack doctor"]
-  Install["msspack tools install"] --> Tools
-  Config --> Pack["msspack pack"]
-  Inputs --> Pack
-  Tools --> Pack
-  Pack --> FinalFiles
-  Pack --> Logs
-  Pack --> Manifest
-  FinalFiles --> Validate["msspack validate"]
-  Tools --> Validate
-  Validate --> Validation
-  Logs --> Plot["msspack plot"]
-  Manifest --> Plot
-  Plot --> Plots
-  FinalFiles --> BuscoCmd["msspack busco"]
-  Inputs --> BuscoCmd
-  BuscoCmd --> Busco
-  Busco -. optional .-> Plot
-  FinalFiles --> ReportCmd["msspack report"]
-  Logs --> ReportCmd
-  Manifest --> ReportCmd
-  Validation --> ReportCmd
-  Plots --> ReportCmd
-  Busco --> ReportCmd
-  ReportCmd --> Report
+flowchart LR
+  Init["msspack init"] --> Config["Edit TOML"]
+  Config --> Pack["msspack pack<br/>validates by default"]
+  Inputs["Genome FASTA + GFF3"] --> Pack
+  Install["msspack tools install"] --> Pack
+  Config -. preflight .-> Doctor["msspack doctor"]
+  Inputs -. preflight .-> Doctor
+  Pack --> Build["Final MSS files<br/>logs + metrics + manifest"]
+  Build -. recheck existing files .-> Validate["msspack validate"]
+  Install --> Validate
+  Build --> Busco["msspack busco<br/>(optional)"]
+  Build --> Plot["msspack plot<br/>(optional standalone)"]
+  Busco -. adds BUSCO summaries .-> Plot
+  Build --> Report["msspack report<br/>runs/reuses plots"]
+  Busco -. included when present .-> Report
 ```
 
-| Command | Main inputs | Main outputs |
-| --- | --- | --- |
-| `msspack init my_submission.toml` | Bundled template | Starter TOML config |
-| `msspack doctor --config my_submission.toml` | Config and local environment | Dependency report |
-| `msspack tools install` | DDBJ download page | Cached `Parser` and `transChecker` |
-| `msspack pack --config my_submission.toml` | Config, genome FASTA, GFF3, validation tools | `final/*.ann.txt`, `final/*.fasta`, logs, metrics, manifest |
-| `msspack validate --config my_submission.toml --ann final/*.ann.txt --fasta final/*.fasta` | Existing MSS files and validation tools | Parser/transChecker logs |
-| `msspack busco --config my_submission.toml` | Existing `pack` genome and GFF artifacts | BUSCO summaries and comparison plots |
-| `msspack plot --config my_submission.toml` | Existing `pack` logs and metrics; optional CDS BUSCO comparison | Pipeline plots under `plots/` |
-| `msspack report --config my_submission.toml` | Outputs, logs, metrics, validation, BUSCO, and plots | `report/index.html` |
+`pack` runs Parser and transChecker unless `--no-validate` is specified. `busco`
+creates or reuses the required `pack` intermediates.
+
+| Command | Purpose |
+| --- | --- |
+| `msspack init my_submission.toml` | Write a starter TOML config |
+| `msspack doctor --config my_submission.toml` | Check the config, inputs, and required tools |
+| `msspack tools install` | Download the reviewed DDBJ validation tools |
+| `msspack pack --config my_submission.toml` | Build and validate the MSS files |
+| `msspack validate --ann FILE --fasta FILE` | Recheck existing MSS files |
+| `msspack busco --config my_submission.toml` | Compare BUSCO results for input and processed sequences |
+| `msspack plot --config my_submission.toml` | Render the pipeline Sankey and supporting figures |
+| `msspack report --config my_submission.toml` | Render/reuse plots and write the HTML report |
 
 ## Example Outputs
 
-`msspack plot` turns the pipeline logs and changed-gene ID sets into three complementary
-figures:
+The main output of `msspack plot` is a stage-wise Sankey diagram that follows gene
+models from the input GFF through filtering, boundary adjustment, functional
+annotation, and final MSS output. A horizontal event-count chart provides the
+supporting counts and distinguishes genes from transcripts. When annotation
+consistency is enabled, additional figures summarize threshold sensitivity and
+evidence-source agreement.
 
-- a stage-wise Sankey diagram of gene-model flow;
-- a horizontal chart of event counts, with genes and transcripts labeled separately; and
-- an UpSet-style view of exclusive overlaps among changed-gene sets.
+If CDS BUSCO results are available, the Sankey adds pies for the input and
+boundary-adjusted CDS sets. A name-consistency pie appears in the same summary row when
+that audit is enabled. Zero-count branches are omitted from the Sankey but remain
+available in the event-count plot and TSV files.
 
-When `busco/cds/comparison.json` is available, the Sankey diagram also shows BUSCO
-compositions for CDS models derived from the input GFF and the GFF after CDS boundary
-adjustment. When name-consistency results are also available, the two BUSCO pies and the
-name-consistency pie share one summary row below the Sankey. Zero-count branches are
-omitted from the Sankey diagram to avoid implying nonzero flow; their values remain
-explicit in the event-count plot and TSV outputs.
-When functional annotation evidence is present, the Sankey adds an annotation stage
-that separates Swiss-Prot, UniRef90, Pfam, CDD, preserved products, and rows
-that remain unannotated. These outcomes are ordered by assignment priority: Swiss-Prot,
-an optional close-reference database, UniRef90, Pfam, CDD, preserved products, and
+Functional annotation adds a stage ordered by assignment priority: Swiss-Prot, an
+optional close-reference database, UniRef90, Pfam, CDD, preserved products, and
 unannotated rows.
 
-<img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram with BUSCO summaries">
+The figure below is from a complete example run with Swiss-Prot, taxon-scoped
+UniRef90, Pfam, CDD, BUSCO, and the close-family name-consistency audit enabled.
 
-`msspack busco` also writes a standalone comparison plot for the two GFF-derived CDS
-FASTA sets.
+<img
+  src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-pipeline-gene-flow.sankey.svg"
+  alt="Example msspack pipeline gene-flow Sankey diagram with BUSCO and name-consistency summaries"
+>
 
-<img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-busco-cds-comparison.svg" alt="Example msspack BUSCO CDS comparison plot" width="360">
+### Product-name examples
+
+These representative products are taken from the same example run. The table shows
+the standardized names written to `ann.txt` and their supporting database records.
+
+| Source | Final product name | Evidence |
+| --- | --- | --- |
+| Swiss-Prot | `glyceraldehyde-3-phosphate dehydrogenase B` | `P12860` |
+| Swiss-Prot | `DNA-directed RNA polymerase V subunit 7` | `A6QRA1` |
+| Swiss-Prot | `mechanosensitive ion channel protein 6` | `Q9SYM1` |
+| UniRef90 | `DNA 5'-3' helicase FANCJ` | `UniRef90_A0A9R0IUZ0` |
+| UniRef90 | `signal peptidase complex catalytic subunit SEC11` | `UniRef90_A0AAD3S319` |
+| UniRef90 | `tRNA (adenine(58)-N(1))-methyltransferase non-catalytic subunit TRM6` | `UniRef90_A0AAD3SMY0` |
+| Pfam | `HMG (high mobility group) box domain-containing protein` | `PF00505` |
+| Pfam | `bZIP transcription factor domain-containing protein` | `PF00170` |
+| Pfam | `casparian strip membrane protein domain-containing protein` | `PF04535` |
+| CDD | `UDP-glycosyltransferase family protein` | `cd03784` |
+| CDD | `plant-specific B3-DNA binding domain-containing protein` | `cd10017` |
+| CDD | `cytochrome P450 (CYP) superfamily protein` | `cl41757` |
 
 ## Configuration
 
-See [`examples/msspack.example.toml`](examples/msspack.example.toml) for the current schema. `msspack init` writes the same template bundled with the package.
+Run `msspack init my_submission.toml`, then edit the generated file. It contains the
+required project, input, sample, submission, submitter, reference, and assembly metadata;
+the complete schema and defaults are in
+[`examples/msspack.example.toml`](examples/msspack.example.toml).
 
-The optional `[busco]` section controls `msspack busco`. By default, BUSCO evaluates
-CDS FASTA sets extracted from the input GFF and the processed GFF after CDS boundary
-adjustment. Set `busco.run_genome = true` or pass `--genome` to add a genome FASTA
-comparison.
+Common optional settings are:
 
-### Functional protein annotation
+```toml
+[functional_annotation]
+enabled = true
+pfam_enabled = true
+cdd_enabled = true
 
-Set `functional_annotation.enabled = true` to annotate products before `ann.txt` is
-rendered. The implementation searches reviewed Swiss-Prot first and then UniRef90 with
-DIAMOND, ranks descriptions with an AHRD-inspired weighted lexical consensus, and uses
-informative Pfam or CDD domains as conservative fallbacks. Existing non-hypothetical
-products are preserved unless `overwrite_existing = true`.
-UniRef90, Pfam, and CDD scan only proteins without an accepted earlier similarity
-assignment. Pfam and CDD receive the same residual query set so their speed and yield are
-directly comparable. Pfam partitions queries into parallel `hmmscan` shards; CDD runs
-multithreaded `rpsblast` followed by representative-hit processing with `rpsbproc`.
+[functional_annotation.consistency]
+enabled = true
 
-On the first enabled run, selected databases are downloaded into `tools.cache_dir`; later
-unchanged runs reuse their indexes and pipeline results. Release-provided checksums and
-sizes are verified when published, and local SHA-256/provenance JSON is recorded. Set
-`swissprot_fasta`, `uniref90_fasta`, `pfam_hmm`, `cdd_database`, or `cdd_data_dir` for an
-offline workflow. Full UniRef90 is very large; `uniref90_taxon_id` downloads a taxonomic
-subset from the UniProt REST API and retains the compressed FASTA while building DIAMOND.
-A close-species protein FASTA can also be supplied through `reference_proteins`.
+[busco]
+run_cds = true
+run_genome = false
+auto_lineage = true
+threads = 8
+```
 
-By default, `[functional_annotation.taxonomy]` resolves the required
-`sample.scientific_name` through NCBI Taxonomy. Set `target_taxon_id` to bypass name
-lookup, or set `offline = true` to use only records already present in the taxonomy cache.
-The resolved target TaxID and ranked lineage are written to
-`functional-annotation-taxonomy.json`. A configured BUSCO lineage and any existing BUSCO
-summary JSON files are checked against that lineage; auto-lineage results are recorded as
-independent evidence, while a manually configured BUSCO dataset is explicitly labelled as
-configured evidence. If name resolution is unavailable, the BUSCO lineage is a broad-clade
-fallback. `strict = true` converts an unresolved target or lineage mismatch from a warning
-to an error.
+- Functional annotation searches Swiss-Prot and optional taxon-scoped UniRef90, then
+  uses Pfam and CDD as domain fallbacks. Set `uniref90_enabled = true` with an
+  appropriate `uniref90_taxon_id`; downloading full UniRef90 is usually unnecessary.
+- Databases are downloaded once to the msspack cache and reused. Local database paths
+  can be supplied for offline runs.
+- Taxonomy is inferred from `sample.scientific_name` and cross-checked against BUSCO,
+  without assuming that the input is a plant.
+- Product names are standardized to DDBJ/NCBI/EMBL-EBI conventions before the family
+  audit. Uninformative evidence remains `hypothetical protein`. Default
+  identity/mutual-coverage thresholds are 90/90%, 70/80%, and 40/60% for
+  near-identical, close-family, and broad homologs.
+- BUSCO compares CDS derived from the input and boundary-adjusted GFF by default.
+  Enable `run_genome` only when a genome-level comparison is also needed.
 
-UniProt `OX=` and UniRef `TaxID=` identifiers are retained for every matched subject.
-Description consensus weights hits by shared genus, family, order, class, phylum, kingdom,
-or domain rather than assuming that every input is a plant. Cross-kingdom and cross-domain
-hits remain available for conserved functions but receive lower weights. Low-identity
-distant hits lose terminal lineage-specific numbering or localization before assignment.
-A moderate or low-confidence Swiss-Prot hit does not suppress the UniRef90 fallback, so a
-closer UniRef90 hit can replace it. After `msspack busco`, the report also links a BUSCO
-taxonomy cross-check JSON generated from the completed BUSCO summaries.
-
-The final directory contains `functional-annotation.tsv`, with the original and assigned
-product, the pre-standardization proposed product, database/accession, subject organism/TaxID,
-taxonomy relation and weight, quality measurements, decision reason, and confidence for every
-transcript. Before products are written to the annotation table, msspack standardizes them
-against the DDBJ/NCBI/EMBL-EBI protein-naming conventions. This includes lowercase formatting
-outside acronyms and symbols, American spelling, `homolog` to `-like protein` conversion,
-removal of terminal localization and source-organism text, removal of COG categories and
-unqualified database/locus identifiers, concise domain/family wording, and
-`hypothetical protein` for candidates that become uninformative. For a resolved eukaryotic
-target, common bacterial-only Pfam/CDD descriptions are generalized to neutral domain or
-family names instead of being transferred literally.
-
-The `proposed_product`, `assigned_product`, `candidate_source`, `source`,
-`name_standardization`, and `name_warnings` columns preserve every naming decision.
-`functional-annotation-name-standardization.tsv` summarizes action and residual-warning
-counts for the complete run.
-`functional-domain-search-comparison.tsv` records the identical Pfam/CDD query count,
-queries with hits, total hits, informative assignments, duration, and rate.
-DIAMOND rows also include the AHRD-style three-character quality code
-for similarity significance, alignment overlap, and description-token support. DIAMOND
-assignments must pass the configured identity, query coverage, subject coverage,
-bit-score, E-value, near-top-hit, and token-consensus thresholds. Pfam uses model-specific
-gathering thresholds (`hmmscan --cut_ga`) plus domain coverage and i-E-value filters. CDD
-uses representative RPS-BLAST hits and accepts informative Specific or Superfamily models.
-Uninformative descriptions, motifs, coiled coils, low-complexity regions, and
-weak/conflicting evidence remain `hypothetical protein`.
-
-The default is deliberately opt-in because the initial databases require substantial
-downloads (especially Pfam) and product names should be reviewed before submission. Run
-`msspack doctor --config my_submission.toml` after enabling the option to check DIAMOND,
-HMMER, RPS-BLAST, and rpsbproc. Each optional fallback can be disabled independently.
-Taxonomy lookup is non-fatal by default: if NCBI is unavailable and no cached or BUSCO
-fallback is available, annotation continues with neutral taxonomy weights and records the
-warning in its provenance.
-
-Set `functional_annotation.consistency.enabled = true` to run one additional DIAMOND
-all-vs-all search and audit whether directly aligned proteins receive compatible names.
-Product-name standardization is completed first; all family comparisons, conflict
-classification, automatic resolution, consistency TSVs, and plots therefore use the
-standardized `assigned_product`, never the raw database description.
-The same search is evaluated at near-identical (90% identity and 90% mutual coverage),
-close-family (70% and 80%), and broad-homology (40% and 60%) thresholds by default.
-Connected components define candidate families, but name comparisons use only direct
-alignment edges to avoid transitive chaining artifacts. The audit distinguishes exact,
-safe canonical-equivalent, compatible-granularity, and conflicting name pairs.
-
-With the default `auto_resolve_conflicts = true`, conflicts do not require manual review.
-For a direct near-identical conflict, a product is propagated only when the better-priority
-annotation source supplies one unambiguous name; otherwise independently supported
-paralog- or subfamily-specific names are retained. Close-family-only differences are also
-retained because forcing one specific name across 70/80 homologs can erase real functional
-divergence. Set `auto_resolve_conflicts = false` to restore audit-only review statuses. The optional
-`harmonize_safe_equivalents = true` setting only standardizes approved aliases and safe
-formatting variants within near-identical families; substrate specificity, paralog
-identifiers, and localization differences are not propagated between equal-priority sources.
-Gene-, family-, pair-, conflict-diagnostic-, threshold-summary-, and source-pair TSV files are written
-to `final/`. `msspack plot` adds a threshold-sensitivity stacked bar, an evidence-source
-review-rate heatmap, and a gene-level name-consistency pie below the pipeline Sankey. Each
-stacked-bar row prints its identity and mutual-coverage threshold. The name-consistency pie
-shares one summary row with both BUSCO pies and uses the close-family threshold (70%
-identity and 80% mutual coverage) in this order: Consistent, Auto-resolved family variation,
-No annotated close-family peer, and Unannotated. “Auto-resolved family variation” means
-that conflicting specific modifiers or family-name tokens were handled by the automatic
-evidence policy above; no manual action is requested. “No annotated
-close-family peer” means no annotated 70/80 partner was found within the analyzed proteome;
-it does not mean that the gene lacks broad-homology or cross-species orthology relationships.
-Figure text is consistently 8 pt; compact consistency figures are 3.6 inches wide and
-multi-stage pipeline figures are 7.2 inches wide. These plots are also embedded by
-`msspack report`.
-
-In Sankey BUSCO panels, `BUSCO genes n` is the size of the selected lineage dataset, while
-`CDS input n` is the number of sequences actually supplied to that BUSCO run.
-
-Older configs may still contain `tools.gff3sort`; that setting is ignored because `msspack` now sorts GFF internally.
+Run `msspack doctor --config my_submission.toml` after enabling optional databases or
+BUSCO. Detailed evidence, naming decisions, consistency tables, timings, and plots are
+written under `final/`, `logs/`, `busco/`, and `plots/` in the configured output
+directory.
 
 ## Development
 
-Local contributor workflow is documented in [`CONTRIBUTING.md`](CONTRIBUTING.md), and release steps are summarized in [`RELEASE.md`](RELEASE.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contributor workflow and
+[`RELEASE.md`](RELEASE.md) for release steps.
 
 For local development:
 
@@ -341,7 +256,8 @@ To clean repo-local build, cache, and BUSCO artifact files before a fresh run:
 python scripts/clean_artifacts.py
 ```
 
-Use the benchmark harness in [`scripts/benchmark_pack.py`](scripts/benchmark_pack.py) to compare fresh and cached runs:
+Use [`scripts/benchmark_pack.py`](scripts/benchmark_pack.py) to compare fresh and
+cached runs:
 
 ```bash
 python scripts/benchmark_pack.py --config /path/to/config.toml --repeats 3 --no-validate
@@ -350,9 +266,12 @@ python scripts/benchmark_pack.py --config /path/to/config.toml --repeats 3 --cle
 
 ## Attribution
 
-The MSS conversion layer in `msspack` derives from ideas and code paths originally adapted from the MIT-licensed [`GFF2MSS`](https://github.com/maedat/GFF2MSS) project by Taro Maeda. The current converter is implemented as native `msspack` modules under `src/msspack/mss_converter/`.
+The MSS conversion layer builds on ideas and code paths adapted from Taro Maeda's
+MIT-licensed [`GFF2MSS`](https://github.com/maedat/GFF2MSS) project. The current
+converter is implemented in `src/msspack/mss_converter/`.
 
-License and attribution details for derived or adapted code are documented in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for license and attribution
+details.
 
 ## License
 

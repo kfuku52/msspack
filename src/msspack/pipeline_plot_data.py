@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import json
 import re
-from itertools import combinations
 from pathlib import Path
 
 from .pipeline_plot_models import (
@@ -13,7 +12,6 @@ from .pipeline_plot_models import (
     AnnotationConsistencySummary,
     FunctionalAnnotationGroup,
     FunctionalAnnotationSummary,
-    GeneOverlapRow,
     ParsedStepRecord,
     PipelineGeneSet,
     PipelinePlotDataBundle,
@@ -326,45 +324,9 @@ def _build_gene_sets(
     return tuple(groups)
 
 
-def _build_overlap_rows(gene_sets: tuple[PipelineGeneSet, ...]) -> tuple[GeneOverlapRow, ...]:
-    nonempty = [gene_set for gene_set in gene_sets if gene_set.count > 0]
-    if not nonempty:
-        return ()
-    id_sets = {gene_set.key: set(gene_set.gene_ids) for gene_set in nonempty}
-    rows: list[GeneOverlapRow] = []
-    for size in range(1, len(nonempty) + 1):
-        for combo in combinations(nonempty, size):
-            member_keys = tuple(gene_set.key for gene_set in combo)
-            member_labels = tuple(gene_set.label for gene_set in combo)
-            shared = set(id_sets[member_keys[0]])
-            for gene_set in combo[1:]:
-                shared &= id_sets[gene_set.key]
-            if not shared:
-                continue
-            outside = set()
-            for gene_set in nonempty:
-                if gene_set.key in member_keys:
-                    continue
-                outside |= id_sets[gene_set.key]
-            exclusive = tuple(sorted(shared - outside))
-            if not exclusive:
-                continue
-            rows.append(
-                GeneOverlapRow(
-                    member_keys=member_keys,
-                    member_labels=member_labels,
-                    count=len(exclusive),
-                    gene_ids=exclusive,
-                )
-            )
-    rows.sort(key=lambda row: (-row.count, len(row.member_keys), row.label))
-    return tuple(rows)
-
-
 def _build_summary_payload(
     metrics: PipelinePlotMetrics,
     gene_sets: tuple[PipelineGeneSet, ...],
-    overlap_rows: tuple[GeneOverlapRow, ...],
     functional_annotation: FunctionalAnnotationSummary | None,
     annotation_consistency: AnnotationConsistencySummary | None,
 ) -> dict[str, object]:
@@ -372,10 +334,6 @@ def _build_summary_payload(
         "metrics": metrics.to_dict(),
         "sources": metrics.sources,
         "gene_sets": {gene_set.key: gene_set.to_dict() for gene_set in gene_sets},
-        "overlap": {
-            "row_count": len(overlap_rows),
-            "rows": [row.to_dict() for row in overlap_rows],
-        },
     }
     if functional_annotation is not None:
         payload["functional_annotation"] = functional_annotation.to_dict()
@@ -578,7 +536,6 @@ def collect_pipeline_plot_data(output_root: Path, log_dir: Path) -> PipelinePlot
     records = _parse_step_records(log_dir)
     metrics = _build_metrics_from_records(records)
     gene_sets = _build_gene_sets(output_root, records)
-    overlap_rows = _build_overlap_rows(gene_sets)
     functional_annotation = load_functional_annotation_summary(output_root)
     if (
         functional_annotation is not None
@@ -601,13 +558,11 @@ def collect_pipeline_plot_data(output_root: Path, log_dir: Path) -> PipelinePlot
         records=records,
         metrics=metrics,
         gene_sets=gene_sets,
-        overlap_rows=overlap_rows,
         functional_annotation=functional_annotation,
         annotation_consistency=annotation_consistency,
         summary_payload=_build_summary_payload(
             metrics,
             gene_sets,
-            overlap_rows,
             functional_annotation,
             annotation_consistency,
         ),

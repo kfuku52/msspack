@@ -338,13 +338,6 @@ def _render_pipeline_plots(report_root: Path, payload: dict[str, Any]) -> str:
             pipeline.get("event_counts_pdf"),
             pipeline.get("event_counts_tsv"),
         ),
-        _render_plot_block(
-            report_root,
-            "Changed-gene overlap",
-            pipeline.get("overlap_svg"),
-            pipeline.get("overlap_pdf"),
-            pipeline.get("overlap_tsv"),
-        ),
     ]
     annotation_consistency = pipeline.get("annotation_consistency")
     if isinstance(annotation_consistency, dict):

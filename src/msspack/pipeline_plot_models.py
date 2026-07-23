@@ -149,29 +149,6 @@ class PipelineGeneSet:
 
 
 @dataclass(frozen=True)
-class GeneOverlapRow:
-    member_keys: tuple[str, ...]
-    member_labels: tuple[str, ...]
-    count: int
-    gene_ids: tuple[str, ...]
-
-    @property
-    def key(self) -> str:
-        return "+".join(self.member_keys)
-
-    @property
-    def label(self) -> str:
-        return " + ".join(self.member_labels)
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "member_keys": list(self.member_keys),
-            "member_labels": list(self.member_labels),
-            "count": self.count,
-        }
-
-
-@dataclass(frozen=True)
 class PipelinePlotArtifacts:
     root: Path
     summary_json: Path
@@ -182,9 +159,6 @@ class PipelinePlotArtifacts:
     event_counts_tsv: Path
     event_counts_svg: Path
     event_counts_pdf: Path
-    overlap_tsv: Path
-    overlap_svg: Path
-    overlap_pdf: Path
     name_consistency_tsv: Path
     name_consistency_svg: Path
     name_consistency_pdf: Path
@@ -337,7 +311,6 @@ class PipelinePlotDataBundle:
     records: dict[str, ParsedStepRecord]
     metrics: PipelinePlotMetrics
     gene_sets: tuple[PipelineGeneSet, ...]
-    overlap_rows: tuple[GeneOverlapRow, ...]
     functional_annotation: FunctionalAnnotationSummary | None
     annotation_consistency: AnnotationConsistencySummary | None
     summary_payload: dict[str, object]

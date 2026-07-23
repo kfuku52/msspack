@@ -231,9 +231,6 @@ class CliTests(unittest.TestCase):
             event_counts_tsv=Path("/tmp/build/Demo/plots/pipeline-event-counts.tsv"),
             event_counts_svg=Path("/tmp/build/Demo/plots/pipeline-event-counts.svg"),
             event_counts_pdf=Path("/tmp/build/Demo/plots/pipeline-event-counts.pdf"),
-            overlap_tsv=Path("/tmp/build/Demo/plots/pipeline-gene-overlap.tsv"),
-            overlap_svg=Path("/tmp/build/Demo/plots/pipeline-gene-overlap.svg"),
-            overlap_pdf=Path("/tmp/build/Demo/plots/pipeline-gene-overlap.pdf"),
             name_consistency_tsv=Path(
                 "/tmp/build/Demo/plots/functional-annotation-name-consistency.tsv"
             ),
@@ -275,8 +272,6 @@ class CliTests(unittest.TestCase):
                 str(artifacts.gene_flow_pdf),
                 str(artifacts.event_counts_svg),
                 str(artifacts.event_counts_pdf),
-                str(artifacts.overlap_svg),
-                str(artifacts.overlap_pdf),
                 "pipeline-flow\tgenes=100\tdedup_removed=5\ttranscript_changed=20\tremoved_mrnas=23",
             ],
         )

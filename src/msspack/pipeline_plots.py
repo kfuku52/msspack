@@ -31,15 +31,18 @@ from .pipeline_plot_render import (
     write_event_counts_svg,
     write_event_counts_tsv,
     write_gene_flow_tsv,
-    write_overlap_pdf,
-    write_overlap_svg,
-    write_overlap_tsv,
     write_sankey_pdf,
     write_sankey_svg,
     write_summary_json,
     write_summary_tsv,
 )
 from .utils import MSSPackError
+
+LEGACY_OVERLAP_FILENAMES = (
+    "pipeline-gene-overlap.tsv",
+    "pipeline-gene-overlap.svg",
+    "pipeline-gene-overlap.pdf",
+)
 
 
 def run_pipeline_plots(
@@ -57,6 +60,10 @@ def run_pipeline_plots(
         )
 
     artifacts = build_plot_artifacts(output_root)
+    for filename in LEGACY_OVERLAP_FILENAMES:
+        legacy_path = artifacts.root / filename
+        if legacy_path.exists():
+            legacy_path.unlink()
     module_paths = [
         module_origin("msspack.pipeline_plots"),
         module_origin("msspack.pipeline_plot_data"),
@@ -81,9 +88,6 @@ def run_pipeline_plots(
             artifacts.event_counts_tsv,
             artifacts.event_counts_svg,
             artifacts.event_counts_pdf,
-            artifacts.overlap_tsv,
-            artifacts.overlap_svg,
-            artifacts.overlap_pdf,
             artifacts.name_consistency_tsv,
             artifacts.name_consistency_svg,
             artifacts.name_consistency_pdf,
@@ -128,7 +132,6 @@ def run_pipeline_plots(
             artifacts.summary_tsv,
             artifacts.gene_flow_tsv,
             artifacts.event_counts_tsv,
-            artifacts.overlap_tsv,
         ],
         dependencies=dependency_paths,
         action=lambda: (
@@ -141,7 +144,6 @@ def run_pipeline_plots(
             ),
             write_gene_flow_tsv(stage_labels, nodes, links, artifacts.gene_flow_tsv),
             write_event_counts_tsv(events, artifacts.event_counts_tsv),
-            write_overlap_tsv(bundle.gene_sets, bundle.overlap_rows, artifacts.overlap_tsv),
         ),
     )
     run_if_needed(
@@ -187,20 +189,6 @@ def run_pipeline_plots(
         outputs=[artifacts.event_counts_pdf],
         dependencies=[artifacts.summary_json, artifacts.event_counts_tsv, *module_paths],
         action=lambda: write_event_counts_pdf(events, artifacts.event_counts_pdf),
-    )
-    run_if_needed(
-        outputs=[artifacts.overlap_svg],
-        dependencies=[artifacts.summary_json, artifacts.overlap_tsv, *module_paths],
-        action=lambda: write_overlap_svg(
-            bundle.gene_sets, bundle.overlap_rows, artifacts.overlap_svg
-        ),
-    )
-    run_if_needed(
-        outputs=[artifacts.overlap_pdf],
-        dependencies=[artifacts.summary_json, artifacts.overlap_tsv, *module_paths],
-        action=lambda: write_overlap_pdf(
-            bundle.gene_sets, bundle.overlap_rows, artifacts.overlap_pdf
-        ),
     )
     if bundle.annotation_consistency is not None:
         consistency = bundle.annotation_consistency
@@ -259,7 +247,6 @@ def run_pipeline_plots(
         artifacts=artifacts,
         metrics=bundle.metrics,
         gene_sets=bundle.gene_sets,
-        overlap_rows=bundle.overlap_rows,
         annotation_consistency=bundle.annotation_consistency,
     )
     return artifacts

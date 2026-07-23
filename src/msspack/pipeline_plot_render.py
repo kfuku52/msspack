@@ -24,7 +24,6 @@ from .pipeline_plot_models import (
     AnnotationConsistencySummary,
     EventCount,
     FunctionalAnnotationSummary,
-    GeneOverlapRow,
     PipelineGeneSet,
     PipelinePlotArtifacts,
     PipelinePlotMetrics,
@@ -43,7 +42,7 @@ SANKEY_BUSCO_HEIGHT = 420.0
 SANKEY_CONSISTENCY_BAND_HEIGHT = 112.0
 SANKEY_LOWER_BAND_TOP_GAP = 8.0
 SANKEY_BUSCO_BAND_HEIGHT = SANKEY_BUSCO_HEIGHT - SANKEY_HEIGHT - SANKEY_LOWER_BAND_TOP_GAP
-SANKEY_SUMMARY_ROW_HEIGHT = 104.0
+SANKEY_SUMMARY_ROW_HEIGHT = 136.0
 SANKEY_LINK_OPACITY = 0.72
 SANKEY_BUSCO_COLORS = {
     "single_copy": "#2ca25f",
@@ -122,9 +121,6 @@ def build_plot_artifacts(output_root: Path) -> PipelinePlotArtifacts:
         event_counts_tsv=root / "pipeline-event-counts.tsv",
         event_counts_svg=root / "pipeline-event-counts.svg",
         event_counts_pdf=root / "pipeline-event-counts.pdf",
-        overlap_tsv=root / "pipeline-gene-overlap.tsv",
-        overlap_svg=root / "pipeline-gene-overlap.svg",
-        overlap_pdf=root / "pipeline-gene-overlap.pdf",
         name_consistency_tsv=root / "functional-annotation-name-consistency.tsv",
         name_consistency_svg=root / "functional-annotation-name-consistency.svg",
         name_consistency_pdf=root / "functional-annotation-name-consistency.pdf",
@@ -834,28 +830,6 @@ def write_event_counts_tsv(events: list[EventCount], output_path: Path) -> Path:
     return write_text(output_path, "\n".join(lines) + "\n")
 
 
-def write_overlap_tsv(
-    gene_sets: tuple[PipelineGeneSet, ...],
-    overlap_rows: tuple[GeneOverlapRow, ...],
-    output_path: Path,
-) -> Path:
-    lines = ["rank\texclusive_gene_count\tmember_keys\tmember_labels"]
-    for index, row in enumerate(overlap_rows, start=1):
-        lines.append(
-            "\t".join(
-                [
-                    str(index),
-                    str(row.count),
-                    ",".join(row.member_keys),
-                    " + ".join(row.member_labels),
-                ]
-            )
-        )
-    if not overlap_rows and gene_sets:
-        lines.append("0\t0\t\t")
-    return write_text(output_path, "\n".join(lines) + "\n")
-
-
 @dataclass
 class _LaidOutNode:
     node: SankeyNode
@@ -1223,6 +1197,19 @@ _CONSISTENCY_PIE_SHORT_LABELS = {
 }
 
 
+def _summary_consistency_legend_lines(
+    node: SankeyNode,
+    percentage: float,
+) -> tuple[str, ...]:
+    percentage_text = f"{percentage:.1f}%"
+    if node.id == "consistency_resolved":
+        return ("Auto-resolved family", f"variation {percentage_text}")
+    if node.id == "consistency_no_close_family_peer":
+        return ("No annotated", f"close-family peer {percentage_text}")
+    label = _CONSISTENCY_PIE_SHORT_LABELS.get(node.id, node.label)
+    return (f"{label} {percentage_text}",)
+
+
 def _consistency_tier_label(summary: AnnotationConsistencySummary) -> str:
     return {
         "near_identical": "Near-identical",
@@ -1246,8 +1233,8 @@ def _append_summary_pie_row_svg(
 ) -> None:
     width = meta["width"]
     panel_width = width / 3.0
-    center_y = top_y + 68.0
-    radius = 18.0
+    center_y = top_y + 90.0
+    radius = 17.0
     for panel_index in range(3):
         panel_x = panel_index * panel_width + 3.0
         parts.append(
@@ -1259,21 +1246,24 @@ def _append_summary_pie_row_svg(
     for panel_index, summary in enumerate(summaries):
         panel_left = panel_index * panel_width
         title_x = panel_left + panel_width / 2.0
-        pie_x = panel_left + 31.0
-        legend_x = pie_x + radius + 7.0
+        pie_x = panel_left + 21.0
+        legend_x = pie_x + radius + 5.0
         parts.append(
-            f'<text x="{title_x:.2f}" y="{top_y + 13.0:.2f}" text-anchor="middle" '
+            f'<text x="{title_x:.2f}" y="{top_y + 14.0:.2f}" text-anchor="middle" '
             f'class="summary-pie-title">{escape(summary.label)} BUSCO</text>'
         )
         subtitle = f"C={summary.complete_pct:.1f}%; BUSCO genes n={summary.total_buscos:,}"
         parts.append(
-            f'<text x="{title_x:.2f}" y="{top_y + 26.0:.2f}" text-anchor="middle" '
+            f'<text x="{title_x:.2f}" y="{top_y + 28.0:.2f}" text-anchor="middle" '
             f'class="summary-pie-note">{escape(subtitle)}</text>'
         )
-        input_note = f"CDS input n={summary.input_sequences:,}; {summary.lineage_dataset}"
         parts.append(
-            f'<text x="{title_x:.2f}" y="{top_y + 36.0:.2f}" text-anchor="middle" '
-            f'class="summary-pie-note">{escape(input_note)}</text>'
+            f'<text x="{title_x:.2f}" y="{top_y + 40.0:.2f}" text-anchor="middle" '
+            f'class="summary-pie-note">CDS input n={summary.input_sequences:,}</text>'
+        )
+        parts.append(
+            f'<text x="{title_x:.2f}" y="{top_y + 52.0:.2f}" text-anchor="middle" '
+            f'class="summary-pie-note">{escape(summary.lineage_dataset)}</text>'
         )
         angle = -math.pi / 2.0
         for key, count in summary.segment_counts():
@@ -1292,7 +1282,7 @@ def _append_summary_pie_row_svg(
             )
             angle = next_angle
         for legend_index, (key, count) in enumerate(summary.segment_counts()):
-            legend_y = top_y + 48.0 + legend_index * 11.5
+            legend_y = top_y + 65.0 + legend_index * 13.0
             percentage = 100.0 * count / summary.total_buscos
             parts.append(
                 f'<rect x="{legend_x:.2f}" y="{legend_y - 6.0:.2f}" width="6" height="6" '
@@ -1308,20 +1298,21 @@ def _append_summary_pie_row_svg(
         return
     panel_left = panel_width * 2.0
     title_x = panel_left + panel_width / 2.0
-    pie_x = panel_left + 31.0
-    legend_x = pie_x + radius + 7.0
+    pie_x = panel_left + 21.0
+    legend_x = pie_x + radius + 5.0
     parts.append(
-        f'<text x="{title_x:.2f}" y="{top_y + 13.0:.2f}" text-anchor="middle" '
+        f'<text x="{title_x:.2f}" y="{top_y + 14.0:.2f}" text-anchor="middle" '
         f'class="summary-pie-title">Name consistency (n={total:,})</text>'
     )
-    subtitle = (
-        f"{escape(_consistency_tier_label(consistency_summary))}: "
-        f"id&gt;={_compact_percentage(consistency_summary.identity_threshold)}%, "
-        f"cov&gt;={_compact_percentage(consistency_summary.coverage_threshold)}%"
+    parts.append(
+        f'<text x="{title_x:.2f}" y="{top_y + 28.0:.2f}" text-anchor="middle" '
+        f'class="summary-pie-note">{escape(_consistency_tier_label(consistency_summary))}</text>'
     )
     parts.append(
-        f'<text x="{title_x:.2f}" y="{top_y + 26.0:.2f}" text-anchor="middle" '
-        f'class="summary-pie-note">{subtitle}</text>'
+        f'<text x="{title_x:.2f}" y="{top_y + 40.0:.2f}" text-anchor="middle" '
+        f'class="summary-pie-note">id&gt;='
+        f'{_compact_percentage(consistency_summary.identity_threshold)}%, cov&gt;='
+        f'{_compact_percentage(consistency_summary.coverage_threshold)}%</text>'
     )
     angle = -math.pi / 2.0
     for node in consistency_nodes:
@@ -1337,18 +1328,27 @@ def _append_summary_pie_row_svg(
             )
         )
         angle = next_angle
-    for legend_index, node in enumerate(consistency_nodes):
-        legend_y = top_y + 44.0 + legend_index * 12.0
+    legend_y = top_y + 52.0
+    line_height = 10.7
+    item_gap = 1.3
+    for node in consistency_nodes:
         percentage = 100.0 * node.count / total
-        label = _CONSISTENCY_PIE_SHORT_LABELS.get(node.id, node.label)
+        lines = _summary_consistency_legend_lines(node, percentage)
         parts.append(
             f'<rect x="{legend_x:.2f}" y="{legend_y - 6.0:.2f}" width="6" height="6" '
             f'rx="1" fill="{node.color}"/>'
         )
         parts.append(
-            f'<text x="{legend_x + 9.0:.2f}" y="{legend_y:.2f}" '
-            f'class="summary-pie-legend">{escape(label)} {percentage:.1f}%</text>'
+            _svg_multiline_text(
+                x=legend_x + 9.0,
+                y=legend_y,
+                anchor="start",
+                css_class="summary-pie-legend",
+                lines=lines,
+                line_height=line_height,
+            )
         )
+        legend_y += len(lines) * line_height + item_gap
 
 
 def _append_consistency_pie_svg(
@@ -1804,8 +1804,8 @@ def _append_summary_pie_row_pdf(
 ) -> None:
     width = meta["width"]
     panel_width = width / 3.0
-    center_y = top_y + 68.0
-    radius = 18.0
+    center_y = top_y + 90.0
+    radius = 17.0
     box_height = SANKEY_SUMMARY_ROW_HEIGHT - 4.0
     box_y = _pdf_top_to_bottom(page_height, top_y, box_height)
     for panel_index in range(3):
@@ -1818,13 +1818,13 @@ def _append_summary_pie_row_pdf(
     for panel_index, summary in enumerate(summaries):
         panel_left = panel_index * panel_width
         title_x = panel_left + panel_width / 2.0
-        pie_x = panel_left + 31.0
-        legend_x = pie_x + radius + 7.0
+        pie_x = panel_left + 21.0
+        legend_x = pie_x + radius + 5.0
         commands.append(
             _centered_pdf_text_command(
                 page_height=page_height,
                 center_x=title_x,
-                y_top=top_y + 13.0,
+                y_top=top_y + 14.0,
                 text=f"{summary.label} BUSCO",
                 font="F2",
                 size=CHART_FONT_SIZE_PT,
@@ -1836,7 +1836,7 @@ def _append_summary_pie_row_pdf(
             _centered_pdf_text_command(
                 page_height=page_height,
                 center_x=title_x,
-                y_top=top_y + 26.0,
+                y_top=top_y + 28.0,
                 text=(
                     f"C={summary.complete_pct:.1f}%; "
                     f"BUSCO genes n={summary.total_buscos:,}"
@@ -1850,8 +1850,19 @@ def _append_summary_pie_row_pdf(
             _centered_pdf_text_command(
                 page_height=page_height,
                 center_x=title_x,
-                y_top=top_y + 36.0,
-                text=f"CDS input n={summary.input_sequences:,}; {summary.lineage_dataset}",
+                y_top=top_y + 40.0,
+                text=f"CDS input n={summary.input_sequences:,}",
+                font="F1",
+                size=CHART_FONT_SIZE_PT,
+                color=MUTED_RGB,
+            )
+        )
+        commands.append(
+            _centered_pdf_text_command(
+                page_height=page_height,
+                center_x=title_x,
+                y_top=top_y + 52.0,
+                text=summary.lineage_dataset,
                 font="F1",
                 size=CHART_FONT_SIZE_PT,
                 color=MUTED_RGB,
@@ -1876,7 +1887,7 @@ def _append_summary_pie_row_pdf(
             )
             angle = next_angle
         for legend_index, (key, count) in enumerate(summary.segment_counts()):
-            legend_y = top_y + 48.0 + legend_index * 11.5
+            legend_y = top_y + 65.0 + legend_index * 13.0
             percentage = 100.0 * count / summary.total_buscos
             red, green, blue = _hex_to_rgb(SANKEY_BUSCO_COLORS[key])
             rect_y = _pdf_top_to_bottom(page_height, legend_y - 6.0, 6.0)
@@ -1900,13 +1911,13 @@ def _append_summary_pie_row_pdf(
         return
     panel_left = panel_width * 2.0
     title_x = panel_left + panel_width / 2.0
-    pie_x = panel_left + 31.0
-    legend_x = pie_x + radius + 7.0
+    pie_x = panel_left + 21.0
+    legend_x = pie_x + radius + 5.0
     commands.append(
         _centered_pdf_text_command(
             page_height=page_height,
             center_x=title_x,
-            y_top=top_y + 13.0,
+            y_top=top_y + 14.0,
             text=f"Name consistency (n={total:,})",
             font="F2",
             size=CHART_FONT_SIZE_PT,
@@ -1918,9 +1929,19 @@ def _append_summary_pie_row_pdf(
         _centered_pdf_text_command(
             page_height=page_height,
             center_x=title_x,
-            y_top=top_y + 26.0,
+            y_top=top_y + 28.0,
+            text=_consistency_tier_label(consistency_summary),
+            font="F1",
+            size=CHART_FONT_SIZE_PT,
+            color=MUTED_RGB,
+        )
+    )
+    commands.append(
+        _centered_pdf_text_command(
+            page_height=page_height,
+            center_x=title_x,
+            y_top=top_y + 40.0,
             text=(
-                f"{_consistency_tier_label(consistency_summary)}: "
                 f"id>={_compact_percentage(consistency_summary.identity_threshold)}%, "
                 f"cov>={_compact_percentage(consistency_summary.coverage_threshold)}%"
             ),
@@ -1945,24 +1966,28 @@ def _append_summary_pie_row_pdf(
             )
         )
         angle = next_angle
-    for legend_index, node in enumerate(consistency_nodes):
-        legend_y = top_y + 44.0 + legend_index * 12.0
+    legend_y = top_y + 52.0
+    line_height = 10.7
+    item_gap = 1.3
+    for node in consistency_nodes:
         percentage = 100.0 * node.count / total
-        label = _CONSISTENCY_PIE_SHORT_LABELS.get(node.id, node.label)
+        lines = _summary_consistency_legend_lines(node, percentage)
         red, green, blue = _hex_to_rgb(node.color)
         rect_y = _pdf_top_to_bottom(page_height, legend_y - 6.0, 6.0)
         commands.append(f"{red:.3f} {green:.3f} {blue:.3f} rg {legend_x:.2f} {rect_y:.2f} 6 6 re f")
-        commands.append(
-            _pdf_text_command(
-                page_height=page_height,
-                x=legend_x + 9.0,
-                y_top=legend_y,
-                text=f"{label} {percentage:.1f}%",
-                font="F1",
-                size=CHART_FONT_SIZE_PT,
-                color=MUTED_RGB,
+        for line_index, line in enumerate(lines):
+            commands.append(
+                _pdf_text_command(
+                    page_height=page_height,
+                    x=legend_x + 9.0,
+                    y_top=legend_y + line_index * line_height,
+                    text=line,
+                    font="F1",
+                    size=CHART_FONT_SIZE_PT,
+                    color=MUTED_RGB,
+                )
             )
-        )
+        legend_y += len(lines) * line_height + item_gap
 
 
 def _append_busco_pdf(
@@ -2439,305 +2464,12 @@ def write_event_counts_pdf(events: list[EventCount], output_path: Path) -> Path:
     )
 
 
-def _overlap_rows_for_plot(overlap_rows: tuple[GeneOverlapRow, ...]) -> list[GeneOverlapRow]:
-    return list(overlap_rows[:12])
-
-
-OVERLAP_COLUMN_LABELS = {
-    "duplicate_removed_genes": "Coordinate\nduplicate\nremoval",
-    "transcript_changed_genes": "mRNA\nselection",
-    "inframe_updated_genes": "Frame\ncorrection",
-    "padding_updated_genes": "CDS\nboundary\nadjustment",
-    "genes_with_stops": "Genes\nwith\nstops",
-    "converted_to_misc_genes": "Converted to\nmisc_feature",
-}
-
-
-def _overlap_column_lines(gene_set: PipelineGeneSet) -> tuple[str, ...]:
-    return _sankey_label_lines(OVERLAP_COLUMN_LABELS.get(gene_set.key, gene_set.label))
-
-
-def _overlap_chart_geometry(
-    gene_sets: tuple[PipelineGeneSet, ...],
-    plot_rows: list[GeneOverlapRow],
-) -> tuple[float, ...]:
-    width = SANKEY_WIDTH
-    matrix_left = 34.0
-    matrix_width = 232.0
-    column_gap = matrix_width / max(1, len(gene_sets) - 1)
-    matrix_top = 101.0
-    marker_radius = 4.0
-    row_gap = 26.0
-    bar_left = 306.0
-    bar_width = 159.0
-    height = matrix_top + max(0, len(plot_rows) - 1) * row_gap + marker_radius + 20.0
-    return (
-        width,
-        height,
-        matrix_left,
-        column_gap,
-        matrix_top,
-        marker_radius,
-        row_gap,
-        bar_left,
-        bar_width,
-    )
-
-
-def _pdf_circle_path(*, page_height: float, cx: float, cy: float, radius: float) -> str:
-    center_y = _pdf_top_to_bottom(page_height, cy)
-    tangent = radius * 0.5522847498
-    return (
-        f"{cx + radius:.2f} {center_y:.2f} m "
-        f"{cx + radius:.2f} {center_y + tangent:.2f} "
-        f"{cx + tangent:.2f} {center_y + radius:.2f} {cx:.2f} {center_y + radius:.2f} c "
-        f"{cx - tangent:.2f} {center_y + radius:.2f} "
-        f"{cx - radius:.2f} {center_y + tangent:.2f} {cx - radius:.2f} {center_y:.2f} c "
-        f"{cx - radius:.2f} {center_y - tangent:.2f} "
-        f"{cx - tangent:.2f} {center_y - radius:.2f} {cx:.2f} {center_y - radius:.2f} c "
-        f"{cx + tangent:.2f} {center_y - radius:.2f} "
-        f"{cx + radius:.2f} {center_y - tangent:.2f} {cx + radius:.2f} {center_y:.2f} c h"
-    )
-
-
-def write_overlap_svg(
-    gene_sets: tuple[PipelineGeneSet, ...],
-    overlap_rows: tuple[GeneOverlapRow, ...],
-    output_path: Path,
-) -> Path:
-    plot_rows = _overlap_rows_for_plot(overlap_rows)
-    (
-        width,
-        height,
-        matrix_left,
-        column_gap,
-        matrix_top,
-        marker_radius,
-        row_gap,
-        bar_left,
-        bar_width,
-    ) = _overlap_chart_geometry(gene_sets, plot_rows)
-    max_count = max((row.count for row in plot_rows), default=0)
-    denominator = max(1, max_count)
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width / PDF_POINTS_PER_INCH:g}in" height="{height / PDF_POINTS_PER_INCH:g}in" viewBox="0 0 {width:.2f} {height:.2f}">',
-        f"<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .header{{font-size:{SVG_FONT_SIZE};font-weight:700;fill:#475569}} .count{{font-size:{SVG_FONT_SIZE};fill:#334155}}</style>",
-        '<rect width="100%" height="100%" fill="white"/>',
-        '<text x="16" y="16" class="title">Changed-gene overlap</text>',
-        '<text x="16" y="31" class="subtitle">Exclusive intersections across stage-emitted changed-gene ID sets. Filled markers indicate included sets.</text>',
-    ]
-    for column, gene_set in enumerate(gene_sets):
-        x = matrix_left + column * column_gap
-        lines = _overlap_column_lines(gene_set)
-        parts.append(
-            _svg_multiline_text(
-                x=x,
-                y=68.0 - (len(lines) - 1) * 5.0,
-                anchor="middle",
-                css_class="header",
-                lines=lines,
-                line_height=10.0,
-            )
-        )
-    parts.append(
-        f'<text x="{bar_left + bar_width / 2.0:.2f}" y="68" text-anchor="middle" class="header">Exclusive genes</text>'
-    )
-    for row_index, row in enumerate(plot_rows):
-        y = matrix_top + row_index * row_gap
-        parts.append(
-            f'<line x1="16" y1="{y:.2f}" x2="{width - 16.0:.2f}" y2="{y:.2f}" stroke="#f1f5f9" stroke-width="0.7"/>'
-        )
-        included = set(row.member_keys)
-        included_columns = [
-            column for column, gene_set in enumerate(gene_sets) if gene_set.key in included
-        ]
-        if len(included_columns) > 1:
-            start_x = matrix_left + min(included_columns) * column_gap
-            end_x = matrix_left + max(included_columns) * column_gap
-            parts.append(
-                f'<line x1="{start_x:.2f}" y1="{y:.2f}" x2="{end_x:.2f}" y2="{y:.2f}" stroke="#475569" stroke-width="1.2"/>'
-            )
-        for column, gene_set in enumerate(gene_sets):
-            x = matrix_left + column * column_gap
-            fill = gene_set.color if gene_set.key in included else "#ffffff"
-            stroke = "#475569" if gene_set.key in included else "#cbd5e1"
-            parts.append(
-                f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{marker_radius:.2f}" fill="{fill}" stroke="{stroke}" stroke-width="0.8"/>'
-            )
-        bar_len = bar_width * row.count / denominator
-        parts.append(
-            f'<rect x="{bar_left:.2f}" y="{y - 6.0:.2f}" width="{bar_width:.2f}" height="12" rx="2" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.7"/>'
-        )
-        if row.count > 0:
-            if bar_len >= 1.2:
-                parts.append(
-                    f'<rect x="{bar_left:.2f}" y="{y - 6.0:.2f}" width="{bar_len:.2f}" height="12" rx="1" fill="#1d4ed8"/>'
-                )
-            else:
-                marker_x = bar_left + bar_len
-                parts.append(
-                    f'<line x1="{marker_x:.2f}" y1="{y - 6.0:.2f}" x2="{marker_x:.2f}" y2="{y + 6.0:.2f}" stroke="#1d4ed8" stroke-width="1.2"/>'
-                )
-        parts.append(
-            f'<text x="{bar_left + bar_width + 8.0:.2f}" y="{y + 3.0:.2f}" class="count">{row.count:,}</text>'
-        )
-    if not plot_rows:
-        parts.append(
-            '<text x="16" y="101" class="subtitle">No non-empty exclusive overlaps were available for plotting.</text>'
-        )
-    parts.append("</svg>")
-    return write_text(output_path, "\n".join(parts) + "\n")
-
-
-def write_overlap_pdf(
-    gene_sets: tuple[PipelineGeneSet, ...],
-    overlap_rows: tuple[GeneOverlapRow, ...],
-    output_path: Path,
-) -> Path:
-    plot_rows = _overlap_rows_for_plot(overlap_rows)
-    (
-        width,
-        height,
-        matrix_left,
-        column_gap,
-        matrix_top,
-        marker_radius,
-        row_gap,
-        bar_left,
-        bar_width,
-    ) = _overlap_chart_geometry(gene_sets, plot_rows)
-    max_count = max((row.count for row in plot_rows), default=0)
-    denominator = max(1, max_count)
-    commands = [
-        f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
-        _pdf_text_command(
-            page_height=height,
-            x=16,
-            y_top=16,
-            text="Changed-gene overlap",
-            font="F2",
-            size=CHART_FONT_SIZE_PT,
-            color=TEXT_RGB,
-        ),
-        _pdf_text_command(
-            page_height=height,
-            x=16,
-            y_top=31,
-            text="Exclusive intersections across stage-emitted changed-gene ID sets. Filled markers indicate included sets.",
-            font="F1",
-            size=CHART_FONT_SIZE_PT,
-            color=MUTED_RGB,
-        ),
-    ]
-    for column, gene_set in enumerate(gene_sets):
-        x = matrix_left + column * column_gap
-        lines = _overlap_column_lines(gene_set)
-        start_y = 68.0 - (len(lines) - 1) * 5.0
-        for line_index, line in enumerate(lines):
-            commands.append(
-                _centered_pdf_text_command(
-                    page_height=height,
-                    center_x=x,
-                    y_top=start_y + line_index * 10.0,
-                    text=line,
-                    font="F2",
-                    size=CHART_FONT_SIZE_PT,
-                    color=MUTED_RGB,
-                    bold=True,
-                )
-            )
-    commands.append(
-        _centered_pdf_text_command(
-            page_height=height,
-            center_x=bar_left + bar_width / 2.0,
-            y_top=68.0,
-            text="Exclusive genes",
-            font="F2",
-            size=CHART_FONT_SIZE_PT,
-            color=MUTED_RGB,
-            bold=True,
-        )
-    )
-    for row_index, row in enumerate(plot_rows):
-        y = matrix_top + row_index * row_gap
-        line_y = _pdf_top_to_bottom(height, y)
-        commands.append(
-            f"0.945 0.961 0.976 RG 0.7 w 16 {line_y:.2f} m {width - 16.0:.2f} {line_y:.2f} l S"
-        )
-        included = set(row.member_keys)
-        included_columns = [
-            column for column, gene_set in enumerate(gene_sets) if gene_set.key in included
-        ]
-        if len(included_columns) > 1:
-            start_x = matrix_left + min(included_columns) * column_gap
-            end_x = matrix_left + max(included_columns) * column_gap
-            commands.append(
-                f"{MUTED_RGB[0]:.3f} {MUTED_RGB[1]:.3f} {MUTED_RGB[2]:.3f} RG 1.2 w {start_x:.2f} {line_y:.2f} m {end_x:.2f} {line_y:.2f} l S"
-            )
-        for column, gene_set in enumerate(gene_sets):
-            x = matrix_left + column * column_gap
-            circle_path = _pdf_circle_path(page_height=height, cx=x, cy=y, radius=marker_radius)
-            if gene_set.key in included:
-                red, green, blue = _hex_to_rgb(gene_set.color)
-                commands.append(f"{red:.3f} {green:.3f} {blue:.3f} rg {circle_path} f")
-                marker_stroke = MUTED_RGB
-            else:
-                commands.append(f"1 1 1 rg {circle_path} f")
-                marker_stroke = GRID_RGB
-            commands.append(
-                f"{marker_stroke[0]:.3f} {marker_stroke[1]:.3f} {marker_stroke[2]:.3f} RG 0.8 w {circle_path} S"
-            )
-        bar_len = bar_width * row.count / denominator
-        bg_y = _pdf_top_to_bottom(height, y - 6.0, 12.0)
-        commands.append(f"0.973 0.980 0.988 rg {bar_left:.2f} {bg_y:.2f} {bar_width:.2f} 12 re f")
-        commands.append(
-            f"{GRID_RGB[0]:.3f} {GRID_RGB[1]:.3f} {GRID_RGB[2]:.3f} RG 0.7 w {bar_left:.2f} {bg_y:.2f} {bar_width:.2f} 12 re S"
-        )
-        if row.count > 0:
-            if bar_len >= 1.2:
-                commands.append(
-                    f"0.114 0.306 0.847 rg {bar_left:.2f} {bg_y:.2f} {bar_len:.2f} 12 re f"
-                )
-            else:
-                marker_x = bar_left + bar_len
-                commands.append(
-                    f"0.114 0.306 0.847 RG 1.2 w {marker_x:.2f} {bg_y:.2f} m {marker_x:.2f} {bg_y + 12.0:.2f} l S"
-                )
-        commands.append(
-            _pdf_text_command(
-                page_height=height,
-                x=bar_left + bar_width + 8.0,
-                y_top=y + 3.0,
-                text=f"{row.count:,}",
-                font="F1",
-                size=CHART_FONT_SIZE_PT,
-                color=MUTED_RGB,
-            )
-        )
-    if not plot_rows:
-        commands.append(
-            _pdf_text_command(
-                page_height=height,
-                x=16,
-                y_top=101,
-                text="No non-empty exclusive overlaps were available for plotting.",
-                font="F1",
-                size=CHART_FONT_SIZE_PT,
-                color=MUTED_RGB,
-            )
-        )
-    return write_single_page_pdf(
-        width=width, height=height, commands=commands, output_path=output_path
-    )
-
-
 def update_plot_manifest(
     manifest_path: Path,
     *,
     artifacts: PipelinePlotArtifacts,
     metrics: PipelinePlotMetrics,
     gene_sets: tuple[PipelineGeneSet, ...],
-    overlap_rows: tuple[GeneOverlapRow, ...],
     annotation_consistency: AnnotationConsistencySummary | None = None,
 ) -> None:
     if manifest_path.exists():
@@ -2749,7 +2481,6 @@ def update_plot_manifest(
     pipeline_payload: dict[str, object] = {
         "enabled": True,
         "stage_wise": True,
-        "gene_id_overlap": True,
         "summary_json": str(artifacts.summary_json),
         "summary_tsv": str(artifacts.summary_tsv),
         "gene_flow_tsv": str(artifacts.gene_flow_tsv),
@@ -2758,13 +2489,9 @@ def update_plot_manifest(
         "event_counts_tsv": str(artifacts.event_counts_tsv),
         "event_counts_svg": str(artifacts.event_counts_svg),
         "event_counts_pdf": str(artifacts.event_counts_pdf),
-        "overlap_tsv": str(artifacts.overlap_tsv),
-        "overlap_svg": str(artifacts.overlap_svg),
-        "overlap_pdf": str(artifacts.overlap_pdf),
         "metrics": metrics.to_dict(),
         "sources": metrics.sources,
         "gene_sets": {gene_set.key: gene_set.to_dict() for gene_set in gene_sets},
-        "overlap": {"row_count": len(overlap_rows)},
     }
     if annotation_consistency is not None:
         pipeline_payload["annotation_consistency"] = {

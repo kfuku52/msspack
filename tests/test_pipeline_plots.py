@@ -456,20 +456,23 @@ class PipelinePlotTests(unittest.TestCase):
             )
             combined_svg = svg_path.read_text(encoding="utf-8")
             combined_pdf = pdf_path.read_bytes().decode("latin-1")
-        self.assertIn('viewBox="0 0 518.40 400.00"', combined_svg)
+        self.assertIn('viewBox="0 0 518.40 432.00"', combined_svg)
         self.assertEqual(combined_svg.count('class="summary-pie-title"'), 3)
         self.assertIn("Input CDS BUSCO", combined_svg)
         self.assertIn("Boundary-adjusted CDS BUSCO", combined_svg)
         self.assertIn("BUSCO genes n=100", combined_svg)
-        self.assertIn("CDS input n=4; embryophyta_odb12", combined_svg)
+        self.assertIn("CDS input n=4", combined_svg)
+        self.assertIn("embryophyta_odb12", combined_svg)
         self.assertIn("Name consistency (n=4)", combined_svg)
-        self.assertIn("Close family peer: id&gt;=70%, cov&gt;=80%", combined_svg)
+        self.assertIn("Close family peer", combined_svg)
+        self.assertIn("id&gt;=70%, cov&gt;=80%", combined_svg)
         self.assertIn("Consistent 50.0%", combined_svg)
-        self.assertIn("Auto-resolved variation 25.0%", combined_svg)
+        self.assertIn("Auto-resolved family", combined_svg)
+        self.assertIn("variation 25.0%", combined_svg)
         self.assertIn('fill-opacity="0.72"', combined_svg)
         self.assertEqual(combined_svg.count('stroke-dasharray="3 2"'), 3)
-        self.assertEqual(combined_svg.count('height="100.00" rx="4"'), 3)
-        self.assertIn("/MediaBox [0 0 518.40 400.00]", combined_pdf)
+        self.assertEqual(combined_svg.count('height="132.00" rx="4"'), 3)
+        self.assertIn("/MediaBox [0 0 518.40 432.00]", combined_pdf)
 
     def test_load_functional_annotation_summary_groups_evidence_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -809,6 +812,14 @@ class PipelinePlotTests(unittest.TestCase):
                 ["g23"],
             )
             _write_busco_comparison(output_root / "busco" / "cds" / "comparison.json")
+            plots_dir = output_root / "plots"
+            plots_dir.mkdir()
+            legacy_overlap_paths = tuple(
+                plots_dir / f"pipeline-gene-overlap.{suffix}"
+                for suffix in ("tsv", "svg", "pdf")
+            )
+            for legacy_path in legacy_overlap_paths:
+                legacy_path.write_text("legacy\n", encoding="utf-8")
 
             artifacts = run_pipeline_plots(config_path)
             summary_lines = summarize_pipeline_plots(artifacts)
@@ -822,9 +833,7 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertTrue(artifacts.event_counts_tsv.exists())
             self.assertTrue(artifacts.event_counts_svg.exists())
             self.assertTrue(artifacts.event_counts_pdf.exists())
-            self.assertTrue(artifacts.overlap_tsv.exists())
-            self.assertTrue(artifacts.overlap_svg.exists())
-            self.assertTrue(artifacts.overlap_pdf.exists())
+            self.assertTrue(all(not path.exists() for path in legacy_overlap_paths))
             gene_flow_tsv = artifacts.gene_flow_tsv.read_text(encoding="utf-8")
             self.assertNotIn("after_transcript", gene_flow_tsv)
             self.assertNotIn("after_inframe", gene_flow_tsv)
@@ -833,7 +842,6 @@ class PipelinePlotTests(unittest.TestCase):
             svg_texts = [
                 artifacts.gene_flow_svg.read_text(encoding="utf-8"),
                 artifacts.event_counts_svg.read_text(encoding="utf-8"),
-                artifacts.overlap_svg.read_text(encoding="utf-8"),
             ]
             for svg_text in svg_texts:
                 self.assertIn("font-size:8pt", svg_text)
@@ -894,33 +902,19 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertIn("CDS boundary-adjusted genes", svg_texts[1])
             self.assertIn('width="7.2in"', svg_texts[1])
             self.assertIn('viewBox="0 0 518.40 298.00"', svg_texts[1])
-            self.assertIn(
-                "Changed-gene overlap",
-                svg_texts[2],
-            )
-            self.assertIn(">Coordinate</tspan>", svg_texts[2])
-            self.assertIn(">duplicate</tspan>", svg_texts[2])
-            self.assertIn("<circle", svg_texts[2])
-            self.assertIn('width="7.2in"', svg_texts[2])
-            self.assertIn('viewBox="0 0 518.40 281.00"', svg_texts[2])
             event_counts_pdf = artifacts.event_counts_pdf.read_bytes().decode("latin-1")
             self.assertIn("/MediaBox [0 0 518.40 298.00]", event_counts_pdf)
-            overlap_pdf = artifacts.overlap_pdf.read_bytes().decode("latin-1")
-            self.assertIn("/MediaBox [0 0 518.40 281.00]", overlap_pdf)
             payload = json.loads(artifacts.summary_json.read_text(encoding="utf-8"))
             self.assertEqual(payload["metrics"]["converted_to_misc_genes"], 1)
             self.assertEqual(payload["metrics"]["final_cds_genes"], 94)
-            self.assertEqual(payload["overlap"]["row_count"], 7)
+            self.assertNotIn("overlap", payload)
             self.assertIn("plots", manifest)
             self.assertIn("pipeline", manifest["plots"])
             self.assertEqual(
                 manifest["plots"]["pipeline"]["gene_flow_pdf"],
                 str(artifacts.gene_flow_pdf),
             )
-            self.assertEqual(
-                manifest["plots"]["pipeline"]["overlap_pdf"],
-                str(artifacts.overlap_pdf),
-            )
+            self.assertNotIn("overlap_pdf", manifest["plots"]["pipeline"])
             self.assertEqual(len(summary_lines), 1)
             self.assertIn("dedup_removed=5", summary_lines[0])
             self.assertIn("misc_feature_genes=1", summary_lines[0])

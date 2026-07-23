@@ -135,9 +135,6 @@ class ReportTests(unittest.TestCase):
                 "pipeline-event-counts.tsv",
                 "pipeline-event-counts.svg",
                 "pipeline-event-counts.pdf",
-                "pipeline-gene-overlap.tsv",
-                "pipeline-gene-overlap.svg",
-                "pipeline-gene-overlap.pdf",
                 "functional-annotation-name-consistency.tsv",
                 "functional-annotation-name-consistency.svg",
                 "functional-annotation-name-consistency.pdf",
@@ -214,9 +211,6 @@ class ReportTests(unittest.TestCase):
                                 "event_counts_tsv": str(plots_dir / "pipeline-event-counts.tsv"),
                                 "event_counts_svg": str(plots_dir / "pipeline-event-counts.svg"),
                                 "event_counts_pdf": str(plots_dir / "pipeline-event-counts.pdf"),
-                                "overlap_tsv": str(plots_dir / "pipeline-gene-overlap.tsv"),
-                                "overlap_svg": str(plots_dir / "pipeline-gene-overlap.svg"),
-                                "overlap_pdf": str(plots_dir / "pipeline-gene-overlap.pdf"),
                                 "annotation_consistency": {
                                     "name_consistency_tsv": str(
                                         plots_dir / "functional-annotation-name-consistency.tsv"
