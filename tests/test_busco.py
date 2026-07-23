@@ -37,11 +37,13 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
         with tempfile.TemporaryDirectory() as tmp_dir:
             summary_path = Path(tmp_dir) / "short_summary.txt"
             summary_path.write_text(summary_text, encoding="utf-8")
+            input_fasta = Path(tmp_dir) / "input.fa"
+            input_fasta.write_text(">a\nATG\n>b\nATG\n", encoding="utf-8")
 
             summary = parse_short_summary(
                 summary_path,
                 label="input",
-                input_fasta=Path("/tmp/input.fa"),
+                input_fasta=input_fasta,
                 raw_output_dir=Path("/tmp/raw"),
                 selection_strategy="auto-lineage",
             )
@@ -54,6 +56,8 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
         self.assertEqual(summary.single_copy_count, 414)
         self.assertAlmostEqual(summary.complete_pct, 98.6)
         self.assertEqual(summary.selection_strategy, "auto-lineage")
+        self.assertEqual(summary.input_sequence_count, 2)
+        self.assertEqual(summary.to_dict()["input_sequence_count"], 2)
 
     def test_parse_short_summary_accepts_transcriptome_mode(self) -> None:
         summary_text = """\
@@ -106,16 +110,20 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
             base = Path(tmp_dir)
             short_summary = base / "short_summary.txt"
             short_summary.write_text(summary_text, encoding="utf-8")
+            input_fasta = base / "input.fa"
+            processed_fasta = base / "processed.fa"
+            input_fasta.write_text(">a\nATG\n>b\nATG\n", encoding="utf-8")
+            processed_fasta.write_text(">a\nATG\n", encoding="utf-8")
             input_summary = parse_short_summary(
                 short_summary,
                 label="input",
-                input_fasta=Path("/tmp/input.fa"),
+                input_fasta=input_fasta,
                 raw_output_dir=base / "input",
             )
             processed_summary = parse_short_summary(
                 short_summary,
                 label="processed",
-                input_fasta=Path("/tmp/processed.fa"),
+                input_fasta=processed_fasta,
                 raw_output_dir=base / "processed",
                 selection_strategy="auto-lineage-from-input",
             )
@@ -128,16 +136,19 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
 
         self.assertIn("BUSCO comparison: genome", svg)
         self.assertIn('width="3.6in"', svg)
-        self.assertIn('viewBox="0 0 259.20 187.20"', svg)
+        self.assertIn('viewBox="0 0 259.20 197.20"', svg)
         self.assertIn('y="143.0" text-anchor="middle" class="tick">0%</text>', svg)
         self.assertIn('x="66.0" y="73.0" text-anchor="end" class="label">input</text>', svg)
         self.assertIn('x="66.0" y="127.0" text-anchor="end" class="label">processed</text>', svg)
         self.assertIn("input", svg)
         self.assertIn("processed", svg)
         self.assertIn("embryophyta_odb12", svg)
+        self.assertIn("BUSCO genes n=425", svg)
+        self.assertIn("Genome input n=2", svg)
+        self.assertIn("Genome input n=1", svg)
         self.assertIn("font-size:8pt", svg)
         self.assertNotRegex(svg, r"font-size:\d+px")
-        self.assertIn("/MediaBox [0 0 259.20 187.20]", pdf)
+        self.assertIn("/MediaBox [0 0 259.20 197.20]", pdf)
 
     def test_summarize_busco_artifacts_reports_metric_changes(self) -> None:
         summary_text_input = """\

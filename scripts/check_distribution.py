@@ -24,6 +24,9 @@ def verify_distribution(path: Path) -> None:
         required_suffixes = (
             "LICENSE",
             "THIRD_PARTY_NOTICES.md",
+            "msspack/annotation_consistency.py",
+            "msspack/annotation_consistency_plots.py",
+            "msspack/functional_annotation.py",
             "msspack/py.typed",
             "msspack/templates/msspack.example.toml",
         )
@@ -40,6 +43,11 @@ def verify_distribution(path: Path) -> None:
             "docs/assets/sample-pipeline-gene-flow.sankey.svg",
             "examples/msspack.example.toml",
             "scripts/check_distribution.py",
+            "src/msspack/annotation_consistency.py",
+            "src/msspack/annotation_consistency_plots.py",
+            "src/msspack/functional_annotation.py",
+            "tests/test_annotation_consistency.py",
+            "tests/test_functional_annotation.py",
             "tests/fixtures/minimal_pack/config.toml",
             "tests/fixtures/minimal_pack/expected.ann.txt",
             "tests/fixtures/minimal_pack/expected.fasta",

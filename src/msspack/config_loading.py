@@ -7,6 +7,8 @@ from typing import Any
 from .config_errors import ConfigError
 from .config_models import (
     BuscoConfig,
+    FunctionalAnnotationConfig,
+    FunctionalAnnotationConsistencyConfig,
     InputsConfig,
     PipelineConfig,
     ProjectConfig,
@@ -107,6 +109,64 @@ SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
         "force": bool,
         "opt_out_run_stats": bool,
     },
+    "functional_annotation": {
+        "enabled": bool,
+        "diamond_command": str,
+        "hmmscan_command": str,
+        "hmmpress_command": str,
+        "rpsblast_command": str,
+        "rpsbproc_command": str,
+        "threads": int,
+        "sensitivity": str,
+        "evalue": (int, float),
+        "max_target_seqs": int,
+        "min_bitscore": (int, float),
+        "min_identity": (int, float),
+        "min_query_coverage": (int, float),
+        "min_subject_coverage": (int, float),
+        "near_top_bitscore_ratio": (int, float),
+        "min_token_score": (int, float),
+        "overwrite_existing": bool,
+        "swissprot_enabled": bool,
+        "swissprot_fasta": str,
+        "swissprot_url": str,
+        "swissprot_weight": (int, float),
+        "uniref90_enabled": bool,
+        "uniref90_fasta": str,
+        "uniref90_url": str,
+        "uniref90_taxon_id": int,
+        "uniref90_weight": (int, float),
+        "reference_proteins": str,
+        "reference_name": str,
+        "reference_weight": (int, float),
+        "pfam_enabled": bool,
+        "pfam_hmm": str,
+        "pfam_url": str,
+        "pfam_max_i_evalue": (int, float),
+        "pfam_min_domain_coverage": (int, float),
+        "cdd_enabled": bool,
+        "cdd_database": str,
+        "cdd_url": str,
+        "cdd_data_dir": str,
+        "cdd_data_url": str,
+        "cdd_evalue": (int, float),
+        "consistency": dict,
+    },
+}
+
+FUNCTIONAL_ANNOTATION_CONSISTENCY_TYPES: dict[str, ExpectedType] = {
+    "enabled": bool,
+    "harmonize_safe_equivalents": bool,
+    "auto_resolve_conflicts": bool,
+    "near_identical_identity": (int, float),
+    "near_identical_coverage": (int, float),
+    "family_identity": (int, float),
+    "family_coverage": (int, float),
+    "broad_identity": (int, float),
+    "broad_coverage": (int, float),
+    "evalue": (int, float),
+    "name_similarity_threshold": (int, float),
+    "source_pair_min_pairs": int,
 }
 
 
@@ -130,7 +190,11 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
             raise ConfigError(f"Unknown config key(s): {dotted}")
         for key, value in values.items():
             expected = schema[key]
-            if expected is int and isinstance(value, bool):
+            if isinstance(value, bool) and (
+                expected is int
+                or expected is float
+                or (isinstance(expected, tuple) and any(item in (int, float) for item in expected))
+            ):
                 valid = False
             else:
                 valid = isinstance(value, expected)
@@ -143,6 +207,33 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
                 raise ConfigError(
                     f"Config value '{section_name}.{key}' must contain only strings"
                 )
+            if section_name == "functional_annotation" and key == "consistency":
+                assert isinstance(value, dict)
+                unknown_consistency_keys = sorted(
+                    set(value) - set(FUNCTIONAL_ANNOTATION_CONSISTENCY_TYPES)
+                )
+                if unknown_consistency_keys:
+                    dotted = ", ".join(
+                        f"functional_annotation.consistency.{item}"
+                        for item in unknown_consistency_keys
+                    )
+                    raise ConfigError(f"Unknown config key(s): {dotted}")
+                for nested_key, nested_value in value.items():
+                    nested_expected = FUNCTIONAL_ANNOTATION_CONSISTENCY_TYPES[nested_key]
+                    nested_numeric_bool = isinstance(nested_value, bool) and (
+                        nested_expected is int
+                        or nested_expected is float
+                        or (
+                            isinstance(nested_expected, tuple)
+                            and any(item in (int, float) for item in nested_expected)
+                        )
+                    )
+                    if nested_numeric_bool or not isinstance(nested_value, nested_expected):
+                        raise ConfigError(
+                            "Config value 'functional_annotation.consistency."
+                            f"{nested_key}' must be {_type_label(nested_expected)}, "
+                            f"got {type(nested_value).__name__}"
+                        )
             strings = value if isinstance(value, list) else [value]
             if any(
                 isinstance(item, str)
@@ -296,6 +387,112 @@ def load_busco_config(data: dict[str, Any]) -> BuscoConfig:
     )
 
 
+def load_functional_annotation_config(data: dict[str, Any]) -> FunctionalAnnotationConfig:
+    defaults = FunctionalAnnotationConfig()
+    consistency_data = data.get("consistency", {})
+    if not isinstance(consistency_data, dict):
+        consistency_data = {}
+    consistency_defaults = FunctionalAnnotationConsistencyConfig()
+    return FunctionalAnnotationConfig(
+        enabled=bool(data.get("enabled", defaults.enabled)),
+        diamond_command=str(data.get("diamond_command", defaults.diamond_command)),
+        hmmscan_command=str(data.get("hmmscan_command", defaults.hmmscan_command)),
+        hmmpress_command=str(data.get("hmmpress_command", defaults.hmmpress_command)),
+        rpsblast_command=str(data.get("rpsblast_command", defaults.rpsblast_command)),
+        rpsbproc_command=str(data.get("rpsbproc_command", defaults.rpsbproc_command)),
+        threads=int(data.get("threads", defaults.threads)),
+        sensitivity=str(data.get("sensitivity", defaults.sensitivity)),
+        evalue=float(data.get("evalue", defaults.evalue)),
+        max_target_seqs=int(data.get("max_target_seqs", defaults.max_target_seqs)),
+        min_bitscore=float(data.get("min_bitscore", defaults.min_bitscore)),
+        min_identity=float(data.get("min_identity", defaults.min_identity)),
+        min_query_coverage=float(data.get("min_query_coverage", defaults.min_query_coverage)),
+        min_subject_coverage=float(data.get("min_subject_coverage", defaults.min_subject_coverage)),
+        near_top_bitscore_ratio=float(
+            data.get("near_top_bitscore_ratio", defaults.near_top_bitscore_ratio)
+        ),
+        min_token_score=float(data.get("min_token_score", defaults.min_token_score)),
+        overwrite_existing=bool(data.get("overwrite_existing", defaults.overwrite_existing)),
+        swissprot_enabled=bool(data.get("swissprot_enabled", defaults.swissprot_enabled)),
+        swissprot_fasta=str(data.get("swissprot_fasta", defaults.swissprot_fasta)),
+        swissprot_url=str(data.get("swissprot_url", defaults.swissprot_url)),
+        swissprot_weight=float(data.get("swissprot_weight", defaults.swissprot_weight)),
+        uniref90_enabled=bool(data.get("uniref90_enabled", defaults.uniref90_enabled)),
+        uniref90_fasta=str(data.get("uniref90_fasta", defaults.uniref90_fasta)),
+        uniref90_url=str(data.get("uniref90_url", defaults.uniref90_url)),
+        uniref90_taxon_id=int(data.get("uniref90_taxon_id", defaults.uniref90_taxon_id)),
+        uniref90_weight=float(data.get("uniref90_weight", defaults.uniref90_weight)),
+        reference_proteins=str(data.get("reference_proteins", defaults.reference_proteins)),
+        reference_name=str(data.get("reference_name", defaults.reference_name)),
+        reference_weight=float(data.get("reference_weight", defaults.reference_weight)),
+        pfam_enabled=bool(data.get("pfam_enabled", defaults.pfam_enabled)),
+        pfam_hmm=str(data.get("pfam_hmm", defaults.pfam_hmm)),
+        pfam_url=str(data.get("pfam_url", defaults.pfam_url)),
+        pfam_max_i_evalue=float(data.get("pfam_max_i_evalue", defaults.pfam_max_i_evalue)),
+        pfam_min_domain_coverage=float(
+            data.get("pfam_min_domain_coverage", defaults.pfam_min_domain_coverage)
+        ),
+        cdd_enabled=bool(data.get("cdd_enabled", defaults.cdd_enabled)),
+        cdd_database=str(data.get("cdd_database", defaults.cdd_database)),
+        cdd_url=str(data.get("cdd_url", defaults.cdd_url)),
+        cdd_data_dir=str(data.get("cdd_data_dir", defaults.cdd_data_dir)),
+        cdd_data_url=str(data.get("cdd_data_url", defaults.cdd_data_url)),
+        cdd_evalue=float(data.get("cdd_evalue", defaults.cdd_evalue)),
+        consistency=FunctionalAnnotationConsistencyConfig(
+            enabled=bool(consistency_data.get("enabled", consistency_defaults.enabled)),
+            harmonize_safe_equivalents=bool(
+                consistency_data.get(
+                    "harmonize_safe_equivalents",
+                    consistency_defaults.harmonize_safe_equivalents,
+                )
+            ),
+            auto_resolve_conflicts=bool(
+                consistency_data.get(
+                    "auto_resolve_conflicts",
+                    consistency_defaults.auto_resolve_conflicts,
+                )
+            ),
+            near_identical_identity=float(
+                consistency_data.get(
+                    "near_identical_identity",
+                    consistency_defaults.near_identical_identity,
+                )
+            ),
+            near_identical_coverage=float(
+                consistency_data.get(
+                    "near_identical_coverage",
+                    consistency_defaults.near_identical_coverage,
+                )
+            ),
+            family_identity=float(
+                consistency_data.get("family_identity", consistency_defaults.family_identity)
+            ),
+            family_coverage=float(
+                consistency_data.get("family_coverage", consistency_defaults.family_coverage)
+            ),
+            broad_identity=float(
+                consistency_data.get("broad_identity", consistency_defaults.broad_identity)
+            ),
+            broad_coverage=float(
+                consistency_data.get("broad_coverage", consistency_defaults.broad_coverage)
+            ),
+            evalue=float(consistency_data.get("evalue", consistency_defaults.evalue)),
+            name_similarity_threshold=float(
+                consistency_data.get(
+                    "name_similarity_threshold",
+                    consistency_defaults.name_similarity_threshold,
+                )
+            ),
+            source_pair_min_pairs=int(
+                consistency_data.get(
+                    "source_pair_min_pairs",
+                    consistency_defaults.source_pair_min_pairs,
+                )
+            ),
+        ),
+    )
+
+
 def read_config_data(config_path: Path) -> dict[str, Any]:
     try:
         payload: object = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -321,4 +518,7 @@ def load_sections(data: dict[str, Any]) -> dict[str, Any]:
         "pipeline": load_pipeline_config(section(data, "pipeline")),
         "tools": load_tools_config(section(data, "tools")),
         "busco": load_busco_config(section(data, "busco")),
+        "functional_annotation": load_functional_annotation_config(
+            section(data, "functional_annotation")
+        ),
     }

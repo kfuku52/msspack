@@ -122,6 +122,33 @@ class ManifestRecorder:
         stages_ran = sum(1 for stage in self.stages if stage.ran)
         stages_reused = len(self.stages) - stages_ran
         existing_payload = _read_existing_manifest(path)
+        output_payload = {
+            "root": str(self.output_root),
+            "annotation": _file_info(self.ann_path),
+            "fasta": _file_info(self.fasta_path),
+        }
+        if self.config.functional_annotation.enabled:
+            output_payload["functional_annotation_evidence"] = _file_info(
+                self.output_root / "final" / "functional-annotation.tsv"
+            )
+            output_payload["functional_domain_search_comparison"] = _file_info(
+                self.output_root / "final" / "functional-domain-search-comparison.tsv"
+            )
+            if self.config.functional_annotation.consistency.enabled:
+                output_payload["functional_annotation_consistency"] = _file_info(
+                    self.output_root / "final" / "functional-annotation-consistency.tsv"
+                )
+                output_payload["functional_annotation_families"] = _file_info(
+                    self.output_root / "final" / "functional-annotation-families.tsv"
+                )
+                output_payload["functional_annotation_conflicts"] = _file_info(
+                    self.output_root / "final" / "functional-annotation-conflicts.tsv"
+                )
+                output_payload["functional_annotation_consistency_summary"] = _file_info(
+                    self.output_root
+                    / "final"
+                    / "functional-annotation-consistency-summary.tsv"
+                )
         payload = {
             "schema_version": 1,
             "msspack_version": __version__,
@@ -144,11 +171,7 @@ class ManifestRecorder:
                 "fasta": _file_info(self.config.fasta_path),
                 "gff": _file_info(self.config.gff_path),
             },
-            "outputs": {
-                "root": str(self.output_root),
-                "annotation": _file_info(self.ann_path),
-                "fasta": _file_info(self.fasta_path),
-            },
+            "outputs": output_payload,
             "stages": [
                 {
                     "name": stage.name,

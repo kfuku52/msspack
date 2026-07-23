@@ -6,11 +6,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
+from .annotation_consistency import (
+    audit_annotation_consistency,
+    run_family_similarity_search,
+)
 from .annotation_table import build_annotation_table
 from .build_manifest import ManifestRecorder
 from .config import MSSPackConfig, load_config
 from .ddbj_tools import describe_installation, list_installed
 from .execution import module_origin, path_list, run_if_needed
+from .functional_annotation import (
+    apply_functional_annotations,
+    run_cdd_domain_search,
+    run_diamond_annotation_search,
+    run_pfam_domain_search,
+    write_empty_cdd_results,
+    write_empty_diamond_results,
+    write_empty_pfam_results,
+    write_translated_protein_fasta,
+)
 from .gff_cleanup import (
     drop_duplicate_coordinate_genes,
     fix_gff_semicolons_file,
@@ -38,6 +52,7 @@ from .submission_render import render_header
 from .utils import (
     MSSPackError,
     ensure_dir,
+    expand_path,
 )
 from .validation import ValidationArtifacts, ValidationOptions, run_validation
 
@@ -69,6 +84,8 @@ class ModulePaths:
     mss_postprocess: Path
     padding_tools: Path
     annotation_table: Path
+    annotation_consistency: Path
+    functional_annotation: Path
     mss_converter_core: Path
     mss_converter_features: Path
     mss_converter_gaps: Path
@@ -147,6 +164,8 @@ def _resolve_modules() -> ModulePaths:
         mss_postprocess=module_origin("msspack.mss_postprocess"),
         padding_tools=module_origin("msspack.padding_tools"),
         annotation_table=module_origin("msspack.annotation_table"),
+        annotation_consistency=module_origin("msspack.annotation_consistency"),
+        functional_annotation=module_origin("msspack.functional_annotation"),
         mss_converter_core=module_origin("msspack.mss_converter.core"),
         mss_converter_features=module_origin("msspack.mss_converter.features"),
         mss_converter_gaps=module_origin("msspack.mss_converter.gaps"),
@@ -532,6 +551,406 @@ def _build_annotation_artifacts(
             metrics_path=annotation_normalize_metrics,
         ),
     )
+
+    if config.functional_annotation.enabled:
+        annotation_config = config.functional_annotation
+        protein_fasta = intermediate / "14a.functional-annotation.proteins.fasta"
+        protein_metrics = logs / "14a.functional-annotation-extract-proteins.metrics.json"
+        ctx.run_step(
+            name="14a.functional-annotation-extract-proteins",
+            outputs=[
+                protein_fasta,
+                logs / "14a.functional-annotation-extract-proteins.log",
+                protein_metrics,
+            ],
+            dependencies=[
+                inputs.downstream_fasta,
+                prepared_gff.padded_gff,
+                ctx.config_path,
+                ctx.modules.functional_annotation,
+            ],
+            action=lambda: write_translated_protein_fasta(
+                fasta_path=inputs.downstream_fasta,
+                gff_path=prepared_gff.padded_gff,
+                output_path=protein_fasta,
+                genetic_code=config.sample.genetic_code,
+                log_path=logs / "14a.functional-annotation-extract-proteins.log",
+                metrics_path=protein_metrics,
+            ),
+        )
+
+        diamond_hits = intermediate / "14b.functional-annotation.diamond.tsv"
+        diamond_metadata = intermediate / "14b.functional-annotation.diamond-metadata.tsv"
+        diamond_provenance = logs / "14b.functional-annotation-primary.database.json"
+        diamond_metrics = logs / "14b.functional-annotation-primary-search.metrics.json"
+        diamond_dependencies: list[Path] = [
+            protein_fasta,
+            ctx.config_path,
+            ctx.modules.functional_annotation,
+        ]
+        if annotation_config.swissprot_fasta:
+            diamond_dependencies.append(
+                expand_path(annotation_config.swissprot_fasta, config.base_dir)
+            )
+        if annotation_config.reference_proteins:
+            diamond_dependencies.append(
+                expand_path(annotation_config.reference_proteins, config.base_dir)
+            )
+        has_diamond_source = bool(
+            annotation_config.swissprot_enabled or annotation_config.reference_proteins.strip()
+        )
+        ctx.run_step(
+            name="14b.functional-annotation-primary-search",
+            outputs=[
+                diamond_hits,
+                diamond_metadata,
+                diamond_provenance,
+                logs / "14b.functional-annotation-primary-search.log",
+                diamond_metrics,
+            ],
+            dependencies=diamond_dependencies,
+            action=(
+                lambda: run_diamond_annotation_search(
+                    protein_fasta_path=protein_fasta,
+                    output_path=diamond_hits,
+                    metadata_path=diamond_metadata,
+                    provenance_path=diamond_provenance,
+                    log_path=logs / "14b.functional-annotation-primary-search.log",
+                    metrics_path=diamond_metrics,
+                    config=annotation_config,
+                    base_dir=config.base_dir,
+                    cache_dir=config.cache_dir / "functional-annotation",
+                    source_group="primary",
+                    step_name="functional-annotation-primary-search",
+                )
+            )
+            if has_diamond_source
+            else lambda: write_empty_diamond_results(
+                output_path=diamond_hits,
+                metadata_path=diamond_metadata,
+                provenance_path=diamond_provenance,
+                log_path=logs / "14b.functional-annotation-primary-search.log",
+                metrics_path=diamond_metrics,
+                step_name="functional-annotation-primary-search",
+            ),
+        )
+
+        uniref90_hits = intermediate / "14c.functional-annotation.uniref90.tsv"
+        uniref90_metadata = intermediate / "14c.functional-annotation.uniref90-metadata.tsv"
+        uniref90_provenance = logs / "14c.functional-annotation-uniref90.database.json"
+        uniref90_metrics = logs / "14c.functional-annotation-uniref90-search.metrics.json"
+        uniref90_dependencies = [
+            protein_fasta,
+            diamond_hits,
+            diamond_metadata,
+            ctx.config_path,
+            ctx.modules.functional_annotation,
+        ]
+        if annotation_config.uniref90_fasta:
+            uniref90_dependencies.append(
+                expand_path(annotation_config.uniref90_fasta, config.base_dir)
+            )
+        ctx.run_step(
+            name="14c.functional-annotation-uniref90-search",
+            outputs=[
+                uniref90_hits,
+                uniref90_metadata,
+                uniref90_provenance,
+                logs / "14c.functional-annotation-uniref90-search.log",
+                uniref90_metrics,
+            ],
+            dependencies=uniref90_dependencies,
+            action=(
+                lambda: run_diamond_annotation_search(
+                    protein_fasta_path=protein_fasta,
+                    output_path=uniref90_hits,
+                    metadata_path=uniref90_metadata,
+                    provenance_path=uniref90_provenance,
+                    log_path=logs / "14c.functional-annotation-uniref90-search.log",
+                    metrics_path=uniref90_metrics,
+                    config=annotation_config,
+                    base_dir=config.base_dir,
+                    cache_dir=config.cache_dir / "functional-annotation",
+                    source_group="uniref90",
+                    prior_similarity_inputs=((diamond_hits, diamond_metadata),),
+                    step_name="functional-annotation-uniref90-search",
+                )
+            )
+            if annotation_config.uniref90_enabled
+            else lambda: write_empty_diamond_results(
+                output_path=uniref90_hits,
+                metadata_path=uniref90_metadata,
+                provenance_path=uniref90_provenance,
+                log_path=logs / "14c.functional-annotation-uniref90-search.log",
+                metrics_path=uniref90_metrics,
+                reason="UniRef90 fallback is disabled.",
+                step_name="functional-annotation-uniref90-search",
+            ),
+        )
+
+        pfam_hits = intermediate / "14d.functional-annotation.pfam.domtblout"
+        pfam_metadata = intermediate / "14d.functional-annotation.pfam-metadata.tsv"
+        pfam_provenance = logs / "14d.functional-annotation-pfam.database.json"
+        pfam_metrics = logs / "14d.functional-annotation-pfam-search.metrics.json"
+        pfam_dependencies: list[Path] = [
+            protein_fasta,
+            diamond_hits,
+            diamond_metadata,
+            uniref90_hits,
+            uniref90_metadata,
+            ctx.config_path,
+            ctx.modules.functional_annotation,
+        ]
+        if annotation_config.pfam_hmm:
+            pfam_dependencies.append(expand_path(annotation_config.pfam_hmm, config.base_dir))
+        ctx.run_step(
+            name="14d.functional-annotation-pfam-search",
+            outputs=[
+                pfam_hits,
+                pfam_metadata,
+                pfam_provenance,
+                logs / "14d.functional-annotation-pfam-search.log",
+                pfam_metrics,
+            ],
+            dependencies=pfam_dependencies,
+            action=(
+                lambda: run_pfam_domain_search(
+                    protein_fasta_path=protein_fasta,
+                    output_path=pfam_hits,
+                    metadata_path=pfam_metadata,
+                    provenance_path=pfam_provenance,
+                    log_path=logs / "14d.functional-annotation-pfam-search.log",
+                    metrics_path=pfam_metrics,
+                    config=annotation_config,
+                    base_dir=config.base_dir,
+                    cache_dir=config.cache_dir / "functional-annotation",
+                    diamond_hits_path=diamond_hits,
+                    diamond_metadata_path=diamond_metadata,
+                    additional_similarity_inputs=((uniref90_hits, uniref90_metadata),),
+                )
+            )
+            if annotation_config.pfam_enabled
+            else lambda: write_empty_pfam_results(
+                output_path=pfam_hits,
+                metadata_path=pfam_metadata,
+                provenance_path=pfam_provenance,
+                log_path=logs / "14d.functional-annotation-pfam-search.log",
+                metrics_path=pfam_metrics,
+            ),
+        )
+
+        cdd_hits = intermediate / "14e.functional-annotation.cdd.tsv"
+        cdd_metadata = intermediate / "14e.functional-annotation.cdd-metadata.tsv"
+        cdd_provenance = logs / "14e.functional-annotation-cdd.database.json"
+        cdd_metrics = logs / "14e.functional-annotation-cdd-search.metrics.json"
+        cdd_dependencies: list[Path] = [
+            protein_fasta,
+            diamond_hits,
+            diamond_metadata,
+            uniref90_hits,
+            uniref90_metadata,
+            ctx.config_path,
+            ctx.modules.functional_annotation,
+        ]
+        if annotation_config.cdd_database:
+            configured_cdd = expand_path(annotation_config.cdd_database, config.base_dir)
+            cdd_dependencies.append(
+                configured_cdd / "Cdd.aux"
+                if configured_cdd.is_dir()
+                else Path(str(configured_cdd) + ".aux")
+            )
+        if annotation_config.cdd_data_dir:
+            cdd_dependencies.append(
+                expand_path(annotation_config.cdd_data_dir, config.base_dir) / "cddid.tbl"
+            )
+        ctx.run_step(
+            name="14e.functional-annotation-cdd-search",
+            outputs=[
+                cdd_hits,
+                cdd_metadata,
+                cdd_provenance,
+                logs / "14e.functional-annotation-cdd-search.log",
+                cdd_metrics,
+            ],
+            dependencies=cdd_dependencies,
+            action=(
+                lambda: run_cdd_domain_search(
+                    protein_fasta_path=protein_fasta,
+                    output_path=cdd_hits,
+                    metadata_path=cdd_metadata,
+                    provenance_path=cdd_provenance,
+                    log_path=logs / "14e.functional-annotation-cdd-search.log",
+                    metrics_path=cdd_metrics,
+                    config=annotation_config,
+                    base_dir=config.base_dir,
+                    cache_dir=config.cache_dir / "functional-annotation",
+                    similarity_inputs=(
+                        (diamond_hits, diamond_metadata),
+                        (uniref90_hits, uniref90_metadata),
+                    ),
+                )
+            )
+            if annotation_config.cdd_enabled
+            else lambda: write_empty_cdd_results(
+                output_path=cdd_hits,
+                metadata_path=cdd_metadata,
+                provenance_path=cdd_provenance,
+                log_path=logs / "14e.functional-annotation-cdd-search.log",
+                metrics_path=cdd_metrics,
+            ),
+        )
+
+        functional_annotation_table = intermediate / "14f.annotation-table.functional.tsv"
+        functional_evidence = ctx.outputs.final / "functional-annotation.tsv"
+        functional_domain_comparison = (
+            ctx.outputs.final / "functional-domain-search-comparison.tsv"
+        )
+        functional_metrics = logs / "14f.functional-annotation-assign-products.metrics.json"
+        ctx.run_step(
+            name="14f.functional-annotation-assign-products",
+            outputs=[
+                functional_annotation_table,
+                functional_evidence,
+                functional_domain_comparison,
+                logs / "14f.functional-annotation-assign-products.log",
+                functional_metrics,
+            ],
+            dependencies=[
+                annotation_table,
+                diamond_hits,
+                diamond_metadata,
+                uniref90_hits,
+                uniref90_metadata,
+                pfam_hits,
+                pfam_metadata,
+                cdd_hits,
+                cdd_metadata,
+                pfam_metrics,
+                logs / "14d.functional-annotation-pfam-search.log",
+                cdd_metrics,
+                logs / "14e.functional-annotation-cdd-search.log",
+                ctx.config_path,
+                ctx.modules.functional_annotation,
+            ],
+            action=lambda: apply_functional_annotations(
+                annotation_table_path=annotation_table,
+                diamond_hits_path=diamond_hits,
+                diamond_metadata_path=diamond_metadata,
+                uniref90_hits_path=uniref90_hits,
+                uniref90_metadata_path=uniref90_metadata,
+                pfam_hits_path=pfam_hits,
+                pfam_metadata_path=pfam_metadata,
+                cdd_hits_path=cdd_hits,
+                cdd_metadata_path=cdd_metadata,
+                output_path=functional_annotation_table,
+                evidence_path=functional_evidence,
+                log_path=logs / "14f.functional-annotation-assign-products.log",
+                metrics_path=functional_metrics,
+                config=annotation_config,
+                missing_product=config.pipeline.replace_product_with,
+                domain_comparison_path=functional_domain_comparison,
+                pfam_search_metrics_path=pfam_metrics,
+                pfam_search_log_path=logs / "14d.functional-annotation-pfam-search.log",
+                cdd_search_metrics_path=cdd_metrics,
+                cdd_search_log_path=logs / "14e.functional-annotation-cdd-search.log",
+            ),
+        )
+        annotation_table = functional_annotation_table
+
+        if annotation_config.consistency.enabled:
+            family_similarity = (
+                intermediate / "14g.functional-annotation.family-similarity.tsv"
+            )
+            family_provenance = (
+                logs / "14g.functional-annotation-family-search.database.json"
+            )
+            family_metrics = (
+                logs / "14g.functional-annotation-family-search.metrics.json"
+            )
+            ctx.run_step(
+                name="14g.functional-annotation-family-search",
+                outputs=[
+                    family_similarity,
+                    family_provenance,
+                    logs / "14g.functional-annotation-family-search.log",
+                    family_metrics,
+                ],
+                dependencies=[
+                    protein_fasta,
+                    ctx.config_path,
+                    ctx.modules.annotation_consistency,
+                ],
+                action=lambda: run_family_similarity_search(
+                    protein_fasta_path=protein_fasta,
+                    output_path=family_similarity,
+                    provenance_path=family_provenance,
+                    log_path=logs / "14g.functional-annotation-family-search.log",
+                    metrics_path=family_metrics,
+                    config=annotation_config,
+                ),
+            )
+
+            consistent_annotation_table = (
+                intermediate / "14h.annotation-table.consistent.tsv"
+            )
+            consistency_gene_table = (
+                ctx.outputs.final / "functional-annotation-consistency.tsv"
+            )
+            consistency_family_table = (
+                ctx.outputs.final / "functional-annotation-families.tsv"
+            )
+            consistency_pair_table = (
+                ctx.outputs.final / "functional-annotation-consistency-pairs.tsv"
+            )
+            consistency_review_table = (
+                ctx.outputs.final / "functional-annotation-conflicts.tsv"
+            )
+            consistency_summary_table = (
+                ctx.outputs.final / "functional-annotation-consistency-summary.tsv"
+            )
+            consistency_source_pair_table = (
+                ctx.outputs.final / "functional-annotation-source-pairs.tsv"
+            )
+            consistency_metrics = (
+                logs / "14h.functional-annotation-consistency-audit.metrics.json"
+            )
+            ctx.run_step(
+                name="14h.functional-annotation-consistency-audit",
+                outputs=[
+                    consistent_annotation_table,
+                    consistency_gene_table,
+                    consistency_family_table,
+                    consistency_pair_table,
+                    consistency_review_table,
+                    consistency_summary_table,
+                    consistency_source_pair_table,
+                    logs / "14h.functional-annotation-consistency-audit.log",
+                    consistency_metrics,
+                ],
+                dependencies=[
+                    functional_annotation_table,
+                    functional_evidence,
+                    family_similarity,
+                    ctx.config_path,
+                    ctx.modules.annotation_consistency,
+                ],
+                action=lambda: audit_annotation_consistency(
+                    annotation_table_path=functional_annotation_table,
+                    evidence_path=functional_evidence,
+                    similarity_path=family_similarity,
+                    output_annotation_table_path=consistent_annotation_table,
+                    gene_output_path=consistency_gene_table,
+                    family_output_path=consistency_family_table,
+                    pair_output_path=consistency_pair_table,
+                    review_output_path=consistency_review_table,
+                    summary_output_path=consistency_summary_table,
+                    source_pair_output_path=consistency_source_pair_table,
+                    log_path=logs / "14h.functional-annotation-consistency-audit.log",
+                    metrics_path=consistency_metrics,
+                    config=annotation_config,
+                ),
+            )
+            annotation_table = consistent_annotation_table
 
     raw_gff2mss = intermediate / "15.mss.raw.txt"
     gff2mss_metrics = logs / "15.gff2mss.metrics.json"

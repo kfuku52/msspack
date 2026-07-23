@@ -3,9 +3,48 @@ import unittest
 from pathlib import Path
 
 from msspack.config import ConfigError, load_config
+from msspack.config_loading import (
+    _validate_raw_config,
+    load_functional_annotation_config,
+)
+from msspack.config_validation import validate_functional_annotation_config
 
 
 class ConfigTests(unittest.TestCase):
+    def test_loads_and_validates_nested_annotation_consistency_config(self) -> None:
+        raw = {
+            "functional_annotation": {
+                "enabled": True,
+                "consistency": {
+                    "enabled": True,
+                    "harmonize_safe_equivalents": True,
+                    "auto_resolve_conflicts": False,
+                    "family_identity": 72.0,
+                    "source_pair_min_pairs": 7,
+                },
+            }
+        }
+
+        _validate_raw_config(raw)
+        config = load_functional_annotation_config(raw["functional_annotation"])
+        validate_functional_annotation_config(config)
+
+        self.assertTrue(config.consistency.enabled)
+        self.assertTrue(config.consistency.harmonize_safe_equivalents)
+        self.assertFalse(config.consistency.auto_resolve_conflicts)
+        self.assertEqual(config.consistency.family_identity, 72.0)
+        self.assertEqual(config.consistency.source_pair_min_pairs, 7)
+
+    def test_rejects_unknown_annotation_consistency_key(self) -> None:
+        with self.assertRaises(ConfigError):
+            _validate_raw_config(
+                {
+                    "functional_annotation": {
+                        "consistency": {"unknown_threshold": 1},
+                    }
+                }
+            )
+
     def test_load_config_populates_defaults_and_resolves_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -64,6 +103,9 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.busco.run_cds)
             self.assertFalse(config.busco.run_genome)
             self.assertEqual(config.busco.cds_mode, "transcriptome")
+            self.assertFalse(config.functional_annotation.enabled)
+            self.assertTrue(config.functional_annotation.swissprot_enabled)
+            self.assertTrue(config.functional_annotation.pfam_enabled)
             self.assertEqual(config.fasta_path, (base / "input.fa").resolve())
             self.assertEqual(config.gff_path, (base / "input.gff3").resolve())
             self.assertEqual(config.output_dir, (base / "build" / "Demo").resolve())

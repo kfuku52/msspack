@@ -2,6 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .annotation_consistency_plots import (
+    load_name_consistency_plot_data,
+    load_source_consistency_plot_data,
+    prepare_name_consistency_plot_data,
+    prepare_source_consistency_plot_data,
+    write_name_consistency_pdf,
+    write_name_consistency_svg,
+    write_source_consistency_pdf,
+    write_source_consistency_svg,
+)
 from .config import load_config
 from .execution import module_origin, run_if_needed
 from .pipeline_plot_data import (
@@ -52,6 +62,7 @@ def run_pipeline_plots(
         module_origin("msspack.pipeline_plot_data"),
         module_origin("msspack.pipeline_plot_models"),
         module_origin("msspack.pipeline_plot_render"),
+        module_origin("msspack.annotation_consistency_plots"),
     ]
     required_logs = [
         log_dir / "06.drop-duplicate-coordinate-gene.log",
@@ -73,12 +84,23 @@ def run_pipeline_plots(
             artifacts.overlap_tsv,
             artifacts.overlap_svg,
             artifacts.overlap_pdf,
+            artifacts.name_consistency_tsv,
+            artifacts.name_consistency_svg,
+            artifacts.name_consistency_pdf,
+            artifacts.source_consistency_tsv,
+            artifacts.source_consistency_svg,
+            artifacts.source_consistency_pdf,
         ):
             if path.exists():
                 path.unlink()
 
     bundle = collect_pipeline_plot_data(output_root, log_dir)
-    stage_labels, nodes, links = build_sankey(bundle.metrics, bundle.gene_sets)
+    stage_labels, nodes, links = build_sankey(
+        bundle.metrics,
+        bundle.gene_sets,
+        bundle.functional_annotation,
+        bundle.annotation_consistency,
+    )
     busco_summaries = load_sankey_busco_summaries(output_root)
     events = build_event_counts(bundle.metrics)
     busco_comparison_path = output_root / "busco" / "cds" / "comparison.json"
@@ -87,6 +109,16 @@ def run_pipeline_plots(
         *required_logs,
         *(record.path for record in bundle.records.values()),
         *(gene_set.path for gene_set in bundle.gene_sets),
+        *([bundle.functional_annotation.path] if bundle.functional_annotation is not None else []),
+        *(
+            [
+                bundle.annotation_consistency.path,
+                bundle.annotation_consistency.summary_path,
+                bundle.annotation_consistency.source_pair_path,
+            ]
+            if bundle.annotation_consistency is not None
+            else []
+        ),
         *module_paths,
     ]
 
@@ -101,7 +133,12 @@ def run_pipeline_plots(
         dependencies=dependency_paths,
         action=lambda: (
             write_summary_json(bundle.summary_payload, artifacts.summary_json),
-            write_summary_tsv(bundle.metrics, artifacts.summary_tsv),
+            write_summary_tsv(
+                bundle.metrics,
+                artifacts.summary_tsv,
+                bundle.functional_annotation,
+                bundle.annotation_consistency,
+            ),
             write_gene_flow_tsv(stage_labels, nodes, links, artifacts.gene_flow_tsv),
             write_event_counts_tsv(events, artifacts.event_counts_tsv),
             write_overlap_tsv(bundle.gene_sets, bundle.overlap_rows, artifacts.overlap_tsv),
@@ -121,6 +158,7 @@ def run_pipeline_plots(
             links,
             artifacts.gene_flow_svg,
             busco_summaries=busco_summaries,
+            annotation_consistency=bundle.annotation_consistency,
         ),
     )
     run_if_needed(
@@ -137,6 +175,7 @@ def run_pipeline_plots(
             links,
             artifacts.gene_flow_pdf,
             busco_summaries=busco_summaries,
+            annotation_consistency=bundle.annotation_consistency,
         ),
     )
     run_if_needed(
@@ -152,19 +191,76 @@ def run_pipeline_plots(
     run_if_needed(
         outputs=[artifacts.overlap_svg],
         dependencies=[artifacts.summary_json, artifacts.overlap_tsv, *module_paths],
-        action=lambda: write_overlap_svg(bundle.gene_sets, bundle.overlap_rows, artifacts.overlap_svg),
+        action=lambda: write_overlap_svg(
+            bundle.gene_sets, bundle.overlap_rows, artifacts.overlap_svg
+        ),
     )
     run_if_needed(
         outputs=[artifacts.overlap_pdf],
         dependencies=[artifacts.summary_json, artifacts.overlap_tsv, *module_paths],
-        action=lambda: write_overlap_pdf(bundle.gene_sets, bundle.overlap_rows, artifacts.overlap_pdf),
+        action=lambda: write_overlap_pdf(
+            bundle.gene_sets, bundle.overlap_rows, artifacts.overlap_pdf
+        ),
     )
+    if bundle.annotation_consistency is not None:
+        consistency = bundle.annotation_consistency
+        run_if_needed(
+            outputs=[artifacts.name_consistency_tsv],
+            dependencies=[consistency.summary_path, *module_paths],
+            action=lambda: prepare_name_consistency_plot_data(
+                consistency.summary_path,
+                artifacts.name_consistency_tsv,
+            ),
+        )
+        run_if_needed(
+            outputs=[artifacts.source_consistency_tsv],
+            dependencies=[consistency.source_pair_path, *module_paths],
+            action=lambda: prepare_source_consistency_plot_data(
+                consistency.source_pair_path,
+                artifacts.source_consistency_tsv,
+            ),
+        )
+        name_rows = load_name_consistency_plot_data(artifacts.name_consistency_tsv)
+        source_rows = load_source_consistency_plot_data(artifacts.source_consistency_tsv)
+        run_if_needed(
+            outputs=[artifacts.name_consistency_svg],
+            dependencies=[artifacts.name_consistency_tsv, *module_paths],
+            action=lambda: write_name_consistency_svg(
+                name_rows,
+                artifacts.name_consistency_svg,
+            ),
+        )
+        run_if_needed(
+            outputs=[artifacts.name_consistency_pdf],
+            dependencies=[artifacts.name_consistency_tsv, *module_paths],
+            action=lambda: write_name_consistency_pdf(
+                name_rows,
+                artifacts.name_consistency_pdf,
+            ),
+        )
+        run_if_needed(
+            outputs=[artifacts.source_consistency_svg],
+            dependencies=[artifacts.source_consistency_tsv, *module_paths],
+            action=lambda: write_source_consistency_svg(
+                source_rows,
+                artifacts.source_consistency_svg,
+            ),
+        )
+        run_if_needed(
+            outputs=[artifacts.source_consistency_pdf],
+            dependencies=[artifacts.source_consistency_tsv, *module_paths],
+            action=lambda: write_source_consistency_pdf(
+                source_rows,
+                artifacts.source_consistency_pdf,
+            ),
+        )
     update_plot_manifest(
         manifest_path,
         artifacts=artifacts,
         metrics=bundle.metrics,
         gene_sets=bundle.gene_sets,
         overlap_rows=bundle.overlap_rows,
+        annotation_consistency=bundle.annotation_consistency,
     )
     return artifacts
 

@@ -267,10 +267,27 @@ def _render_summary_cards(report_root: Path, payload: dict[str, Any]) -> str:
         link_targets = {}
         annotation = outputs.get("annotation")
         fasta = outputs.get("fasta")
+        functional_evidence = outputs.get("functional_annotation_evidence")
+        domain_comparison = outputs.get("functional_domain_search_comparison")
+        consistency_audit = outputs.get("functional_annotation_consistency")
+        consistency_families = outputs.get("functional_annotation_families")
+        consistency_review = outputs.get("functional_annotation_conflicts") or outputs.get(
+            "functional_annotation_review"
+        )
         if isinstance(annotation, dict) and annotation.get("path"):
             link_targets["annotation"] = str(annotation["path"])
         if isinstance(fasta, dict) and fasta.get("path"):
             link_targets["fasta"] = str(fasta["path"])
+        if isinstance(functional_evidence, dict) and functional_evidence.get("path"):
+            link_targets["functional annotation evidence"] = str(functional_evidence["path"])
+        if isinstance(domain_comparison, dict) and domain_comparison.get("path"):
+            link_targets["Pfam/CDD search comparison"] = str(domain_comparison["path"])
+        if isinstance(consistency_audit, dict) and consistency_audit.get("path"):
+            link_targets["annotation name consistency"] = str(consistency_audit["path"])
+        if isinstance(consistency_families, dict) and consistency_families.get("path"):
+            link_targets["annotation family summary"] = str(consistency_families["path"])
+        if isinstance(consistency_review, dict) and consistency_review.get("path"):
+            link_targets["annotation conflict diagnostics"] = str(consistency_review["path"])
         output_links = _render_link_list(report_root, link_targets)
     body = "".join(
         f"<div class='summary-card'><h3>{escape(str(label))}</h3><p>{escape(str(value))}</p></div>"
@@ -309,6 +326,26 @@ def _render_pipeline_plots(report_root: Path, payload: dict[str, Any]) -> str:
             pipeline.get("overlap_tsv"),
         ),
     ]
+    annotation_consistency = pipeline.get("annotation_consistency")
+    if isinstance(annotation_consistency, dict):
+        blocks.extend(
+            [
+                _render_plot_block(
+                    report_root,
+                    "Functional annotation name consistency",
+                    annotation_consistency.get("name_consistency_svg"),
+                    annotation_consistency.get("name_consistency_pdf"),
+                    annotation_consistency.get("name_consistency_tsv"),
+                ),
+                _render_plot_block(
+                    report_root,
+                    "Name review rate by evidence source",
+                    annotation_consistency.get("source_consistency_svg"),
+                    annotation_consistency.get("source_consistency_pdf"),
+                    annotation_consistency.get("source_consistency_tsv"),
+                ),
+            ]
+        )
     return "<section><h2>Plots</h2>" + "".join(block for block in blocks if block) + "</section>"
 
 

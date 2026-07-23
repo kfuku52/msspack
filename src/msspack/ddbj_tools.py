@@ -11,13 +11,20 @@ import stat
 import tarfile
 import urllib.request
 import zipfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkstemp
 
-from .utils import MSSPackError, default_cache_dir, ensure_dir, run_command, write_text
+from .utils import (
+    MSSPackError,
+    default_cache_dir,
+    ensure_dir,
+    link_or_copy,
+    run_command,
+    write_text,
+)
 
 DDBJ_TOOL_INDEX = "https://ddbj.nig.ac.jp/public/ddbj-cib/MSS/"
 DDBJ_LICENSE_URL = "https://www.ddbj.nig.ac.jp/ddbj/mss-tool-e.html"
@@ -473,8 +480,11 @@ def _run_with_java(
     cwd: Path,
     log_path: Path,
     java_cmd: str,
+    extra_env: Mapping[str, str] | None = None,
 ) -> None:
     env = dict(os.environ)
+    if extra_env is not None:
+        env.update(extra_env)
     resolved = shutil.which(java_cmd) if "/" not in java_cmd else str(Path(java_cmd).expanduser().resolve())
     if resolved and Path(resolved).name == "java":
         env["PATH"] = str(Path(resolved).parent) + os.pathsep + env.get("PATH", "")
@@ -502,21 +512,39 @@ def run_parser(
     java_cmd: str,
     log_path: Path,
 ) -> None:
-    _run_with_java(
-        command=[
-            "bash",
-            str(installation.executable),
-            "-x",
-            str(ann_path),
-            "-s",
-            str(fasta_path),
-            "-M",
-            heap,
-        ],
-        cwd=installation.root,
-        log_path=log_path,
-        java_cmd=java_cmd,
-    )
+    # The upstream shell wrapper does not quote every parsed argument. Use
+    # no-space symlink paths so submissions stored in cloud folders remain valid.
+    with TemporaryDirectory(prefix="msspack-ddbj-parser-") as temporary_name:
+        staging = Path(temporary_name)
+        staged_ann = staging / "submission.ann.txt"
+        staged_fasta = staging / "submission.fasta"
+        staged_error = staging / "parser.stderr.log"
+        staged_ann.symlink_to(ann_path.resolve())
+        staged_fasta.symlink_to(fasta_path.resolve())
+        try:
+            _run_with_java(
+                command=[
+                    "bash",
+                    str(installation.executable),
+                    "-x",
+                    str(staged_ann),
+                    "-s",
+                    str(staged_fasta),
+                    "-M",
+                    heap,
+                ],
+                cwd=installation.root,
+                log_path=log_path,
+                java_cmd=java_cmd,
+                extra_env={"err": str(staged_error)},
+            )
+        finally:
+            if staged_error.is_file() and staged_error.stat().st_size > 0:
+                with log_path.open("a", encoding="utf-8") as log_handle:
+                    log_handle.write("\nParser stderr:\n")
+                    log_handle.write(
+                        staged_error.read_text(encoding="utf-8", errors="replace")
+                    )
 
 
 def run_transchecker(
@@ -530,22 +558,34 @@ def run_transchecker(
     java_cmd: str,
     log_path: Path,
 ) -> None:
-    _run_with_java(
-        command=[
-            "bash",
-            str(installation.executable),
-            "-x",
-            str(ann_path),
-            "-s",
-            str(fasta_path),
-            "-o",
-            str(aa_out),
-            "-t",
-            str(nuc_out),
-            "-M",
-            heap,
-        ],
-        cwd=installation.root,
-        log_path=log_path,
-        java_cmd=java_cmd,
-    )
+    with TemporaryDirectory(prefix="msspack-ddbj-transchecker-") as temporary_name:
+        staging = Path(temporary_name)
+        staged_ann = staging / "submission.ann.txt"
+        staged_fasta = staging / "submission.fasta"
+        staged_aa = staging / "translated.aa.fasta"
+        staged_nuc = staging / "translated.nuc.fasta"
+        staged_ann.symlink_to(ann_path.resolve())
+        staged_fasta.symlink_to(fasta_path.resolve())
+        _run_with_java(
+            command=[
+                "bash",
+                str(installation.executable),
+                "-x",
+                str(staged_ann),
+                "-s",
+                str(staged_fasta),
+                "-o",
+                str(staged_aa),
+                "-t",
+                str(staged_nuc),
+                "-M",
+                heap,
+            ],
+            cwd=installation.root,
+            log_path=log_path,
+            java_cmd=java_cmd,
+        )
+        if not staged_aa.is_file() or not staged_nuc.is_file():
+            raise MSSPackError("TransChecker did not create both translated FASTA outputs")
+        link_or_copy(staged_aa, aa_out)
+        link_or_copy(staged_nuc, nuc_out)

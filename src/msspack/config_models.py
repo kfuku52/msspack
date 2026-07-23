@@ -118,6 +118,75 @@ class BuscoConfig:
 
 
 @dataclass
+class FunctionalAnnotationConsistencyConfig:
+    enabled: bool = False
+    harmonize_safe_equivalents: bool = False
+    auto_resolve_conflicts: bool = True
+    near_identical_identity: float = 90.0
+    near_identical_coverage: float = 90.0
+    family_identity: float = 70.0
+    family_coverage: float = 80.0
+    broad_identity: float = 40.0
+    broad_coverage: float = 60.0
+    evalue: float = 1e-10
+    name_similarity_threshold: float = 0.45
+    source_pair_min_pairs: int = 5
+
+
+@dataclass
+class FunctionalAnnotationConfig:
+    enabled: bool = False
+    diamond_command: str = "diamond"
+    hmmscan_command: str = "hmmscan"
+    hmmpress_command: str = "hmmpress"
+    rpsblast_command: str = "rpsblast"
+    rpsbproc_command: str = "rpsbproc"
+    threads: int = 8
+    sensitivity: str = "sensitive"
+    evalue: float = 1e-10
+    max_target_seqs: int = 25
+    min_bitscore: float = 50.0
+    min_identity: float = 35.0
+    min_query_coverage: float = 70.0
+    min_subject_coverage: float = 70.0
+    near_top_bitscore_ratio: float = 0.90
+    min_token_score: float = 0.60
+    overwrite_existing: bool = False
+    swissprot_enabled: bool = True
+    swissprot_fasta: str = ""
+    swissprot_url: str = (
+        "https://ftp.uniprot.org/pub/databases/uniprot/current_release/"
+        "knowledgebase/complete/uniprot_sprot.fasta.gz"
+    )
+    swissprot_weight: float = 1.0
+    uniref90_enabled: bool = False
+    uniref90_fasta: str = ""
+    uniref90_url: str = (
+        "https://ftp.uniprot.org/pub/databases/uniprot/uniref/uniref90/"
+        "uniref90.fasta.gz"
+    )
+    uniref90_taxon_id: int = 0
+    uniref90_weight: float = 0.5
+    reference_proteins: str = ""
+    reference_name: str = "reference"
+    reference_weight: float = 1.2
+    pfam_enabled: bool = True
+    pfam_hmm: str = ""
+    pfam_url: str = "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz"
+    pfam_max_i_evalue: float = 1e-5
+    pfam_min_domain_coverage: float = 0.35
+    cdd_enabled: bool = False
+    cdd_database: str = ""
+    cdd_url: str = "https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/little_endian/Cdd_LE.tar.gz"
+    cdd_data_dir: str = ""
+    cdd_data_url: str = "https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd"
+    cdd_evalue: float = 0.01
+    consistency: FunctionalAnnotationConsistencyConfig = field(
+        default_factory=FunctionalAnnotationConsistencyConfig
+    )
+
+
+@dataclass
 class MSSPackConfig:
     base_dir: Path
     project: ProjectConfig
@@ -130,6 +199,9 @@ class MSSPackConfig:
     pipeline: PipelineConfig
     tools: ToolsConfig
     busco: BuscoConfig = field(default_factory=BuscoConfig)
+    functional_annotation: FunctionalAnnotationConfig = field(
+        default_factory=FunctionalAnnotationConfig
+    )
 
     @property
     def output_dir(self) -> Path:

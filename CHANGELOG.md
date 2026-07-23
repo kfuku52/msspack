@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+- Add an optional DIAMOND all-vs-all functional-annotation name-consistency audit with
+  stable family IDs, conservative safe-equivalent harmonization, review evidence tables,
+  threshold/source plots, Sankey integration, and HTML report links.
+- Label family thresholds directly, standardize all figure text at 8 pt and widths at
+  3.6 or 7.2 inches, and add a gene-level name-consistency pie below the Sankey.
+- Place both BUSCO pies and the name-consistency pie in one Sankey summary row, order
+  functional-annotation outcomes by database priority, and use higher-contrast
+  stage-colored ribbons.
+- Remove name consistency from the Sankey flow itself, retain it as a summary pie, connect
+  the Input GFF, CDS boundary adjustment, and functional-annotation columns to their boxed
+  pies with dashed guides, and label boundary outcomes as Adjusted or No adjustment.
+- Rename the adjusted BUSCO panel to Boundary-adjusted CDS, show each BUSCO sample size,
+  and label the transcript outcome Already one mRNA per gene.
+- Evaluate the gene-level name-consistency pie at the close-family 70/80 threshold, replace
+  the misleading No comparable family category with No annotated close-family peer, and
+  retain near-identical conflicts as the high-severity subset.
+- Separate BUSCO lineage gene-set size from the number of CDS input sequences in Sankey
+  panels, and label the comparison tier Close family peer.
+- Automatically resolve name conflicts without a manual-review requirement: propagate a
+  unique higher-priority product only across direct near-identical pairs and retain other
+  independently supported family variation.
+
+- Add opt-in AHRD-inspired product annotation using DIAMOND against Swiss-Prot or a
+  close-reference proteome, with conservative Pfam domain fallback
+- Add sequential UniRef90 DIAMOND fallback, including disk-saving taxon-scoped downloads
+- Add CDD RPS-BLAST/rpsbproc fallback and a durable Pfam/CDD timing-and-yield comparison
+- Cache and checksum official annotation database downloads, preserve existing products,
+  and write per-transcript functional evidence and provenance artifacts
+- Check annotation runtimes with `msspack doctor` and document offline/local database use
+- Add functional-annotation outcomes and their exact gene flows to the pipeline Sankey
+- Limit Pfam fallback to similarity-unassigned proteins and parallelize HMMER query shards
+- Show Swiss-Prot, UniRef90, Pfam, and CDD outcomes separately in the pipeline Sankey
+
 ## 0.5.0 - 2026-07-22
 
 - Add stage-aligned BUSCO composition summaries to pipeline gene-flow Sankey plots

@@ -30,6 +30,7 @@ from .config_validation import validate_busco_config
 from .execution import module_origin, run_if_needed
 from .padding_tools import write_spliced_cds_fasta
 from .pipeline import PipelineOutputs, run_pipeline
+from .step_logging import count_fasta_records
 from .utils import (
     MSSPackError,
     default_cache_dir,
@@ -87,6 +88,7 @@ class BuscoSummary:
     fragmented_count: int | None = None
     missing_count: int | None = None
     selection_strategy: str = ""
+    input_sequence_count: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -98,6 +100,7 @@ class BuscoSummary:
             "lineage_dataset": self.lineage_dataset,
             "busco_version": self.busco_version,
             "selection_strategy": self.selection_strategy,
+            "input_sequence_count": self.input_sequence_count,
             "percentages": {
                 "complete": self.complete_pct,
                 "single_copy": self.single_copy_pct,
@@ -406,6 +409,9 @@ def parse_short_summary(
         fragmented_count=counts.get("fragmented"),
         missing_count=counts.get("missing"),
         selection_strategy=selection_strategy,
+        input_sequence_count=(
+            count_fasta_records(input_fasta) if input_fasta.is_file() else None
+        ),
     )
 
 
@@ -417,9 +423,13 @@ def _read_summary_json(path: Path) -> BuscoSummary:
     data = json.loads(path.read_text(encoding="utf-8"))
     percentages = data["percentages"]
     counts = data["counts"]
+    input_fasta = Path(str(data["input_fasta"]))
+    input_sequence_count = _optional_int(data.get("input_sequence_count"))
+    if input_sequence_count is None and input_fasta.is_file():
+        input_sequence_count = count_fasta_records(input_fasta)
     return BuscoSummary(
         label=str(data["label"]),
-        input_fasta=Path(str(data["input_fasta"])),
+        input_fasta=input_fasta,
         raw_output_dir=Path(str(data["raw_output_dir"])),
         short_summary_path=Path(str(data["short_summary_path"])),
         mode=str(data["mode"]),
@@ -437,6 +447,7 @@ def _read_summary_json(path: Path) -> BuscoSummary:
         duplicated_count=_optional_int(counts.get("duplicated")),
         fragmented_count=_optional_int(counts.get("fragmented")),
         missing_count=_optional_int(counts.get("missing")),
+        input_sequence_count=input_sequence_count,
     )
 
 
@@ -573,6 +584,7 @@ def _write_comparison_tsv(
             [
                 "label",
                 "input_fasta",
+                "input_sequence_count",
                 "lineage_dataset",
                 "mode",
                 "busco_version",
@@ -598,6 +610,7 @@ def _write_comparison_tsv(
                 for value in (
                     summary.label,
                     summary.input_fasta,
+                    summary.input_sequence_count,
                     summary.lineage_dataset,
                     summary.mode,
                     summary.busco_version,
@@ -627,7 +640,7 @@ def _comparison_chart_layout(
     if len(summaries) != 2:
         raise MSSPackError("BUSCO comparison plot expects exactly two summaries")
     width = BUSCO_COMPARISON_WIDTH_PT
-    height = 187.2
+    height = 197.2
     left = 70.0
     label_x = left - 4.0
     top = 64.0
@@ -682,8 +695,11 @@ def _comparison_chart_layout(
             f"C{summary.complete_pct:.1f}% S{summary.single_copy_pct:.1f}% "
             f"D{summary.duplicated_pct:.1f}%",
             f"F{summary.fragmented_pct:.1f}% M{summary.missing_pct:.1f}% "
-            f"n{summary.total_buscos}",
+            f"BUSCO genes n={summary.total_buscos}",
         ]
+        if summary.input_sequence_count is not None:
+            input_label = "CDS input" if comparison_name == "cds" else "Genome input"
+            summary_lines.append(f"{input_label} n={summary.input_sequence_count:,}")
         rows.append(
             {
                 "summary": summary,

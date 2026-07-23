@@ -138,6 +138,12 @@ class ReportTests(unittest.TestCase):
                 "pipeline-gene-overlap.tsv",
                 "pipeline-gene-overlap.svg",
                 "pipeline-gene-overlap.pdf",
+                "functional-annotation-name-consistency.tsv",
+                "functional-annotation-name-consistency.svg",
+                "functional-annotation-name-consistency.pdf",
+                "functional-annotation-source-consistency.tsv",
+                "functional-annotation-source-consistency.svg",
+                "functional-annotation-source-consistency.pdf",
             ):
                 (plots_dir / relative).write_text("demo\n", encoding="utf-8")
 
@@ -153,8 +159,10 @@ class ReportTests(unittest.TestCase):
 
             ann_path = final_dir / "Demo.ann.txt"
             fasta_path = final_dir / "Demo.fasta"
+            evidence_path = final_dir / "functional-annotation.tsv"
             ann_path.write_text("COMMON\n", encoding="utf-8")
             fasta_path.write_text(">chr1\nACGT\n//\n", encoding="utf-8")
+            evidence_path.write_text("ID\tassigned_product\n", encoding="utf-8")
 
             manifest_path = output_root / "build-manifest.json"
             manifest_path.write_text(
@@ -169,6 +177,7 @@ class ReportTests(unittest.TestCase):
                         "outputs": {
                             "annotation": {"path": str(ann_path)},
                             "fasta": {"path": str(fasta_path)},
+                            "functional_annotation_evidence": {"path": str(evidence_path)},
                         },
                         "stage_summary": {"count": 18, "ran": 18, "reused": 0},
                         "validation": {
@@ -188,6 +197,26 @@ class ReportTests(unittest.TestCase):
                                 "overlap_tsv": str(plots_dir / "pipeline-gene-overlap.tsv"),
                                 "overlap_svg": str(plots_dir / "pipeline-gene-overlap.svg"),
                                 "overlap_pdf": str(plots_dir / "pipeline-gene-overlap.pdf"),
+                                "annotation_consistency": {
+                                    "name_consistency_tsv": str(
+                                        plots_dir / "functional-annotation-name-consistency.tsv"
+                                    ),
+                                    "name_consistency_svg": str(
+                                        plots_dir / "functional-annotation-name-consistency.svg"
+                                    ),
+                                    "name_consistency_pdf": str(
+                                        plots_dir / "functional-annotation-name-consistency.pdf"
+                                    ),
+                                    "source_consistency_tsv": str(
+                                        plots_dir / "functional-annotation-source-consistency.tsv"
+                                    ),
+                                    "source_consistency_svg": str(
+                                        plots_dir / "functional-annotation-source-consistency.svg"
+                                    ),
+                                    "source_consistency_pdf": str(
+                                        plots_dir / "functional-annotation-source-consistency.pdf"
+                                    ),
+                                },
                             }
                         },
                         "busco": {
@@ -226,6 +255,9 @@ class ReportTests(unittest.TestCase):
             self.assertIn("Pipeline gene flow", html)
             self.assertIn("BUSCO cds", html)
             self.assertIn("00.copy-input-fasta", html)
+            self.assertIn("functional annotation evidence", html)
+            self.assertIn("Functional annotation name consistency", html)
+            self.assertIn("Name review rate by evidence source", html)
             updated_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(updated_manifest["report"]["index_html"], str(artifacts.index_html))
 

@@ -205,6 +205,11 @@ def _handle_plot(args: argparse.Namespace) -> int:
     print(artifacts.event_counts_pdf)
     print(artifacts.overlap_svg)
     print(artifacts.overlap_pdf)
+    if artifacts.name_consistency_svg.exists():
+        print(artifacts.name_consistency_svg)
+        print(artifacts.name_consistency_pdf)
+        print(artifacts.source_consistency_svg)
+        print(artifacts.source_consistency_pdf)
     for line in summarize_pipeline_plots(artifacts):
         print(line)
     return 0

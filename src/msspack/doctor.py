@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import importlib.util
 import platform
 from dataclasses import dataclass
@@ -8,7 +9,7 @@ from .config import MSSPackConfig
 from .ddbj_tools import list_installed
 from .fasta import iter_fasta
 from .gff import GFFRecord
-from .utils import which
+from .utils import expand_path, which
 
 
 @dataclass
@@ -65,7 +66,11 @@ def _input_checks(config: MSSPackConfig) -> list[Check]:
             )
         )
         gff_seqids: set[str] = set()
-        with gff_path.open("r", encoding="utf-8") as handle:
+        if gff_path.suffix == ".gz":
+            gff_handle = gzip.open(gff_path, "rt", encoding="utf-8")
+        else:
+            gff_handle = gff_path.open("r", encoding="utf-8")
+        with gff_handle as handle:
             for line_number, raw_line in enumerate(handle, start=1):
                 line = raw_line.rstrip("\n")
                 if line == "##FASTA":
@@ -127,6 +132,65 @@ def run_doctor(config: MSSPackConfig | None = None) -> list[Check]:
     checks.append(
         Check("BUSCO (optional)", which(busco_cmd) is not None, busco_cmd, required=False)
     )
+    annotation = config.functional_annotation if config is not None else None
+    annotation_enabled = bool(annotation and annotation.enabled)
+    diamond_required = bool(
+        annotation_enabled
+        and annotation
+        and (
+            annotation.swissprot_enabled
+            or annotation.uniref90_enabled
+            or annotation.reference_proteins.strip()
+            or annotation.consistency.enabled
+        )
+    )
+    diamond_cmd = annotation.diamond_command if annotation else "diamond"
+    checks.append(
+        Check(
+            "DIAMOND (functional annotation)",
+            which(diamond_cmd) is not None,
+            diamond_cmd,
+            required=diamond_required,
+        )
+    )
+    pfam_required = bool(annotation_enabled and annotation and annotation.pfam_enabled)
+    hmmscan_cmd = annotation.hmmscan_command if annotation else "hmmscan"
+    hmmpress_cmd = annotation.hmmpress_command if annotation else "hmmpress"
+    checks.extend(
+        [
+            Check(
+                "HMMER hmmscan (Pfam fallback)",
+                which(hmmscan_cmd) is not None,
+                hmmscan_cmd,
+                required=pfam_required,
+            ),
+            Check(
+                "HMMER hmmpress (Pfam fallback)",
+                which(hmmpress_cmd) is not None,
+                hmmpress_cmd,
+                required=pfam_required,
+            ),
+        ]
+    )
+    cdd_required = bool(annotation_enabled and annotation and annotation.cdd_enabled)
+    rpsblast_cmd = annotation.rpsblast_command if annotation else "rpsblast"
+    rpsbproc_cmd = annotation.rpsbproc_command if annotation else "rpsbproc"
+    checks.extend(
+        [
+            Check(
+                "NCBI RPS-BLAST (CDD fallback)",
+                which(rpsblast_cmd) is not None,
+                rpsblast_cmd,
+                required=cdd_required,
+            ),
+            Check(
+                "NCBI rpsbproc (CDD fallback)",
+                which(rpsbproc_cmd) is not None,
+                rpsbproc_cmd,
+                required=cdd_required,
+            ),
+        ]
+    )
     converter_modules = {
         "Bio": "biopython",
     }
@@ -172,6 +236,44 @@ def run_doctor(config: MSSPackConfig | None = None) -> list[Check]:
 
     if config is not None:
         checks.extend(_input_checks(config))
+        annotation = config.functional_annotation
+        if annotation.enabled:
+            local_databases = (
+                ("Swiss-Prot FASTA", annotation.swissprot_fasta),
+                ("UniRef90 FASTA", annotation.uniref90_fasta),
+                ("reference protein FASTA", annotation.reference_proteins),
+                ("Pfam HMM", annotation.pfam_hmm),
+            )
+            for label, configured_path in local_databases:
+                if not configured_path.strip():
+                    continue
+                resolved = expand_path(configured_path, config.base_dir)
+                checks.append(
+                    Check(
+                        f"functional annotation {label}",
+                        resolved.is_file(),
+                        str(resolved),
+                    )
+                )
+            for label, configured_path in (
+                ("CDD database", annotation.cdd_database),
+                ("CDD data directory", annotation.cdd_data_dir),
+            ):
+                if not configured_path.strip():
+                    continue
+                resolved = expand_path(configured_path, config.base_dir)
+                exists = (
+                    (resolved / "Cdd.aux").is_file()
+                    if label == "CDD database" and resolved.is_dir()
+                    else resolved.exists()
+                )
+                checks.append(
+                    Check(
+                        f"functional annotation {label}",
+                        exists,
+                        str(resolved),
+                    )
+                )
 
     return checks
 

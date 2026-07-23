@@ -6,6 +6,8 @@ from .config_errors import ConfigError
 from .config_loading import load_sections, read_config_data
 from .config_models import (
     BuscoConfig,
+    FunctionalAnnotationConfig,
+    FunctionalAnnotationConsistencyConfig,
     InputsConfig,
     MSSPackConfig,
     PipelineConfig,
@@ -22,6 +24,8 @@ from .config_validation import validate_config
 __all__ = [
     "ConfigError",
     "BuscoConfig",
+    "FunctionalAnnotationConsistencyConfig",
+    "FunctionalAnnotationConfig",
     "InputsConfig",
     "MSSPackConfig",
     "PipelineConfig",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,7 +54,12 @@ def iter_fasta_handle(handle: TextIO) -> Iterator[FastaRecord]:
 
 
 def iter_fasta(path: str | Path) -> Iterator[FastaRecord]:
-    with Path(path).open("r", encoding="utf-8") as handle:
+    fasta_path = Path(path)
+    if fasta_path.suffix == ".gz":
+        handle = gzip.open(fasta_path, "rt", encoding="utf-8")
+    else:
+        handle = fasta_path.open("r", encoding="utf-8")
+    with handle:
         yield from iter_fasta_handle(handle)
 
 

@@ -34,3 +34,29 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## AHRD algorithm inspiration
+
+The independent implementation in `src/msspack/functional_annotation.py` is inspired by
+the published, documented concepts of AHRD (Automated Assignment of Human Readable
+Descriptions): description filtering, token filtering, database weights, alignment
+quality, and lexical consensus. No AHRD source code is included or invoked.
+
+Original project:
+
+- [AHRD](https://github.com/groupschoof/AHRD)
+- Distributed by its authors under the Common Development and Distribution License 1.0
+
+## Downloaded annotation data
+
+When functional annotation is enabled, `msspack` can download but does not redistribute
+the following databases:
+
+- [UniProtKB/Swiss-Prot](https://www.uniprot.org/help/license), provided under Creative
+  Commons Attribution 4.0 (CC BY 4.0).
+- [UniRef90](https://www.uniprot.org/help/uniref), provided by the UniProt Consortium under
+  Creative Commons Attribution 4.0 (CC BY 4.0).
+- [Pfam](https://www.ebi.ac.uk/interpro/about/license/), downloadable data provided under
+  the CC0 1.0 Universal Public Domain Dedication.
+- [NCBI Conserved Domain Database](https://www.ncbi.nlm.nih.gov/Structure/cdd/cdd.shtml),
+  used with NCBI BLAST+ and rpsbproc; downloaded data and tools are not redistributed.

@@ -68,6 +68,73 @@ replace_product_patterns = [
   "Cullin-4",
 ]
 
+[functional_annotation]
+# Opt-in AHRD-like product assignment. Databases are downloaded once into
+# tools.cache_dir unless local database paths are supplied.
+enabled = false
+diamond_command = "diamond"
+hmmscan_command = "hmmscan"
+hmmpress_command = "hmmpress"
+rpsblast_command = "rpsblast"
+rpsbproc_command = "rpsbproc"
+threads = 8
+sensitivity = "sensitive"
+evalue = 1e-10
+max_target_seqs = 25
+min_bitscore = 50.0
+min_identity = 35.0
+min_query_coverage = 70.0
+min_subject_coverage = 70.0
+near_top_bitscore_ratio = 0.90
+min_token_score = 0.60
+overwrite_existing = false
+swissprot_enabled = true
+swissprot_fasta = ""
+swissprot_url = "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz"
+swissprot_weight = 1.0
+uniref90_enabled = false
+uniref90_fasta = ""
+uniref90_url = "https://ftp.uniprot.org/pub/databases/uniprot/uniref/uniref90/uniref90.fasta.gz"
+# Optional taxonomic subset obtained from the UniProt REST API; 0 means full UniRef90.
+uniref90_taxon_id = 0
+uniref90_weight = 0.5
+reference_proteins = ""
+reference_name = "reference"
+reference_weight = 1.2
+pfam_enabled = true
+pfam_hmm = ""
+pfam_url = "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz"
+pfam_max_i_evalue = 1e-5
+pfam_min_domain_coverage = 0.35
+cdd_enabled = false
+cdd_database = ""
+cdd_url = "https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/little_endian/Cdd_LE.tar.gz"
+cdd_data_dir = ""
+cdd_data_url = "https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd"
+cdd_evalue = 0.01
+
+[functional_annotation.consistency]
+# Optional family-level name audit. One DIAMOND all-vs-all search is reused for
+# near-identical, close-family, and broad-homology sensitivity thresholds.
+enabled = false
+# When true, only approved aliases and safe formatting variants in near-identical
+# families are harmonized. Specificity, paralog, substrate, and localization
+# differences are retained as evidence-resolved family variation.
+harmonize_safe_equivalents = false
+# Resolve conflicts without manual review: propagate a unique higher-priority
+# product only across near-identical proteins; otherwise retain independently
+# supported paralog/subfamily-specific names.
+auto_resolve_conflicts = true
+near_identical_identity = 90.0
+near_identical_coverage = 90.0
+family_identity = 70.0
+family_coverage = 80.0
+broad_identity = 40.0
+broad_coverage = 60.0
+evalue = 1e-10
+name_similarity_threshold = 0.45
+source_pair_min_pairs = 5
+
 [busco]
 command = "busco"
 run_cds = true

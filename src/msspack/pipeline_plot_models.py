@@ -4,19 +4,29 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SANKEY_COLORS = {
-    "start": "#475569",
-    "removed": "#dc2626",
-    "kept": "#64748b",
+    "start": "#334155",
+    "removed": "#e11d48",
+    "kept": "#6366f1",
     "transcript_changed": "#2563eb",
-    "transcript_unchanged": "#94a3b8",
+    "transcript_unchanged": "#0ea5e9",
     "merge": "#475569",
-    "inframe_updated": "#d97706",
-    "inframe_unchanged": "#cbd5e1",
-    "padding_updated": "#0891b2",
-    "genes_with_stops": "#be123c",
-    "padding_unchanged": "#cbd5e1",
+    "inframe_updated": "#f59e0b",
+    "inframe_unchanged": "#14b8a6",
+    "padding_updated": "#8b5cf6",
+    "genes_with_stops": "#e11d48",
+    "padding_unchanged": "#22c55e",
     "final_cds": "#059669",
-    "final_misc": "#b45309",
+    "final_misc": "#ea580c",
+    "annotation_similarity": "#2563eb",
+    "annotation_uniref": "#0d9488",
+    "annotation_domain": "#7c3aed",
+    "annotation_cdd": "#c026d3",
+    "annotation_existing": "#ea580c",
+    "annotation_missing": "#94a3b8",
+    "consistency_consistent": "#1d4ed8",
+    "consistency_review": "#d97706",
+    "consistency_no_peer": "#64748b",
+    "consistency_unannotated": "#cbd5e1",
 }
 
 GENE_SET_SPECS = (
@@ -175,6 +185,12 @@ class PipelinePlotArtifacts:
     overlap_tsv: Path
     overlap_svg: Path
     overlap_pdf: Path
+    name_consistency_tsv: Path
+    name_consistency_svg: Path
+    name_consistency_pdf: Path
+    source_consistency_tsv: Path
+    source_consistency_svg: Path
+    source_consistency_pdf: Path
 
 
 @dataclass(frozen=True)
@@ -199,6 +215,7 @@ class SankeyBuscoSummary:
     label: str
     stage: int
     lineage_dataset: str
+    input_sequences: int
     total_buscos: int
     single_copy: int
     duplicated: int
@@ -232,9 +249,95 @@ class EventCount:
 
 
 @dataclass(frozen=True)
+class FunctionalAnnotationGroup:
+    key: str
+    source: str
+    label: str
+    color: str
+    locus_tags: tuple[str, ...]
+
+    @property
+    def count(self) -> int:
+        return len(self.locus_tags)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "label": self.label,
+            "color": self.color,
+            "count": self.count,
+        }
+
+
+@dataclass(frozen=True)
+class FunctionalAnnotationSummary:
+    path: Path
+    groups: tuple[FunctionalAnnotationGroup, ...]
+
+    @property
+    def total(self) -> int:
+        return sum(group.count for group in self.groups)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": str(self.path),
+            "total": self.total,
+            "groups": {group.key: group.to_dict() for group in self.groups},
+        }
+
+
+@dataclass(frozen=True)
+class AnnotationConsistencyGroup:
+    key: str
+    label: str
+    color: str
+    locus_tags: tuple[str, ...]
+
+    @property
+    def count(self) -> int:
+        return len(self.locus_tags)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "label": self.label,
+            "color": self.color,
+            "count": self.count,
+        }
+
+
+@dataclass(frozen=True)
+class AnnotationConsistencySummary:
+    path: Path
+    summary_path: Path
+    source_pair_path: Path
+    groups: tuple[AnnotationConsistencyGroup, ...]
+    comparison_tier: str = "family"
+    identity_threshold: float = 70.0
+    coverage_threshold: float = 80.0
+
+    @property
+    def total(self) -> int:
+        return sum(group.count for group in self.groups)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": str(self.path),
+            "summary_path": str(self.summary_path),
+            "source_pair_path": str(self.source_pair_path),
+            "comparison_tier": self.comparison_tier,
+            "identity_threshold": self.identity_threshold,
+            "coverage_threshold": self.coverage_threshold,
+            "total": self.total,
+            "groups": {group.key: group.to_dict() for group in self.groups},
+        }
+
+
+@dataclass(frozen=True)
 class PipelinePlotDataBundle:
     records: dict[str, ParsedStepRecord]
     metrics: PipelinePlotMetrics
     gene_sets: tuple[PipelineGeneSet, ...]
     overlap_rows: tuple[GeneOverlapRow, ...]
+    functional_annotation: FunctionalAnnotationSummary | None
+    annotation_consistency: AnnotationConsistencySummary | None
     summary_payload: dict[str, object]

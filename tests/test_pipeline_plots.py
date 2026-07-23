@@ -4,12 +4,24 @@ import unittest
 from pathlib import Path
 
 from msspack.chart_primitives import pdf_helvetica_text_width
-from msspack.pipeline_plot_models import PipelineGeneSet, PipelinePlotMetrics
+from msspack.pipeline_plot_data import load_functional_annotation_summary
+from msspack.pipeline_plot_models import (
+    AnnotationConsistencyGroup,
+    AnnotationConsistencySummary,
+    FunctionalAnnotationGroup,
+    FunctionalAnnotationSummary,
+    PipelineGeneSet,
+    PipelinePlotMetrics,
+    SankeyBuscoSummary,
+    SankeyNode,
+)
 from msspack.pipeline_plot_render import (
     SANKEY_HEIGHT,
     _sankey_layout,
     build_sankey,
     load_sankey_busco_summaries,
+    write_sankey_pdf,
+    write_sankey_svg,
 )
 from msspack.pipeline_plots import (
     parse_pipeline_plot_metrics,
@@ -106,6 +118,7 @@ def _write_busco_comparison(path: Path) -> None:
                 "summaries": [
                     {
                         "label": "input",
+                        "input_sequence_count": 95,
                         "lineage_dataset": "embryophyta_odb12",
                         "counts": {
                             "single_copy": 70,
@@ -117,6 +130,7 @@ def _write_busco_comparison(path: Path) -> None:
                     },
                     {
                         "label": "processed",
+                        "input_sequence_count": 95,
                         "lineage_dataset": "embryophyta_odb12",
                         "counts": {
                             "single_copy": 85,
@@ -215,6 +229,268 @@ class PipelinePlotTests(unittest.TestCase):
                 link.target_y + link.height, link.target.y + link.target.height + 1e-6
             )
 
+    def test_sankey_orders_annotation_nodes_by_priority(self) -> None:
+        nodes = [
+            SankeyNode("annotation_none", "Unannotated", 0, 1, "#000000"),
+            SankeyNode("annotation_existing", "Existing", 0, 1, "#000000"),
+            SankeyNode("annotation_cdd", "CDD", 0, 1, "#000000"),
+            SankeyNode("annotation_pfam", "Pfam", 0, 1, "#000000"),
+            SankeyNode("annotation_uniref90", "UniRef90", 0, 1, "#000000"),
+            SankeyNode("annotation_close_reference", "Close reference", 0, 1, "#000000"),
+            SankeyNode("annotation_swissprot", "Swiss-Prot", 0, 1, "#000000"),
+        ]
+
+        laid_out_nodes, _links, _meta = _sankey_layout(
+            ["Functional annotation"],
+            nodes,
+            [],
+        )
+
+        annotation_order = sorted(
+            (node for node in nodes if node.stage == 0),
+            key=lambda node: laid_out_nodes[node.id].y,
+        )
+        self.assertEqual(
+            [node.id for node in annotation_order],
+            [
+                "annotation_swissprot",
+                "annotation_close_reference",
+                "annotation_uniref90",
+                "annotation_pfam",
+                "annotation_cdd",
+                "annotation_existing",
+                "annotation_none",
+            ],
+        )
+
+    def test_sankey_includes_functional_annotation_outcomes(self) -> None:
+        metrics = PipelinePlotMetrics(
+            initial_genes=5,
+            duplicate_removed_genes=1,
+            genes_after_dedup=4,
+            transcript_changed_genes=2,
+            transcript_unchanged_genes=2,
+            removed_mrnas=2,
+            genes_after_single_mrna=4,
+            inframe_updated_genes=1,
+            inframe_unchanged_genes=3,
+            genes_after_inframe=4,
+            padding_updated_genes=1,
+            genes_with_stops=1,
+            padding_unchanged_genes=2,
+            genes_after_padding=4,
+            converted_to_misc_genes=1,
+            final_cds_genes=3,
+            total_cds_input=4,
+            total_cds_output=3,
+            misc_feature_output=1,
+            sources={},
+        )
+        gene_sets = _sankey_gene_sets(
+            {
+                "duplicate_removed_genes": ["d1"],
+                "transcript_changed_genes": ["g1", "g2"],
+                "inframe_updated_genes": ["g2"],
+                "padding_updated_genes": ["g3"],
+                "genes_with_stops": ["g4"],
+                "converted_to_misc_genes": ["g4"],
+            }
+        )
+        summary = FunctionalAnnotationSummary(
+            path=Path("/tmp/functional-annotation.tsv"),
+            groups=(
+                FunctionalAnnotationGroup(
+                    key="swissprot",
+                    source="swissprot",
+                    label="Swiss-Prot assigned",
+                    color="#16a34a",
+                    locus_tags=("g1", "g3"),
+                ),
+                FunctionalAnnotationGroup(
+                    key="pfam",
+                    source="pfam",
+                    label="Pfam fallback",
+                    color="#7c3aed",
+                    locus_tags=("g2",),
+                ),
+                FunctionalAnnotationGroup(
+                    key="none",
+                    source="none",
+                    label="Unannotated",
+                    color="#94a3b8",
+                    locus_tags=("g4",),
+                ),
+            ),
+        )
+
+        stage_labels, nodes, links = build_sankey(metrics, gene_sets, summary)
+        _laid_out_nodes, _laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
+
+        self.assertEqual(stage_labels[-2:], ["Functional annotation", "Final feature fate"])
+        self.assertEqual(len(stage_labels), 7)
+        self.assertAlmostEqual(meta["width"], 7.2 * 72.0)
+        node_counts = {node.id: node.count for node in nodes}
+        self.assertEqual(node_counts["annotation_swissprot"], 2)
+        self.assertEqual(node_counts["annotation_pfam"], 1)
+        self.assertEqual(node_counts["annotation_none"], 1)
+        link_counts = {(link.source, link.target): link.count for link in links}
+        self.assertEqual(link_counts[("annotation_swissprot", "final_cds")], 2)
+        self.assertEqual(link_counts[("annotation_pfam", "final_cds")], 1)
+        self.assertEqual(link_counts[("annotation_none", "final_misc")], 1)
+
+        consistency = AnnotationConsistencySummary(
+            path=Path("/tmp/functional-annotation-consistency.tsv"),
+            summary_path=Path("/tmp/functional-annotation-consistency-summary.tsv"),
+            source_pair_path=Path("/tmp/functional-annotation-source-pairs.tsv"),
+            groups=(
+                AnnotationConsistencyGroup(
+                    key="consistent",
+                    label="Consistent",
+                    color="#1d4ed8",
+                    locus_tags=("g1", "g2"),
+                ),
+                AnnotationConsistencyGroup(
+                    key="resolved",
+                    label="Auto-resolved family variation",
+                    color="#d97706",
+                    locus_tags=("g3",),
+                ),
+                AnnotationConsistencyGroup(
+                    key="unannotated",
+                    label="Unannotated",
+                    color="#cbd5e1",
+                    locus_tags=("g4",),
+                ),
+            ),
+        )
+        stage_labels, nodes, links = build_sankey(
+            metrics,
+            gene_sets,
+            summary,
+            consistency,
+        )
+        _laid_out_nodes, _laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
+
+        self.assertEqual(
+            stage_labels[-2:],
+            ["Functional annotation", "Final feature fate"],
+        )
+        self.assertAlmostEqual(meta["width"], 7.2 * 72.0)
+        self.assertFalse(any(node.id.startswith("consistency_") for node in nodes))
+        link_counts = {(link.source, link.target): link.count for link in links}
+        self.assertEqual(link_counts[("annotation_swissprot", "final_cds")], 2)
+        self.assertEqual(link_counts[("annotation_pfam", "final_cds")], 1)
+        self.assertEqual(link_counts[("annotation_none", "final_misc")], 1)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            svg_path = Path(tmp_dir) / "consistency.svg"
+            pdf_path = Path(tmp_dir) / "consistency.pdf"
+            write_sankey_svg(
+                stage_labels,
+                nodes,
+                links,
+                svg_path,
+                annotation_consistency=consistency,
+            )
+            write_sankey_pdf(
+                stage_labels,
+                nodes,
+                links,
+                pdf_path,
+                annotation_consistency=consistency,
+            )
+            svg_text = svg_path.read_text(encoding="utf-8")
+            pdf_text = pdf_path.read_bytes().decode("latin-1")
+        self.assertIn('width="7.2in"', svg_text)
+        self.assertIn('viewBox="0 0 518.40 408.00"', svg_text)
+        self.assertIn("Name consistency (genes)", svg_text)
+        self.assertIn("Close family peer threshold", svg_text)
+        self.assertIn("&gt;=70% identity / &gt;=80% mutual coverage", svg_text)
+        self.assertIn("Consistent 2 (50.0%)", svg_text)
+        self.assertIn("Auto-resolved family variation 1 (25.0%)", svg_text)
+        self.assertIn(">Adjusted</tspan>", svg_text)
+        self.assertIn(">No adjustment</tspan>", svg_text)
+        self.assertIn("/MediaBox [0 0 518.40 408.00]", pdf_text)
+
+        busco_summaries = (
+            SankeyBuscoSummary(
+                label="Input CDS",
+                stage=0,
+                lineage_dataset="embryophyta_odb12",
+                input_sequences=4,
+                total_buscos=100,
+                single_copy=70,
+                duplicated=20,
+                fragmented=5,
+                missing=5,
+            ),
+            SankeyBuscoSummary(
+                label="Boundary-adjusted CDS",
+                stage=4,
+                lineage_dataset="embryophyta_odb12",
+                input_sequences=4,
+                total_buscos=100,
+                single_copy=85,
+                duplicated=5,
+                fragmented=5,
+                missing=5,
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            svg_path = Path(tmp_dir) / "combined.svg"
+            pdf_path = Path(tmp_dir) / "combined.pdf"
+            write_sankey_svg(
+                stage_labels,
+                nodes,
+                links,
+                svg_path,
+                busco_summaries=busco_summaries,
+                annotation_consistency=consistency,
+            )
+            write_sankey_pdf(
+                stage_labels,
+                nodes,
+                links,
+                pdf_path,
+                busco_summaries=busco_summaries,
+                annotation_consistency=consistency,
+            )
+            combined_svg = svg_path.read_text(encoding="utf-8")
+            combined_pdf = pdf_path.read_bytes().decode("latin-1")
+        self.assertIn('viewBox="0 0 518.40 400.00"', combined_svg)
+        self.assertEqual(combined_svg.count('class="summary-pie-title"'), 3)
+        self.assertIn("Input CDS BUSCO", combined_svg)
+        self.assertIn("Boundary-adjusted CDS BUSCO", combined_svg)
+        self.assertIn("BUSCO genes n=100", combined_svg)
+        self.assertIn("CDS input n=4; embryophyta_odb12", combined_svg)
+        self.assertIn("Name consistency (n=4)", combined_svg)
+        self.assertIn("Close family peer: id&gt;=70%, cov&gt;=80%", combined_svg)
+        self.assertIn("Consistent 50.0%", combined_svg)
+        self.assertIn("Auto-resolved variation 25.0%", combined_svg)
+        self.assertIn('fill-opacity="0.72"', combined_svg)
+        self.assertEqual(combined_svg.count('stroke-dasharray="3 2"'), 3)
+        self.assertEqual(combined_svg.count('height="100.00" rx="4"'), 3)
+        self.assertIn("/MediaBox [0 0 518.40 400.00]", combined_pdf)
+
+    def test_load_functional_annotation_summary_groups_evidence_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_root = Path(tmp_dir)
+            final_dir = output_root / "final"
+            final_dir.mkdir()
+            (final_dir / "functional-annotation.tsv").write_text(
+                "ID\tLocus_tag\tsource\ng1.t1\tg1\tswissprot\ng2.t1\tg2\tpfam\ng3.t1\tg3\tnone\n",
+                encoding="utf-8",
+            )
+
+            summary = load_functional_annotation_summary(output_root)
+
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertEqual(summary.total, 3)
+        self.assertEqual(
+            {group.key: group.count for group in summary.groups},
+            {"swissprot": 1, "pfam": 1, "none": 1},
+        )
+
     def test_load_sankey_busco_summaries_maps_results_to_measured_stages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_root = Path(tmp_dir)
@@ -222,8 +498,12 @@ class PipelinePlotTests(unittest.TestCase):
 
             summaries = load_sankey_busco_summaries(output_root)
 
-        self.assertEqual([summary.label for summary in summaries], ["Input CDS", "Adjusted CDS"])
+        self.assertEqual(
+            [summary.label for summary in summaries],
+            ["Input CDS", "Boundary-adjusted CDS"],
+        )
         self.assertEqual([summary.stage for summary in summaries], [0, 4])
+        self.assertEqual([summary.input_sequences for summary in summaries], [95, 95])
         self.assertEqual(summaries[0].complete_pct, 90.0)
 
     def test_parse_pipeline_plot_metrics_extracts_stage_counts(self) -> None:
@@ -562,18 +842,24 @@ class PipelinePlotTests(unittest.TestCase):
                 "Stage-wise pipeline gene flow",
                 svg_texts[0],
             )
-            self.assertIn(">mRNA selection</tspan>", svg_texts[0])
+            self.assertIn(">mRNA</tspan>", svg_texts[0])
+            self.assertIn(">selection</tspan>", svg_texts[0])
             self.assertNotIn(">One mRNA</tspan>", svg_texts[0])
             self.assertIn(">Frame</tspan>", svg_texts[0])
             self.assertIn(">correction</tspan>", svg_texts[0])
-            self.assertIn(">Input GFF</tspan>", svg_texts[0])
-            self.assertIn(">Coordinate duplicate</tspan>", svg_texts[0])
+            self.assertIn(">Input</tspan>", svg_texts[0])
+            self.assertIn(">GFF</tspan>", svg_texts[0])
+            self.assertIn(">Coordinate</tspan>", svg_texts[0])
+            self.assertIn(">duplicate</tspan>", svg_texts[0])
             self.assertIn(">removal</tspan>", svg_texts[0])
-            self.assertIn(">CDS boundary</tspan>", svg_texts[0])
+            self.assertIn(">CDS</tspan>", svg_texts[0])
+            self.assertIn(">boundary</tspan>", svg_texts[0])
             self.assertIn(">adjustment</tspan>", svg_texts[0])
-            self.assertIn(">Output ann.txt</tspan>", svg_texts[0])
+            self.assertIn(">Output</tspan>", svg_texts[0])
+            self.assertIn(">ann.txt</tspan>", svg_texts[0])
             self.assertEqual(svg_texts[0].count('class="stage"'), 6)
             self.assertIn(">Already one</tspan>", svg_texts[0])
+            self.assertIn(">mRNA per gene</tspan>", svg_texts[0])
             self.assertIn(">Reduced to</tspan>", svg_texts[0])
             self.assertNotIn(">Selected<", svg_texts[0])
             self.assertNotIn(">Framed<", svg_texts[0])
@@ -582,16 +868,24 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertIn('viewBox="0 0 518.40 420.00"', svg_texts[0])
             self.assertIn("BUSCO results (CDS; embryophyta_odb12; n=100)", svg_texts[0])
             self.assertIn("Single-copy 70.0%", svg_texts[0])
-            self.assertIn(">Input CDS</text>", svg_texts[0])
-            self.assertIn(">Adjusted CDS</text>", svg_texts[0])
+            self.assertIn(">Input CDS (CDS input n=95)</text>", svg_texts[0])
+            self.assertIn(">Boundary-adjusted CDS (CDS input n=95)</text>", svg_texts[0])
             gene_flow_pdf = artifacts.gene_flow_pdf.read_bytes().decode("latin-1")
             self.assertIn("/MediaBox [0 0 518.40 420.00]", gene_flow_pdf)
-            self.assertIn("(mRNA selection)", gene_flow_pdf)
-            self.assertIn("(Coordinate duplicate)", gene_flow_pdf)
-            self.assertIn("(CDS boundary)", gene_flow_pdf)
-            self.assertIn("(Output ann.txt)", gene_flow_pdf)
-            self.assertIn("(Adjusted CDS)", gene_flow_pdf)
+            self.assertIn("(mRNA)", gene_flow_pdf)
+            self.assertIn("(selection)", gene_flow_pdf)
+            self.assertIn("(Coordinate)", gene_flow_pdf)
+            self.assertIn("(duplicate)", gene_flow_pdf)
+            self.assertIn("(CDS)", gene_flow_pdf)
+            self.assertIn("(boundary)", gene_flow_pdf)
+            self.assertIn("(Output)", gene_flow_pdf)
+            self.assertIn("(ann.txt)", gene_flow_pdf)
+            self.assertIn(
+                r"(Boundary-adjusted CDS \(CDS input n=95\))",
+                gene_flow_pdf,
+            )
             self.assertIn("(Already one)", gene_flow_pdf)
+            self.assertIn("(mRNA per gene)", gene_flow_pdf)
             self.assertIn("(Reduced to)", gene_flow_pdf)
             self.assertIn(
                 "Pipeline event counts",

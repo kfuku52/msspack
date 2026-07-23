@@ -22,6 +22,7 @@ For the official submission workflow and file requirements, see the DDBJ [MSS - 
 - Download and run DDBJ `Parser` and `transChecker`
 - Reuse unchanged intermediate files on rerun
 - Write build logs, metrics, and `build-manifest.json`
+- Optionally assign conservative protein products with Swiss-Prot, UniRef90, Pfam, and CDD
 - Run BUSCO comparisons for GFF-derived CDS sets, with optional genome FASTA comparison
 - Render stage-wise gene-flow, event-count, and changed-gene overlap plots
 - Render an HTML report that links outputs, validation, BUSCO results, plots, and metrics
@@ -41,12 +42,14 @@ Python 3.11 or newer is required. CI tests Python 3.11 through 3.14.
 If you use conda or mamba, you can install the external runtime tools at the same time:
 
 ```bash
-conda create -n msspack -c conda-forge -c bioconda "python>=3.11" pip openjdk busco
+conda create -n msspack -c conda-forge -c bioconda "python>=3.11" pip openjdk busco diamond hmmer
 conda activate msspack
 pip install git+https://github.com/kfuku52/msspack.git
 ```
 
-`openjdk` provides the `java` command required by the DDBJ validation tools. `busco` is only needed when you run `msspack busco`; omit it if you do not need BUSCO comparison plots.
+`openjdk` provides the `java` command required by the DDBJ validation tools. `busco`
+is only needed when you run `msspack busco`. DIAMOND and HMMER are only needed when
+functional annotation is enabled; omit optional tools for features you do not use.
 
 The Python packaging pipeline is platform-independent, but automated installation and
 execution of the DDBJ `Parser` and `transChecker` currently supports Linux and macOS.
@@ -164,9 +167,15 @@ figures:
 
 When `busco/cds/comparison.json` is available, the Sankey diagram also shows BUSCO
 compositions for CDS models derived from the input GFF and the GFF after CDS boundary
-adjustment. Each pie is aligned with the stage where its CDS set was measured. Zero-count
-branches are omitted from the Sankey diagram to avoid implying nonzero flow; their
-values remain explicit in the event-count plot and TSV outputs.
+adjustment. When name-consistency results are also available, the two BUSCO pies and the
+name-consistency pie share one summary row below the Sankey. Zero-count branches are
+omitted from the Sankey diagram to avoid implying nonzero flow; their values remain
+explicit in the event-count plot and TSV outputs.
+When functional annotation evidence is present, the Sankey adds an annotation stage
+that separates Swiss-Prot, UniRef90, Pfam, CDD, preserved products, and rows
+that remain unannotated. These outcomes are ordered by assignment priority: Swiss-Prot,
+an optional close-reference database, UniRef90, Pfam, CDD, preserved products, and
+unannotated rows.
 
 <img src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-pipeline-gene-flow.sankey.svg" alt="Example msspack pipeline gene-flow Sankey diagram with BUSCO summaries">
 
@@ -183,6 +192,79 @@ The optional `[busco]` section controls `msspack busco`. By default, BUSCO evalu
 CDS FASTA sets extracted from the input GFF and the processed GFF after CDS boundary
 adjustment. Set `busco.run_genome = true` or pass `--genome` to add a genome FASTA
 comparison.
+
+### Functional protein annotation
+
+Set `functional_annotation.enabled = true` to annotate products before `ann.txt` is
+rendered. The implementation searches reviewed Swiss-Prot first and then UniRef90 with
+DIAMOND, ranks descriptions with an AHRD-inspired weighted lexical consensus, and uses
+informative Pfam or CDD domains as conservative fallbacks. Existing non-hypothetical
+products are preserved unless `overwrite_existing = true`.
+UniRef90, Pfam, and CDD scan only proteins without an accepted earlier similarity
+assignment. Pfam and CDD receive the same residual query set so their speed and yield are
+directly comparable. Pfam partitions queries into parallel `hmmscan` shards; CDD runs
+multithreaded `rpsblast` followed by representative-hit processing with `rpsbproc`.
+
+On the first enabled run, selected databases are downloaded into `tools.cache_dir`; later
+unchanged runs reuse their indexes and pipeline results. Release-provided checksums and
+sizes are verified when published, and local SHA-256/provenance JSON is recorded. Set
+`swissprot_fasta`, `uniref90_fasta`, `pfam_hmm`, `cdd_database`, or `cdd_data_dir` for an
+offline workflow. Full UniRef90 is very large; `uniref90_taxon_id` downloads a taxonomic
+subset from the UniProt REST API and retains the compressed FASTA while building DIAMOND.
+A close-species protein FASTA can also be supplied through `reference_proteins`.
+
+The final directory contains `functional-annotation.tsv`, with the original and assigned
+product, database/accession, quality measurements, decision reason, and confidence for
+every transcript. `functional-domain-search-comparison.tsv` records the identical Pfam/CDD
+query count, queries with hits, total hits, informative assignments, duration, and rate.
+DIAMOND rows also include the AHRD-style three-character quality code
+for similarity significance, alignment overlap, and description-token support. DIAMOND
+assignments must pass the configured identity, query coverage, subject coverage,
+bit-score, E-value, near-top-hit, and token-consensus thresholds. Pfam uses model-specific
+gathering thresholds (`hmmscan --cut_ga`) plus domain coverage and i-E-value filters. CDD
+uses representative RPS-BLAST hits and accepts informative Specific or Superfamily models.
+Uninformative descriptions, motifs, coiled coils, low-complexity regions, and
+weak/conflicting evidence remain `hypothetical protein`.
+
+The default is deliberately opt-in because the initial databases require substantial
+downloads (especially Pfam) and product names should be reviewed before submission. Run
+`msspack doctor --config my_submission.toml` after enabling the option to check DIAMOND,
+HMMER, RPS-BLAST, and rpsbproc. Each optional fallback can be disabled independently.
+
+Set `functional_annotation.consistency.enabled = true` to run one additional DIAMOND
+all-vs-all search and audit whether directly aligned proteins receive compatible names.
+The same search is evaluated at near-identical (90% identity and 90% mutual coverage),
+close-family (70% and 80%), and broad-homology (40% and 60%) thresholds by default.
+Connected components define candidate families, but name comparisons use only direct
+alignment edges to avoid transitive chaining artifacts. The audit distinguishes exact,
+safe canonical-equivalent, compatible-granularity, and conflicting name pairs.
+
+With the default `auto_resolve_conflicts = true`, conflicts do not require manual review.
+For a direct near-identical conflict, a product is propagated only when the better-priority
+annotation source supplies one unambiguous name; otherwise independently supported
+paralog- or subfamily-specific names are retained. Close-family-only differences are also
+retained because forcing one specific name across 70/80 homologs can erase real functional
+divergence. Set `auto_resolve_conflicts = false` to restore audit-only review statuses. The optional
+`harmonize_safe_equivalents = true` setting only standardizes approved aliases and safe
+formatting variants within near-identical families; substrate specificity, paralog
+identifiers, and localization differences are not propagated between equal-priority sources.
+Gene-, family-, pair-, conflict-diagnostic-, threshold-summary-, and source-pair TSV files are written
+to `final/`. `msspack plot` adds a threshold-sensitivity stacked bar, an evidence-source
+review-rate heatmap, and a gene-level name-consistency pie below the pipeline Sankey. Each
+stacked-bar row prints its identity and mutual-coverage threshold. The name-consistency pie
+shares one summary row with both BUSCO pies and uses the close-family threshold (70%
+identity and 80% mutual coverage) in this order: Consistent, Auto-resolved family variation,
+No annotated close-family peer, and Unannotated. “Auto-resolved family variation” means
+that conflicting specific modifiers or family-name tokens were handled by the automatic
+evidence policy above; no manual action is requested. “No annotated
+close-family peer” means no annotated 70/80 partner was found within the analyzed proteome;
+it does not mean that the gene lacks broad-homology or cross-species orthology relationships.
+Figure text is consistently 8 pt; compact consistency figures are 3.6 inches wide and
+multi-stage pipeline figures are 7.2 inches wide. These plots are also embedded by
+`msspack report`.
+
+In Sankey BUSCO panels, `BUSCO genes n` is the size of the selected lineage dataset, while
+`CDS input n` is the number of sequences actually supplied to that BUSCO run.
 
 Older configs may still contain `tools.gff3sort`; that setting is ignored because `msspack` now sorts GFF internally.
 

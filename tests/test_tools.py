@@ -22,6 +22,7 @@ from msspack.ddbj_tools import (
     require_installed,
     resolve_latest_archives,
     run_parser,
+    run_transchecker,
 )
 
 FAKE_ARCHIVE_SHA256 = hashlib.sha256(b"archive").hexdigest()
@@ -286,6 +287,7 @@ class ToolResolutionTests(unittest.TestCase):
 
             env = mocked.call_args.kwargs["env"]
             self.assertTrue(env["PATH"].startswith("/opt/custom/bin"))
+            self.assertNotIn(" ", env["err"])
 
     def test_run_parser_creates_java_shim_for_non_java_command_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -323,3 +325,59 @@ class ToolResolutionTests(unittest.TestCase):
                 )
 
             self.assertIn('exec java17 "$@"', captured["shim_text"])
+
+    def test_ddbj_wrappers_stage_paths_without_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            input_dir = base / "input with spaces"
+            input_dir.mkdir()
+            ann = input_dir / "sample.ann.txt"
+            fasta = input_dir / "sample.fasta"
+            ann.write_text("COMMON\n", encoding="utf-8")
+            fasta.write_text(">x\nATG\n", encoding="utf-8")
+            parser = ToolInstallation("parser", "1", "", base)
+            transchecker = ToolInstallation("transchecker", "1", "", base)
+            parser.executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            transchecker.executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            captured_commands: list[list[str]] = []
+
+            def fake_run_with_java(*, command: list[str], **_kwargs: object) -> None:
+                captured_commands.append(command)
+                for flag in ("-x", "-s"):
+                    staged = Path(command[command.index(flag) + 1])
+                    self.assertNotIn(" ", str(staged))
+                    self.assertTrue(staged.is_symlink())
+                if "-o" in command:
+                    Path(command[command.index("-o") + 1]).write_text(
+                        ">x\nM\n", encoding="utf-8"
+                    )
+                    Path(command[command.index("-t") + 1]).write_text(
+                        ">x\nATG\n", encoding="utf-8"
+                    )
+
+            with patch(
+                "msspack.ddbj_tools._run_with_java",
+                side_effect=fake_run_with_java,
+            ):
+                run_parser(
+                    parser,
+                    ann_path=ann,
+                    fasta_path=fasta,
+                    heap="1G",
+                    java_cmd="java",
+                    log_path=base / "parser.log",
+                )
+                run_transchecker(
+                    transchecker,
+                    ann_path=ann,
+                    fasta_path=fasta,
+                    aa_out=input_dir / "translated.aa.fasta",
+                    nuc_out=input_dir / "translated.nuc.fasta",
+                    heap="1G",
+                    java_cmd="java",
+                    log_path=base / "transchecker.log",
+                )
+
+            self.assertEqual(len(captured_commands), 2)
+            self.assertTrue((input_dir / "translated.aa.fasta").is_file())
+            self.assertTrue((input_dir / "translated.nuc.fasta").is_file())

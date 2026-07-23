@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import re
 from itertools import combinations
@@ -7,6 +8,11 @@ from pathlib import Path
 
 from .pipeline_plot_models import (
     GENE_SET_SPECS,
+    SANKEY_COLORS,
+    AnnotationConsistencyGroup,
+    AnnotationConsistencySummary,
+    FunctionalAnnotationGroup,
+    FunctionalAnnotationSummary,
     GeneOverlapRow,
     ParsedStepRecord,
     PipelineGeneSet,
@@ -27,6 +33,11 @@ STANDARD_LOG_FIELDS = {
     "Changed total",
     "Output total",
 }
+
+CONSISTENCY_THRESHOLD_RE = re.compile(
+    r"identity>=(?P<identity>[0-9]+(?:\.[0-9]+)?)%;\s*"
+    r"mutual coverage>=(?P<coverage>[0-9]+(?:\.[0-9]+)?)%"
+)
 
 
 def _parse_count(value: object | None) -> int | None:
@@ -169,7 +180,9 @@ def _detail_path(record: ParsedStepRecord, *keys: str) -> Path | None:
 
 def _parse_step_records(log_dir: Path) -> dict[str, ParsedStepRecord]:
     return {
-        "drop_duplicate_coordinate_gene": _load_step_record(log_dir, "06.drop-duplicate-coordinate-gene"),
+        "drop_duplicate_coordinate_gene": _load_step_record(
+            log_dir, "06.drop-duplicate-coordinate-gene"
+        ),
         "select_one_mrna": _load_step_record(log_dir, "07.select-one-mrna"),
         "update_gff_to_inframe": _load_step_record(log_dir, "09.update-gff-to-inframe"),
         "update_gff_with_padding": _load_step_record(log_dir, "11.update-gff-with-padding"),
@@ -188,8 +201,12 @@ def _build_metrics_from_records(records: dict[str, ParsedStepRecord]) -> Pipelin
     duplicate_removed_genes = _required_count(dedup.changed_total, "Changed total", dedup.path)
     genes_after_dedup = _required_count(dedup.output_total, "Output total", dedup.path)
 
-    transcript_changed_genes = _required_count(select_mrna.changed_total, "Changed total", select_mrna.path)
-    genes_after_single_mrna = _required_count(select_mrna.output_total, "Output total", select_mrna.path)
+    transcript_changed_genes = _required_count(
+        select_mrna.changed_total, "Changed total", select_mrna.path
+    )
+    genes_after_single_mrna = _required_count(
+        select_mrna.output_total, "Output total", select_mrna.path
+    )
     transcript_unchanged_genes = genes_after_single_mrna - transcript_changed_genes
     if transcript_unchanged_genes < 0:
         raise MSSPackError(
@@ -217,18 +234,20 @@ def _build_metrics_from_records(records: dict[str, ParsedStepRecord]) -> Pipelin
     if padding_unchanged_genes < 0:
         raise MSSPackError(f"Padding unchanged genes became negative for {padding.path}")
 
-    converted_to_misc_genes = _required_count(cds_to_misc.changed_total, "Changed total", cds_to_misc.path)
+    converted_to_misc_genes = _required_count(
+        cds_to_misc.changed_total, "Changed total", cds_to_misc.path
+    )
     total_cds_input = _detail_count(cds_to_misc, keys=("cds_input", "Total number of CDS in input"))
-    total_cds_output = _detail_count(cds_to_misc, keys=("cds_output", "Total number of CDS in output"))
+    total_cds_output = _detail_count(
+        cds_to_misc, keys=("cds_output", "Total number of CDS in output")
+    )
     misc_feature_output = _detail_count(
         cds_to_misc,
         keys=("misc_feature_output", "Total number of misc_feature in output"),
     )
     final_cds_genes = genes_after_padding - converted_to_misc_genes
     if final_cds_genes < 0:
-        raise MSSPackError(
-            f"Converted-to-misc genes exceed available genes in {cds_to_misc.path}"
-        )
+        raise MSSPackError(f"Converted-to-misc genes exceed available genes in {cds_to_misc.path}")
 
     return PipelinePlotMetrics(
         initial_genes=initial_genes,
@@ -267,7 +286,9 @@ def _read_id_list(path: Path) -> tuple[str, ...]:
     return tuple(identifiers)
 
 
-def _build_gene_sets(output_root: Path, records: dict[str, ParsedStepRecord]) -> tuple[PipelineGeneSet, ...]:
+def _build_gene_sets(
+    output_root: Path, records: dict[str, ParsedStepRecord]
+) -> tuple[PipelineGeneSet, ...]:
     log_dir = output_root / "logs"
     intermediate_dir = output_root / "intermediate"
     record_for_key = {
@@ -344,8 +365,10 @@ def _build_summary_payload(
     metrics: PipelinePlotMetrics,
     gene_sets: tuple[PipelineGeneSet, ...],
     overlap_rows: tuple[GeneOverlapRow, ...],
+    functional_annotation: FunctionalAnnotationSummary | None,
+    annotation_consistency: AnnotationConsistencySummary | None,
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "metrics": metrics.to_dict(),
         "sources": metrics.sources,
         "gene_sets": {gene_set.key: gene_set.to_dict() for gene_set in gene_sets},
@@ -354,6 +377,201 @@ def _build_summary_payload(
             "rows": [row.to_dict() for row in overlap_rows],
         },
     }
+    if functional_annotation is not None:
+        payload["functional_annotation"] = functional_annotation.to_dict()
+    if annotation_consistency is not None:
+        payload["annotation_consistency"] = annotation_consistency.to_dict()
+    return payload
+
+
+def _annotation_source_style(source: str) -> tuple[str, str]:
+    normalized = source.casefold()
+    if normalized == "swissprot":
+        return "Swiss-Prot", SANKEY_COLORS["annotation_similarity"]
+    if normalized == "uniref90":
+        return "UniRef90", SANKEY_COLORS["annotation_uniref"]
+    if normalized == "pfam":
+        return "Pfam", SANKEY_COLORS["annotation_domain"]
+    if normalized == "cdd":
+        return "CDD", SANKEY_COLORS["annotation_cdd"]
+    if normalized == "existing":
+        return "Existing product", SANKEY_COLORS["annotation_existing"]
+    if normalized == "none":
+        return "Unannotated", SANKEY_COLORS["annotation_missing"]
+    return source, SANKEY_COLORS["annotation_similarity"]
+
+
+def _annotation_source_sort_key(source: str) -> tuple[int, str]:
+    normalized = source.casefold()
+    if normalized == "existing":
+        return 1, normalized
+    if normalized == "none":
+        return 2, normalized
+    return 0, normalized
+
+
+def load_functional_annotation_summary(
+    output_root: Path,
+) -> FunctionalAnnotationSummary | None:
+    evidence_path = output_root / "final" / "functional-annotation.tsv"
+    if not evidence_path.is_file():
+        return None
+    grouped_ids: dict[str, list[str]] = {}
+    seen_ids: set[str] = set()
+    with evidence_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        required = {"ID", "Locus_tag", "source"}
+        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+            raise MSSPackError(
+                "Functional annotation evidence must contain ID, Locus_tag, and source columns: "
+                f"{evidence_path}"
+            )
+        for row in reader:
+            identifier = row["Locus_tag"].strip() or row["ID"].strip()
+            source = row["source"].strip() or "none"
+            if not identifier:
+                raise MSSPackError(
+                    f"Functional annotation evidence contains an empty identifier: {evidence_path}"
+                )
+            if identifier in seen_ids:
+                raise MSSPackError(
+                    f"Functional annotation evidence contains duplicate locus tag {identifier}: "
+                    f"{evidence_path}"
+                )
+            seen_ids.add(identifier)
+            grouped_ids.setdefault(source, []).append(identifier)
+
+    groups: list[FunctionalAnnotationGroup] = []
+    used_keys: set[str] = set()
+    for source in sorted(grouped_ids, key=_annotation_source_sort_key):
+        base_key = re.sub(r"[^a-z0-9]+", "_", source.casefold()).strip("_") or "none"
+        key = base_key
+        suffix = 2
+        while key in used_keys:
+            key = f"{base_key}_{suffix}"
+            suffix += 1
+        used_keys.add(key)
+        label, color = _annotation_source_style(source)
+        groups.append(
+            FunctionalAnnotationGroup(
+                key=key,
+                source=source,
+                label=label,
+                color=color,
+                locus_tags=tuple(grouped_ids[source]),
+            )
+        )
+    return FunctionalAnnotationSummary(path=evidence_path, groups=tuple(groups))
+
+
+def load_annotation_consistency_summary(
+    output_root: Path,
+) -> AnnotationConsistencySummary | None:
+    audit_path = output_root / "final" / "functional-annotation-consistency.tsv"
+    summary_path = output_root / "final" / "functional-annotation-consistency-summary.tsv"
+    source_pair_path = output_root / "final" / "functional-annotation-source-pairs.tsv"
+    if not audit_path.is_file():
+        return None
+    missing = [path for path in (summary_path, source_pair_path) if not path.is_file()]
+    if missing:
+        raise MSSPackError(
+            "Functional annotation consistency outputs are incomplete; missing: "
+            + ", ".join(str(path) for path in missing)
+        )
+    styles = {
+        "consistent": (
+            "Consistent",
+            SANKEY_COLORS["consistency_consistent"],
+        ),
+        "resolved": (
+            "Auto-resolved family variation",
+            SANKEY_COLORS["consistency_review"],
+        ),
+        "review": (
+            "Needs name review",
+            SANKEY_COLORS["consistency_review"],
+        ),
+        "no_close_family_peer": (
+            "No annotated close-family peer",
+            SANKEY_COLORS["consistency_no_peer"],
+        ),
+        "unannotated": (
+            "Unannotated",
+            SANKEY_COLORS["consistency_unannotated"],
+        ),
+    }
+    grouped_ids: dict[str, list[str]] = {key: [] for key in styles}
+    seen: set[str] = set()
+    with audit_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        required = {"ID", "Locus_tag", "name_consistency"}
+        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+            raise MSSPackError(
+                "Functional annotation consistency evidence must contain ID, Locus_tag, "
+                f"and name_consistency columns: {audit_path}"
+            )
+        for row in reader:
+            identifier = row["Locus_tag"].strip() or row["ID"].strip()
+            status = row["name_consistency"].strip()
+            if status in {"no_comparable_family", "no_near_identical_peer"}:
+                # Backward-compatible reading of audit tables written before
+                # the gene-level comparison tier was relaxed to 70/80.
+                status = "no_close_family_peer"
+            if status not in styles:
+                raise MSSPackError(
+                    f"Unknown functional annotation consistency status {status!r}: {audit_path}"
+                )
+            if not identifier or identifier in seen:
+                raise MSSPackError(
+                    "Functional annotation consistency evidence contains an empty or "
+                    f"duplicate locus tag: {audit_path}"
+                )
+            seen.add(identifier)
+            grouped_ids[status].append(identifier)
+    groups = tuple(
+        AnnotationConsistencyGroup(
+            key=key,
+            label=styles[key][0],
+            color=styles[key][1],
+            locus_tags=tuple(grouped_ids[key]),
+        )
+        for key in styles
+        if grouped_ids[key]
+    )
+    identity_threshold: float | None = None
+    coverage_threshold: float | None = None
+    with summary_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if reader.fieldnames is None or not {"tier", "threshold"}.issubset(reader.fieldnames):
+            raise MSSPackError(
+                "Functional annotation consistency summary must contain tier and threshold "
+                f"columns: {summary_path}"
+            )
+        for row in reader:
+            if row["tier"].strip() != "family":
+                continue
+            match = CONSISTENCY_THRESHOLD_RE.fullmatch(row["threshold"].strip())
+            if match is None:
+                raise MSSPackError(
+                    "Invalid close-family consistency threshold in "
+                    f"{summary_path}: {row['threshold']!r}"
+                )
+            identity_threshold = float(match.group("identity"))
+            coverage_threshold = float(match.group("coverage"))
+            break
+    if identity_threshold is None or coverage_threshold is None:
+        raise MSSPackError(
+            f"Functional annotation consistency summary has no family tier: {summary_path}"
+        )
+    return AnnotationConsistencySummary(
+        path=audit_path,
+        summary_path=summary_path,
+        source_pair_path=source_pair_path,
+        groups=groups,
+        comparison_tier="family",
+        identity_threshold=identity_threshold,
+        coverage_threshold=coverage_threshold,
+    )
 
 
 def collect_pipeline_plot_data(output_root: Path, log_dir: Path) -> PipelinePlotDataBundle:
@@ -361,12 +579,38 @@ def collect_pipeline_plot_data(output_root: Path, log_dir: Path) -> PipelinePlot
     metrics = _build_metrics_from_records(records)
     gene_sets = _build_gene_sets(output_root, records)
     overlap_rows = _build_overlap_rows(gene_sets)
+    functional_annotation = load_functional_annotation_summary(output_root)
+    if (
+        functional_annotation is not None
+        and functional_annotation.total != metrics.genes_after_padding
+    ):
+        raise MSSPackError(
+            "Functional annotation evidence contains "
+            f"{functional_annotation.total:,} genes; expected {metrics.genes_after_padding:,}"
+        )
+    annotation_consistency = load_annotation_consistency_summary(output_root)
+    if (
+        annotation_consistency is not None
+        and annotation_consistency.total != metrics.genes_after_padding
+    ):
+        raise MSSPackError(
+            "Functional annotation consistency evidence contains "
+            f"{annotation_consistency.total:,} genes; expected {metrics.genes_after_padding:,}"
+        )
     return PipelinePlotDataBundle(
         records=records,
         metrics=metrics,
         gene_sets=gene_sets,
         overlap_rows=overlap_rows,
-        summary_payload=_build_summary_payload(metrics, gene_sets, overlap_rows),
+        functional_annotation=functional_annotation,
+        annotation_consistency=annotation_consistency,
+        summary_payload=_build_summary_payload(
+            metrics,
+            gene_sets,
+            overlap_rows,
+            functional_annotation,
+            annotation_consistency,
+        ),
     )
 
 

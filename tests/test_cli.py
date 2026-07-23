@@ -234,6 +234,24 @@ class CliTests(unittest.TestCase):
             overlap_tsv=Path("/tmp/build/Demo/plots/pipeline-gene-overlap.tsv"),
             overlap_svg=Path("/tmp/build/Demo/plots/pipeline-gene-overlap.svg"),
             overlap_pdf=Path("/tmp/build/Demo/plots/pipeline-gene-overlap.pdf"),
+            name_consistency_tsv=Path(
+                "/tmp/build/Demo/plots/functional-annotation-name-consistency.tsv"
+            ),
+            name_consistency_svg=Path(
+                "/tmp/build/Demo/plots/functional-annotation-name-consistency.svg"
+            ),
+            name_consistency_pdf=Path(
+                "/tmp/build/Demo/plots/functional-annotation-name-consistency.pdf"
+            ),
+            source_consistency_tsv=Path(
+                "/tmp/build/Demo/plots/functional-annotation-source-consistency.tsv"
+            ),
+            source_consistency_svg=Path(
+                "/tmp/build/Demo/plots/functional-annotation-source-consistency.svg"
+            ),
+            source_consistency_pdf=Path(
+                "/tmp/build/Demo/plots/functional-annotation-source-consistency.pdf"
+            ),
         )
         stdout = io.StringIO()
 

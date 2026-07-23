@@ -1,81 +1,124 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="7.2in" height="5.83333in" viewBox="0 0 518.40 420.00">
-<style>text{font-family:Helvetica,Arial,sans-serif;fill:#111827} .title{font-size:8pt;font-weight:700} .subtitle{font-size:8pt;fill:#4b5563} .stage{font-size:8pt;font-weight:700;fill:#334155} .label{font-size:8pt} .count{font-size:8pt;fill:#475569} .busco-title,.busco-label{font-size:8pt;font-weight:700;fill:#334155} .busco-legend,.busco-value{font-size:8pt;fill:#475569}</style>
+<svg xmlns="http://www.w3.org/2000/svg" width="7.2in" height="5.55556in" viewBox="0 0 518.40 400.00">
+<style>text{font-family:Helvetica,Arial,sans-serif;font-size:8pt;fill:#111827} .title{font-weight:700} .subtitle{fill:#4b5563} .stage{font-weight:700;fill:#334155} .count{fill:#475569} .busco-title,.busco-label,.consistency-title,.summary-pie-title{font-weight:700;fill:#334155} .busco-legend,.busco-value,.consistency-note,.summary-pie-note,.summary-pie-legend{fill:#475569}</style>
 <rect width="100%" height="100%" fill="white"/>
 <text x="16" y="16" class="title">Stage-wise pipeline gene flow</text>
 <text x="16" y="31" class="subtitle">Ribbon widths are proportional to gene counts; node values are genes.</text>
-<text x="32.50" y="58.00" text-anchor="middle" class="stage"><tspan x="32.50" dy="0">Input GFF</tspan></text>
-<text x="123.18" y="53.00" text-anchor="middle" class="stage"><tspan x="123.18" dy="0">Coordinate duplicate</tspan><tspan x="123.18" dy="10">removal</tspan></text>
-<text x="213.86" y="58.00" text-anchor="middle" class="stage"><tspan x="213.86" dy="0">mRNA selection</tspan></text>
-<text x="304.54" y="53.00" text-anchor="middle" class="stage"><tspan x="304.54" dy="0">Frame</tspan><tspan x="304.54" dy="10">correction</tspan></text>
-<text x="395.22" y="53.00" text-anchor="middle" class="stage"><tspan x="395.22" dy="0">CDS boundary</tspan><tspan x="395.22" dy="10">adjustment</tspan></text>
-<text x="485.90" y="58.00" text-anchor="middle" class="stage"><tspan x="485.90" dy="0">Output ann.txt</tspan></text>
-<path d="M 37.00 88.75 C 65.59 88.75, 90.09 78.00, 118.68 78.00 L 118.68 239.00 C 90.09 239.00, 65.59 249.75, 37.00 249.75 Z" fill="#64748b" fill-opacity="0.55" stroke="none"/>
-<path d="M 37.00 249.75 C 65.59 249.75, 90.09 257.00, 118.68 257.00 L 118.68 260.50 C 90.09 260.50, 65.59 253.25, 37.00 253.25 Z" fill="#dc2626" fill-opacity="0.55" stroke="none"/>
-<path d="M 127.68 78.00 C 156.27 78.00, 180.77 79.76, 209.36 79.76 L 209.36 209.88 C 180.77 209.88, 156.27 208.12, 127.68 208.12 Z" fill="#94a3b8" fill-opacity="0.55" stroke="none"/>
-<path d="M 127.68 208.12 C 156.27 208.12, 180.77 231.36, 209.36 231.36 L 209.36 262.24 C 180.77 262.24, 156.27 239.00, 127.68 239.00 Z" fill="#2563eb" fill-opacity="0.55" stroke="none"/>
-<path d="M 218.36 79.76 C 246.95 79.76, 271.45 78.01, 300.04 78.01 L 300.04 208.11 C 271.45 208.11, 246.95 209.86, 218.36 209.86 Z" fill="#cbd5e1" fill-opacity="0.55" stroke="none"/>
-<path d="M 218.36 209.86 C 246.95 209.86, 271.45 256.99, 300.04 256.99 L 300.04 260.49 C 271.45 260.49, 246.95 213.36, 218.36 213.36 Z" fill="#d97706" fill-opacity="0.55" stroke="none"/>
-<path d="M 218.36 231.36 C 246.95 231.36, 271.45 208.11, 300.04 208.11 L 300.04 238.99 C 271.45 238.99, 246.95 262.24, 218.36 262.24 Z" fill="#cbd5e1" fill-opacity="0.55" stroke="none"/>
-<path d="M 309.04 78.01 C 337.63 78.01, 362.13 88.76, 390.72 88.76 L 390.72 249.74 C 362.13 249.74, 337.63 238.99, 309.04 238.99 Z" fill="#cbd5e1" fill-opacity="0.55" stroke="none"/>
-<path d="M 309.04 256.99 C 337.63 256.99, 362.13 249.74, 390.72 249.74 L 390.72 253.24 C 362.13 253.24, 337.63 260.49, 309.04 260.49 Z" fill="#cbd5e1" fill-opacity="0.55" stroke="none"/>
-<path d="M 399.72 88.76 C 428.31 88.76, 452.81 90.50, 481.40 90.50 L 481.40 251.50 C 452.81 251.50, 428.31 249.76, 399.72 249.76 Z" fill="#059669" fill-opacity="0.55" stroke="none"/>
-<rect x="28.00" y="88.75" width="9.00" height="164.50" rx="4" fill="#475569" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="118.68" y="78.00" width="9.00" height="161.00" rx="4" fill="#64748b" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="118.68" y="257.00" width="9.00" height="7.00" rx="4" fill="#dc2626" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="209.36" y="79.76" width="9.00" height="133.60" rx="4" fill="#94a3b8" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="209.36" y="231.36" width="9.00" height="30.88" rx="4" fill="#2563eb" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="300.04" y="78.01" width="9.00" height="160.98" rx="4" fill="#cbd5e1" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="300.04" y="256.99" width="9.00" height="7.00" rx="4" fill="#d97706" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="390.72" y="88.76" width="9.00" height="164.48" rx="4" fill="#cbd5e1" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="481.40" y="90.50" width="9.00" height="161.00" rx="4" fill="#059669" stroke="#0f172a" stroke-width="0.8"/>
+<text x="32.50" y="53.00" text-anchor="middle" class="stage"><tspan x="32.50" dy="0">Input</tspan><tspan x="32.50" dy="10">GFF</tspan></text>
+<text x="103.40" y="48.00" text-anchor="middle" class="stage"><tspan x="103.40" dy="0">Coordinate</tspan><tspan x="103.40" dy="10">duplicate</tspan><tspan x="103.40" dy="10">removal</tspan></text>
+<text x="174.30" y="53.00" text-anchor="middle" class="stage"><tspan x="174.30" dy="0">mRNA</tspan><tspan x="174.30" dy="10">selection</tspan></text>
+<text x="245.20" y="53.00" text-anchor="middle" class="stage"><tspan x="245.20" dy="0">Frame</tspan><tspan x="245.20" dy="10">correction</tspan></text>
+<text x="316.10" y="48.00" text-anchor="middle" class="stage"><tspan x="316.10" dy="0">CDS</tspan><tspan x="316.10" dy="10">boundary</tspan><tspan x="316.10" dy="10">adjustment</tspan></text>
+<text x="387.00" y="53.00" text-anchor="middle" class="stage"><tspan x="387.00" dy="0">Functional</tspan><tspan x="387.00" dy="10">annotation</tspan></text>
+<text x="457.90" y="53.00" text-anchor="middle" class="stage"><tspan x="457.90" dy="0">Output</tspan><tspan x="457.90" dy="10">ann.txt</tspan></text>
+<path d="M 37.00 114.48 C 58.66 114.48, 77.23 103.73, 98.90 103.73 L 98.90 213.27 C 77.23 213.27, 58.66 224.02, 37.00 224.02 Z" fill="#6366f1" fill-opacity="0.72" stroke="none"/>
+<path d="M 37.00 224.02 C 58.66 224.02, 77.23 231.27, 98.90 231.27 L 98.90 234.77 C 77.23 234.77, 58.66 227.52, 37.00 227.52 Z" fill="#e11d48" fill-opacity="0.72" stroke="none"/>
+<path d="M 107.90 103.73 C 129.56 103.73, 148.13 105.49, 169.80 105.49 L 169.80 194.01 C 148.13 194.01, 129.56 192.26, 107.90 192.26 Z" fill="#0ea5e9" fill-opacity="0.72" stroke="none"/>
+<path d="M 107.90 192.26 C 129.56 192.26, 148.13 215.50, 169.80 215.50 L 169.80 236.51 C 148.13 236.51, 129.56 213.27, 107.90 213.27 Z" fill="#2563eb" fill-opacity="0.72" stroke="none"/>
+<path d="M 178.80 105.49 C 200.46 105.49, 219.03 103.74, 240.70 103.74 L 240.70 107.24 C 219.03 107.24, 200.46 108.99, 178.80 108.99 Z" fill="#f59e0b" fill-opacity="0.72" stroke="none"/>
+<path d="M 178.80 108.99 C 200.46 108.99, 219.03 128.74, 240.70 128.74 L 240.70 217.25 C 219.03 217.25, 200.46 197.50, 178.80 197.50 Z" fill="#14b8a6" fill-opacity="0.72" stroke="none"/>
+<path d="M 178.80 215.50 C 200.46 215.50, 219.03 217.25, 240.70 217.25 L 240.70 238.26 C 219.03 238.26, 200.46 236.51, 178.80 236.51 Z" fill="#14b8a6" fill-opacity="0.72" stroke="none"/>
+<path d="M 249.70 103.74 C 271.37 103.74, 289.93 114.49, 311.60 114.49 L 311.60 117.99 C 289.93 117.99, 271.37 107.24, 249.70 107.24 Z" fill="#22c55e" fill-opacity="0.72" stroke="none"/>
+<path d="M 249.70 128.74 C 271.37 128.74, 289.93 117.99, 311.60 117.99 L 311.60 227.51 C 289.93 227.51, 271.37 238.26, 249.70 238.26 Z" fill="#22c55e" fill-opacity="0.72" stroke="none"/>
+<path d="M 320.60 114.49 C 342.26 114.49, 360.83 78.00, 382.50 78.00 L 382.50 132.59 C 360.83 132.59, 342.26 169.08, 320.60 169.08 Z" fill="#2563eb" fill-opacity="0.72" stroke="none"/>
+<path d="M 320.60 169.08 C 342.26 169.08, 360.83 150.59, 382.50 150.59 L 382.50 177.92 C 360.83 177.92, 342.26 196.41, 320.60 196.41 Z" fill="#0d9488" fill-opacity="0.72" stroke="none"/>
+<path d="M 320.60 196.41 C 342.26 196.41, 360.83 195.92, 382.50 195.92 L 382.50 209.19 C 360.83 209.19, 342.26 209.68, 320.60 209.68 Z" fill="#7c3aed" fill-opacity="0.72" stroke="none"/>
+<path d="M 320.60 209.68 C 342.26 209.68, 360.83 227.19, 382.50 227.19 L 382.50 230.69 C 360.83 230.69, 342.26 213.18, 320.60 213.18 Z" fill="#c026d3" fill-opacity="0.72" stroke="none"/>
+<path d="M 320.60 213.18 C 342.26 213.18, 360.83 252.19, 382.50 252.19 L 382.50 264.00 C 360.83 264.00, 342.26 224.99, 320.60 224.99 Z" fill="#94a3b8" fill-opacity="0.72" stroke="none"/>
+<path d="M 391.50 78.00 C 413.16 78.00, 431.73 115.75, 453.40 115.75 L 453.40 170.34 C 431.73 170.34, 413.16 132.59, 391.50 132.59 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
+<path d="M 391.50 150.59 C 413.16 150.59, 431.73 170.34, 453.40 170.34 L 453.40 197.67 C 431.73 197.67, 413.16 177.92, 391.50 177.92 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
+<path d="M 391.50 195.92 C 413.16 195.92, 431.73 197.67, 453.40 197.67 L 453.40 210.94 C 431.73 210.94, 413.16 209.19, 391.50 209.19 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
+<path d="M 391.50 227.19 C 413.16 227.19, 431.73 210.94, 453.40 210.94 L 453.40 214.44 C 431.73 214.44, 413.16 230.69, 391.50 230.69 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
+<path d="M 391.50 252.19 C 413.16 252.19, 431.73 214.44, 453.40 214.44 L 453.40 226.25 C 431.73 226.25, 413.16 264.00, 391.50 264.00 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
+<rect x="28.00" y="114.48" width="9.00" height="113.03" rx="4" fill="#334155" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="98.90" y="103.73" width="9.00" height="109.53" rx="4" fill="#6366f1" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="98.90" y="231.27" width="9.00" height="7.00" rx="4" fill="#e11d48" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="169.80" y="105.49" width="9.00" height="92.01" rx="4" fill="#0ea5e9" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="169.80" y="215.50" width="9.00" height="21.01" rx="4" fill="#2563eb" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="240.70" y="103.74" width="9.00" height="7.00" rx="4" fill="#f59e0b" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="240.70" y="128.74" width="9.00" height="109.52" rx="4" fill="#14b8a6" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="311.60" y="114.49" width="9.00" height="113.02" rx="4" fill="#22c55e" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="382.50" y="78.00" width="9.00" height="54.59" rx="4" fill="#2563eb" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="382.50" y="150.59" width="9.00" height="27.34" rx="4" fill="#0d9488" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="382.50" y="195.92" width="9.00" height="13.27" rx="4" fill="#7c3aed" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="382.50" y="227.19" width="9.00" height="7.00" rx="4" fill="#c026d3" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="382.50" y="252.19" width="9.00" height="11.81" rx="4" fill="#94a3b8" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="453.40" y="115.75" width="9.00" height="110.50" rx="4" fill="#059669" stroke="#0f172a" stroke-width="0.8"/>
 <text x="41.00" y="167.00" text-anchor="start" class="label"><tspan x="41.00" dy="0">Input</tspan></text>
 <text x="41.00" y="179.00" text-anchor="start" class="count">22,005</text>
-<text x="131.68" y="154.50" text-anchor="start" class="label"><tspan x="131.68" dy="0">Kept</tspan></text>
-<text x="131.68" y="166.50" text-anchor="start" class="count">22,001</text>
-<text x="131.68" y="258.00" text-anchor="start" class="label"><tspan x="131.68" dy="0">Removed</tspan></text>
-<text x="131.68" y="270.00" text-anchor="start" class="count">4</text>
-<text x="222.36" y="137.56" text-anchor="start" class="label"><tspan x="222.36" dy="0">Already one</tspan><tspan x="222.36" dy="10">mRNA</tspan></text>
-<text x="222.36" y="157.56" text-anchor="start" class="count">17,781</text>
-<text x="222.36" y="237.80" text-anchor="start" class="label"><tspan x="222.36" dy="0">Reduced to</tspan><tspan x="222.36" dy="10">one mRNA</tspan></text>
-<text x="222.36" y="257.80" text-anchor="start" class="count">4,220</text>
-<text x="313.04" y="154.50" text-anchor="start" class="label"><tspan x="313.04" dy="0">Frame OK</tspan></text>
-<text x="313.04" y="166.50" text-anchor="start" class="count">21,998</text>
-<text x="313.04" y="257.99" text-anchor="start" class="label"><tspan x="313.04" dy="0">Frame fixed</tspan></text>
-<text x="313.04" y="269.99" text-anchor="start" class="count">3</text>
-<text x="386.72" y="167.00" text-anchor="end" class="label"><tspan x="386.72" dy="0">No padding</tspan></text>
-<text x="386.72" y="179.00" text-anchor="end" class="count">22,001</text>
-<text x="477.40" y="167.00" text-anchor="end" class="label"><tspan x="477.40" dy="0">Final CDS</tspan></text>
-<text x="477.40" y="179.00" text-anchor="end" class="count">22,001</text>
-<line x1="16" y1="296" x2="502.4" y2="296" stroke="#cbd5e1" stroke-width="0.7"/>
-<text x="259.20" y="309" text-anchor="middle" class="busco-title">BUSCO results (CDS; eudicotyledons_odb12; n=2,805)</text>
-<line x1="32.50" y1="288" x2="32.50" y2="319" stroke="#94a3b8" stroke-width="0.7" stroke-dasharray="2 2"/>
-<path d="M 32.50 350.00 L 32.50 325.00 A 25.00 25.00 0 1 1 8.78 357.91 Z" fill="#2ca25f" stroke="white" stroke-width="0.6"/>
-<path d="M 32.50 350.00 L 8.78 357.91 A 25.00 25.00 0 0 1 25.16 326.10 Z" fill="#3b82f6" stroke="white" stroke-width="0.6"/>
-<path d="M 32.50 350.00 L 25.16 326.10 A 25.00 25.00 0 0 1 27.82 325.44 Z" fill="#f59e0b" stroke="white" stroke-width="0.6"/>
-<path d="M 32.50 350.00 L 27.82 325.44 A 25.00 25.00 0 0 1 32.50 325.00 Z" fill="#ef4444" stroke="white" stroke-width="0.6"/>
-<rect x="64.50" y="321.00" width="6" height="6" rx="1" fill="#2ca25f"/>
-<text x="73.50" y="327.00" class="busco-legend">Single-copy 69.9%</text>
-<rect x="64.50" y="335.00" width="6" height="6" rx="1" fill="#3b82f6"/>
-<text x="73.50" y="341.00" class="busco-legend">Duplicated 25.4%</text>
-<rect x="64.50" y="349.00" width="6" height="6" rx="1" fill="#f59e0b"/>
-<text x="73.50" y="355.00" class="busco-legend">Fragmented 1.7%</text>
-<rect x="64.50" y="363.00" width="6" height="6" rx="1" fill="#ef4444"/>
-<text x="73.50" y="369.00" class="busco-legend">Missing 3.0%</text>
-<text x="32.50" y="385" text-anchor="middle" class="busco-label">Input CDS</text>
-<text x="32.50" y="399" text-anchor="middle" class="busco-value">Complete 95.3%</text>
-<line x1="395.22" y1="288" x2="395.22" y2="319" stroke="#94a3b8" stroke-width="0.7" stroke-dasharray="2 2"/>
-<path d="M 395.22 350.00 L 395.22 325.00 A 25.00 25.00 0 1 1 379.79 330.33 Z" fill="#2ca25f" stroke="white" stroke-width="0.6"/>
-<path d="M 395.22 350.00 L 379.79 330.33 A 25.00 25.00 0 0 1 387.83 326.12 Z" fill="#3b82f6" stroke="white" stroke-width="0.6"/>
-<path d="M 395.22 350.00 L 387.83 326.12 A 25.00 25.00 0 0 1 390.54 325.44 Z" fill="#f59e0b" stroke="white" stroke-width="0.6"/>
-<path d="M 395.22 350.00 L 390.54 325.44 A 25.00 25.00 0 0 1 395.22 325.00 Z" fill="#ef4444" stroke="white" stroke-width="0.6"/>
-<rect x="427.22" y="321.00" width="6" height="6" rx="1" fill="#2ca25f"/>
-<text x="436.22" y="327.00" class="busco-legend">Single-copy 89.4%</text>
-<rect x="427.22" y="335.00" width="6" height="6" rx="1" fill="#3b82f6"/>
-<text x="436.22" y="341.00" class="busco-legend">Duplicated 5.8%</text>
-<rect x="427.22" y="349.00" width="6" height="6" rx="1" fill="#f59e0b"/>
-<text x="436.22" y="355.00" class="busco-legend">Fragmented 1.8%</text>
-<rect x="427.22" y="363.00" width="6" height="6" rx="1" fill="#ef4444"/>
-<text x="436.22" y="369.00" class="busco-legend">Missing 3.0%</text>
-<text x="395.22" y="385" text-anchor="middle" class="busco-label">Adjusted CDS</text>
-<text x="395.22" y="399" text-anchor="middle" class="busco-value">Complete 95.2%</text>
+<text x="111.90" y="154.50" text-anchor="start" class="label"><tspan x="111.90" dy="0">Kept</tspan></text>
+<text x="111.90" y="166.50" text-anchor="start" class="count">22,001</text>
+<text x="111.90" y="232.27" text-anchor="start" class="label"><tspan x="111.90" dy="0">Removed</tspan></text>
+<text x="111.90" y="244.27" text-anchor="start" class="count">4</text>
+<text x="182.80" y="142.50" text-anchor="start" class="label"><tspan x="182.80" dy="0">Already one</tspan><tspan x="182.80" dy="10">mRNA per gene</tspan></text>
+<text x="182.80" y="162.50" text-anchor="start" class="count">17,781</text>
+<text x="182.80" y="217.00" text-anchor="start" class="label"><tspan x="182.80" dy="0">Reduced to</tspan><tspan x="182.80" dy="10">one mRNA</tspan></text>
+<text x="182.80" y="237.00" text-anchor="start" class="count">4,220</text>
+<text x="253.70" y="104.74" text-anchor="start" class="label"><tspan x="253.70" dy="0">Frame fixed</tspan></text>
+<text x="253.70" y="116.74" text-anchor="start" class="count">3</text>
+<text x="253.70" y="179.50" text-anchor="start" class="label"><tspan x="253.70" dy="0">Frame OK</tspan></text>
+<text x="253.70" y="191.50" text-anchor="start" class="count">21,998</text>
+<text x="324.60" y="150.05" text-anchor="start" class="label"><tspan x="324.60" dy="0">No adjustment</tspan></text>
+<text x="324.60" y="162.05" text-anchor="start" class="count">22,001</text>
+<text x="395.50" y="101.29" text-anchor="start" class="label"><tspan x="395.50" dy="0">Swiss-Prot</tspan></text>
+<text x="395.50" y="113.29" text-anchor="start" class="count">10,964</text>
+<text x="395.50" y="160.25" text-anchor="start" class="label"><tspan x="395.50" dy="0">UniRef90</tspan></text>
+<text x="395.50" y="172.25" text-anchor="start" class="count">5,491</text>
+<text x="395.50" y="200.92" text-anchor="start" class="label"><tspan x="395.50" dy="0">Pfam</tspan></text>
+<text x="395.50" y="212.92" text-anchor="start" class="count">2,665</text>
+<text x="395.50" y="228.19" text-anchor="start" class="label"><tspan x="395.50" dy="0">CDD</tspan></text>
+<text x="395.50" y="240.19" text-anchor="start" class="count">509</text>
+<text x="395.50" y="257.19" text-anchor="start" class="label"><tspan x="395.50" dy="0">Unannotated</tspan></text>
+<text x="395.50" y="269.19" text-anchor="start" class="count">2,372</text>
+<text x="466.40" y="167.00" text-anchor="start" class="label"><tspan x="466.40" dy="0">Final CDS</tspan></text>
+<text x="466.40" y="179.00" text-anchor="start" class="count">22,001</text>
+<line x1="32.50" y1="227.52" x2="32.50" y2="296.00" stroke="#64748b" stroke-width="0.8" stroke-dasharray="3 2"/>
+<line x1="316.10" y1="227.51" x2="316.10" y2="296.00" stroke="#64748b" stroke-width="0.8" stroke-dasharray="3 2"/>
+<line x1="387.00" y1="264.00" x2="387.00" y2="296.00" stroke="#64748b" stroke-width="0.8" stroke-dasharray="3 2"/>
+<rect x="3.00" y="296.00" width="166.80" height="100.00" rx="4" fill="none" stroke="#cbd5e1" stroke-width="0.7"/>
+<rect x="175.80" y="296.00" width="166.80" height="100.00" rx="4" fill="none" stroke="#cbd5e1" stroke-width="0.7"/>
+<rect x="348.60" y="296.00" width="166.80" height="100.00" rx="4" fill="none" stroke="#cbd5e1" stroke-width="0.7"/>
+<text x="86.40" y="309.00" text-anchor="middle" class="summary-pie-title">Input CDS BUSCO</text>
+<text x="86.40" y="322.00" text-anchor="middle" class="summary-pie-note">C=95.3%; BUSCO genes n=2,805</text>
+<text x="86.40" y="332.00" text-anchor="middle" class="summary-pie-note">CDS input n=27,061; eudicotyledons_odb12</text>
+<path d="M 31.00 364.00 L 31.00 346.00 A 18.00 18.00 0 1 1 13.93 369.70 Z" fill="#2ca25f" stroke="white" stroke-width="0.6"/>
+<path d="M 31.00 364.00 L 13.93 369.70 A 18.00 18.00 0 0 1 25.72 346.79 Z" fill="#3b82f6" stroke="white" stroke-width="0.6"/>
+<path d="M 31.00 364.00 L 25.72 346.79 A 18.00 18.00 0 0 1 27.63 346.32 Z" fill="#f59e0b" stroke="white" stroke-width="0.6"/>
+<path d="M 31.00 364.00 L 27.63 346.32 A 18.00 18.00 0 0 1 31.00 346.00 Z" fill="#ef4444" stroke="white" stroke-width="0.6"/>
+<rect x="56.00" y="338.00" width="6" height="6" rx="1" fill="#2ca25f"/>
+<text x="65.00" y="344.00" class="summary-pie-legend">Single-copy 69.9%</text>
+<rect x="56.00" y="349.50" width="6" height="6" rx="1" fill="#3b82f6"/>
+<text x="65.00" y="355.50" class="summary-pie-legend">Duplicated 25.4%</text>
+<rect x="56.00" y="361.00" width="6" height="6" rx="1" fill="#f59e0b"/>
+<text x="65.00" y="367.00" class="summary-pie-legend">Fragmented 1.7%</text>
+<rect x="56.00" y="372.50" width="6" height="6" rx="1" fill="#ef4444"/>
+<text x="65.00" y="378.50" class="summary-pie-legend">Missing 3.0%</text>
+<text x="259.20" y="309.00" text-anchor="middle" class="summary-pie-title">Boundary-adjusted CDS BUSCO</text>
+<text x="259.20" y="322.00" text-anchor="middle" class="summary-pie-note">C=95.2%; BUSCO genes n=2,805</text>
+<text x="259.20" y="332.00" text-anchor="middle" class="summary-pie-note">CDS input n=22,001; eudicotyledons_odb12</text>
+<path d="M 203.80 364.00 L 203.80 346.00 A 18.00 18.00 0 1 1 192.69 349.84 Z" fill="#2ca25f" stroke="white" stroke-width="0.6"/>
+<path d="M 203.80 364.00 L 192.69 349.84 A 18.00 18.00 0 0 1 198.48 346.80 Z" fill="#3b82f6" stroke="white" stroke-width="0.6"/>
+<path d="M 203.80 364.00 L 198.48 346.80 A 18.00 18.00 0 0 1 200.43 346.32 Z" fill="#f59e0b" stroke="white" stroke-width="0.6"/>
+<path d="M 203.80 364.00 L 200.43 346.32 A 18.00 18.00 0 0 1 203.80 346.00 Z" fill="#ef4444" stroke="white" stroke-width="0.6"/>
+<rect x="228.80" y="338.00" width="6" height="6" rx="1" fill="#2ca25f"/>
+<text x="237.80" y="344.00" class="summary-pie-legend">Single-copy 89.4%</text>
+<rect x="228.80" y="349.50" width="6" height="6" rx="1" fill="#3b82f6"/>
+<text x="237.80" y="355.50" class="summary-pie-legend">Duplicated 5.8%</text>
+<rect x="228.80" y="361.00" width="6" height="6" rx="1" fill="#f59e0b"/>
+<text x="237.80" y="367.00" class="summary-pie-legend">Fragmented 1.8%</text>
+<rect x="228.80" y="372.50" width="6" height="6" rx="1" fill="#ef4444"/>
+<text x="237.80" y="378.50" class="summary-pie-legend">Missing 3.0%</text>
+<text x="432.00" y="309.00" text-anchor="middle" class="summary-pie-title">Name consistency (n=22,001)</text>
+<text x="432.00" y="322.00" text-anchor="middle" class="summary-pie-note">Close family peer: id&gt;=70%, cov&gt;=80%</text>
+<path d="M 376.60 364.00 L 376.60 346.00 A 18.00 18.00 0 0 1 393.62 358.13 Z" fill="#1d4ed8" stroke="white" stroke-width="0.6"/>
+<path d="M 376.60 364.00 L 393.62 358.13 A 18.00 18.00 0 0 1 394.60 363.61 Z" fill="#d97706" stroke="white" stroke-width="0.6"/>
+<path d="M 376.60 364.00 L 394.60 363.61 A 18.00 18.00 0 1 1 365.32 349.97 Z" fill="#64748b" stroke="white" stroke-width="0.6"/>
+<path d="M 376.60 364.00 L 365.32 349.97 A 18.00 18.00 0 0 1 376.60 346.00 Z" fill="#cbd5e1" stroke="white" stroke-width="0.6"/>
+<rect x="401.60" y="334.00" width="6" height="6" rx="1" fill="#1d4ed8"/>
+<text x="410.60" y="340.00" class="summary-pie-legend">Consistent 19.7%</text>
+<rect x="401.60" y="346.00" width="6" height="6" rx="1" fill="#d97706"/>
+<text x="410.60" y="352.00" class="summary-pie-legend">Auto-resolved variation 4.9%</text>
+<rect x="401.60" y="358.00" width="6" height="6" rx="1" fill="#64748b"/>
+<text x="410.60" y="364.00" class="summary-pie-legend">No close-family peer 64.6%</text>
+<rect x="401.60" y="370.00" width="6" height="6" rx="1" fill="#cbd5e1"/>
+<text x="410.60" y="376.00" class="summary-pie-legend">Unannotated 10.8%</text>
 </svg>

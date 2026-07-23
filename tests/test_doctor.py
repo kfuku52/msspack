@@ -1,3 +1,4 @@
+import gzip
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,60 @@ from msspack.doctor import doctor_succeeded, run_doctor
 
 
 class DoctorTests(unittest.TestCase):
+    def test_run_doctor_accepts_gzipped_fasta_and_gff(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "minimal_pack"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            with gzip.open(base / "input.fa.gz", "wt", encoding="utf-8") as handle:
+                handle.write(">ctg1\nATG\n")
+            with gzip.open(base / "input.gff3.gz", "wt", encoding="utf-8") as handle:
+                handle.write("ctg1\tsrc\tgene\t1\t3\t.\t+\t.\tID=g1\n")
+            config_path = base / "config.toml"
+            config_path.write_text(
+                (fixture / "config.toml")
+                .read_text(encoding="utf-8")
+                .replace('fasta = "input.fa"', 'fasta = "input.fa.gz"')
+                .replace('gff = "input.gff3"', 'gff = "input.gff3.gz"'),
+                encoding="utf-8",
+            )
+            config = load_config(config_path)
+            with patch("msspack.doctor.which", return_value="/usr/bin/tool"), patch(
+                "msspack.doctor._importable", return_value=True
+            ), patch("msspack.doctor.list_installed", return_value={}):
+                checks = run_doctor(config)
+
+        by_name = {check.name: check for check in checks}
+        self.assertTrue(by_name["FASTA records"].ok)
+        self.assertTrue(by_name["GFF/FASTA seqids"].ok)
+        self.assertNotIn("input format", by_name)
+
+    def test_functional_annotation_tools_are_required_only_when_enabled(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "minimal_pack"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            config_path = base / "config.toml"
+            config_path.write_text(
+                (fixture / "config.toml").read_text(encoding="utf-8")
+                + "\n[functional_annotation]\nenabled = true\n",
+                encoding="utf-8",
+            )
+            config = load_config(config_path)
+            with patch(
+                "msspack.doctor.which",
+                side_effect=lambda command: None
+                if command in {"diamond", "hmmscan", "hmmpress"}
+                else "/usr/bin/tool",
+            ), patch("msspack.doctor._importable", return_value=True), patch(
+                "msspack.doctor.list_installed", return_value={}
+            ):
+                checks = run_doctor(config)
+
+        by_name = {check.name: check for check in checks}
+        self.assertTrue(by_name["DIAMOND (functional annotation)"].required)
+        self.assertTrue(by_name["HMMER hmmscan (Pfam fallback)"].required)
+        self.assertTrue(by_name["HMMER hmmpress (Pfam fallback)"].required)
+        self.assertFalse(doctor_succeeded(checks))
+
     def test_run_doctor_rejects_native_windows_for_validation(self) -> None:
         with patch("msspack.doctor.platform.system", return_value="Windows"), patch(
             "msspack.doctor.which", return_value="C:/tool.exe"
