@@ -174,6 +174,14 @@ def _render_busco_section(report_root: Path, payload: dict[str, Any]) -> str:
     if not isinstance(comparisons, dict):
         return ""
     blocks: list[str] = []
+    taxonomy_crosscheck = busco.get("taxonomy_crosscheck")
+    if taxonomy_crosscheck:
+        blocks.append(
+            "<section class='card'>"
+            "<h3>BUSCO taxonomy cross-check</h3>"
+            f"<p class='links'><a href='{escape(_relative_href(report_root, str(taxonomy_crosscheck)))}'>JSON</a></p>"
+            "</section>"
+        )
     for name in ("cds", "genome"):
         comparison = comparisons.get(name)
         if not isinstance(comparison, dict):
@@ -267,7 +275,11 @@ def _render_summary_cards(report_root: Path, payload: dict[str, Any]) -> str:
         link_targets = {}
         annotation = outputs.get("annotation")
         fasta = outputs.get("fasta")
+        functional_taxonomy = outputs.get("functional_annotation_taxonomy")
         functional_evidence = outputs.get("functional_annotation_evidence")
+        name_standardization = outputs.get(
+            "functional_annotation_name_standardization"
+        )
         domain_comparison = outputs.get("functional_domain_search_comparison")
         consistency_audit = outputs.get("functional_annotation_consistency")
         consistency_families = outputs.get("functional_annotation_families")
@@ -278,8 +290,16 @@ def _render_summary_cards(report_root: Path, payload: dict[str, Any]) -> str:
             link_targets["annotation"] = str(annotation["path"])
         if isinstance(fasta, dict) and fasta.get("path"):
             link_targets["fasta"] = str(fasta["path"])
+        if isinstance(functional_taxonomy, dict) and functional_taxonomy.get("path"):
+            link_targets["functional annotation taxonomy"] = str(
+                functional_taxonomy["path"]
+            )
         if isinstance(functional_evidence, dict) and functional_evidence.get("path"):
             link_targets["functional annotation evidence"] = str(functional_evidence["path"])
+        if isinstance(name_standardization, dict) and name_standardization.get("path"):
+            link_targets["product-name standardization"] = str(
+                name_standardization["path"]
+            )
         if isinstance(domain_comparison, dict) and domain_comparison.get("path"):
             link_targets["Pfam/CDD search comparison"] = str(domain_comparison["path"])
         if isinstance(consistency_audit, dict) and consistency_audit.get("path"):

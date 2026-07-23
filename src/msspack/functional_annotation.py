@@ -12,7 +12,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -21,9 +21,16 @@ from pathlib import Path
 
 from Bio.Seq import Seq
 
+from .annotation_taxonomy import (
+    RELATION_WEIGHTS,
+    TaxonomyRecord,
+    load_taxonomy_context,
+    subject_taxonomy_annotations,
+)
 from .config_models import FunctionalAnnotationConfig
 from .fasta import iter_fasta, reverse_complement, write_fasta_record
 from .gff import GFFRecord, child_ids, read_gff_document
+from .product_names import ProductNameContext, standardize_product_name
 from .step_logging import write_step_log, write_step_metrics
 from .utils import (
     MSSPackError,
@@ -56,10 +63,14 @@ EVIDENCE_FIELDS = (
     "ID",
     "Locus_tag",
     "original_product",
+    "proposed_product",
     "assigned_product",
+    "candidate_source",
     "source",
     "evidence_id",
     "confidence",
+    "name_standardization",
+    "name_warnings",
     "quality_code",
     "reason",
     "identity",
@@ -68,6 +79,11 @@ EVIDENCE_FIELDS = (
     "evalue",
     "bitscore",
     "consensus_score",
+    "subject_taxon_id",
+    "subject_organism",
+    "taxonomy_relation",
+    "taxonomy_weight",
+    "taxonomy_adjustment",
 )
 
 _UNINFORMATIVE_DESCRIPTION_PATTERNS = tuple(
@@ -158,6 +174,25 @@ class DiamondHit:
 
 
 @dataclass(frozen=True)
+class DiamondMetadata:
+    description: str
+    source_weight: float
+    subject_taxon_id: int | None = None
+    subject_organism: str = ""
+    taxonomy_relation: str = "unknown"
+    taxonomy_weight: float = RELATION_WEIGHTS["unknown"]
+
+
+@dataclass(frozen=True)
+class DiamondCandidate:
+    hit: DiamondHit
+    description: str
+    metadata: DiamondMetadata
+    tokens: set[str]
+    evidence_weight: float
+
+
+@dataclass(frozen=True)
 class PfamHit:
     query_id: str
     name: str
@@ -203,6 +238,11 @@ class Assignment:
     evalue: float | None = None
     bitscore: float | None = None
     consensus_score: float | None = None
+    subject_taxon_id: int | None = None
+    subject_organism: str = ""
+    taxonomy_relation: str = ""
+    taxonomy_weight: float | None = None
+    taxonomy_adjustment: str = ""
 
 
 def _sha256(path: Path) -> str:
@@ -542,6 +582,24 @@ def _fasta_description(record_description: str) -> str:
     return description
 
 
+def _fasta_taxonomy(record_description: str) -> tuple[int | None, str]:
+    tax_id_match = re.search(r"\b(?:OX|TaxID)=(\d+)\b", record_description)
+    tax_id = int(tax_id_match.group(1)) if tax_id_match else None
+    organism = ""
+    organism_match = re.search(
+        r"\bOS=(.+?)(?=\s(?:OX|GN|PE|SV)=|$)",
+        record_description,
+    )
+    if organism_match is None:
+        organism_match = re.search(
+            r"\bTax=(.+?)(?=\s(?:TaxID|RepID)=|$)",
+            record_description,
+        )
+    if organism_match is not None:
+        organism = re.sub(r"\s+", " ", organism_match.group(1)).strip()
+    return tax_id, organism
+
+
 def _uniref90_download_url(config: FunctionalAnnotationConfig) -> str:
     if config.uniref90_taxon_id <= 0:
         return config.uniref90_url
@@ -711,7 +769,11 @@ def write_empty_diamond_results(
 ) -> None:
     started_at = datetime.now()
     write_text(output_path, "database\t" + "\t".join(DIAMOND_FIELDS) + "\n")
-    write_text(metadata_path, "database\tsubject_id\tdescription\tweight\n")
+    write_text(
+        metadata_path,
+        "database\tsubject_id\tdescription\tweight\tsubject_taxon_id\t"
+        "subject_organism\ttaxonomy_relation\ttaxonomy_weight\n",
+    )
     write_text(provenance_path, '{"sources": [], "status": "skipped"}\n')
     write_step_log(
         log_path=log_path,
@@ -747,6 +809,8 @@ def run_diamond_annotation_search(
     config: FunctionalAnnotationConfig,
     base_dir: Path,
     cache_dir: Path,
+    taxonomy_context_path: Path | None = None,
+    taxonomy_cache_dir: Path | None = None,
     source_group: str = "primary",
     prior_similarity_inputs: Sequence[tuple[Path, Path]] = (),
     step_name: str = "functional-annotation-diamond-search",
@@ -774,11 +838,18 @@ def run_diamond_annotation_search(
         inputs=prior_similarity_inputs,
         config=config,
     )
-    skipped_ids = set(prior_assignments)
+    skipped_ids = {
+        query_id
+        for query_id, assignment in prior_assignments.items()
+        if assignment.confidence == "high"
+    }
     alignment_count = 0
     query_ids: set[str] = set()
     command_example: list[str] | None = None
-    matched_metadata: dict[tuple[str, str], tuple[str, float]] = {}
+    matched_metadata: dict[
+        tuple[str, str],
+        tuple[str, float, int | None, str],
+    ] = {}
 
     with tempfile.TemporaryDirectory(prefix="msspack-diamond-") as temporary_dir:
         temporary_root = Path(temporary_dir)
@@ -850,21 +921,63 @@ def run_diamond_annotation_search(
                             )
                         core_fields = fields[: len(DIAMOND_FIELDS)]
                         description = _fasta_description(fields[-1])
+                        subject_taxon_id, subject_organism = _fasta_taxonomy(fields[-1])
                         combined.write(source.name + "\t" + "\t".join(core_fields) + "\n")
                         matched_metadata[(source.name, fields[1])] = (
                             description,
                             source.weight,
+                            subject_taxon_id,
+                            subject_organism,
                         )
                         query_ids.add(fields[0])
                         alignment_count += 1
 
+    subject_tax_ids = {
+        tax_id
+        for _description, _weight, tax_id, _organism in matched_metadata.values()
+        if tax_id is not None
+    }
+    taxonomy_annotations: dict[int, tuple[TaxonomyRecord, str, float]] = {}
+    taxonomy_warnings: list[str] = []
+    if taxonomy_context_path is not None and taxonomy_cache_dir is not None:
+        taxonomy_annotations, taxonomy_warnings = subject_taxonomy_annotations(
+            subject_tax_ids,
+            target_context_path=taxonomy_context_path,
+            cache_dir=taxonomy_cache_dir,
+            offline=config.taxonomy.offline,
+            strict=config.taxonomy.strict,
+        )
     with atomic_text_writer(metadata_path) as metadata:
-        metadata.write("database\tsubject_id\tdescription\tweight\n")
-        for (database, subject_id), (description, weight) in sorted(
+        metadata.write(
+            "database\tsubject_id\tdescription\tweight\tsubject_taxon_id\t"
+            "subject_organism\ttaxonomy_relation\ttaxonomy_weight\n"
+        )
+        for (database, subject_id), (
+            description,
+            weight,
+            subject_taxon_id,
+            subject_organism,
+        ) in sorted(
             matched_metadata.items()
         ):
+            relation = "reference" if database not in {"swissprot", "uniref90"} else "unknown"
+            taxonomy_weight = RELATION_WEIGHTS[relation]
+            if subject_taxon_id is not None and subject_taxon_id in taxonomy_annotations:
+                _record, relation, taxonomy_weight = taxonomy_annotations[subject_taxon_id]
             metadata.write(
-                f"{database}\t{subject_id}\t{description.replace(chr(9), ' ')}\t{weight:g}\n"
+                "\t".join(
+                    (
+                        database,
+                        subject_id,
+                        description.replace("\t", " "),
+                        f"{weight:g}",
+                        str(subject_taxon_id or ""),
+                        subject_organism.replace("\t", " "),
+                        relation,
+                        f"{taxonomy_weight:g}",
+                    )
+                )
+                + "\n"
             )
     metadata_count = len(matched_metadata)
 
@@ -877,6 +990,12 @@ def run_diamond_annotation_search(
                 "source_group": source_group,
                 "queries_scanned": query_count,
                 "prior_assignments_skipped": len(skipped_ids),
+                "taxonomy_context": (
+                    str(taxonomy_context_path) if taxonomy_context_path is not None else ""
+                ),
+                "subject_taxon_ids": len(subject_tax_ids),
+                "resolved_subject_taxonomies": len(taxonomy_annotations),
+                "taxonomy_warnings": taxonomy_warnings,
                 "sources": [
                     {
                         "name": source.name,
@@ -911,6 +1030,9 @@ def run_diamond_annotation_search(
             f"Accepted prior assignments skipped: {len(skipped_ids):,}",
             f"Queries with hits: {len(query_ids):,}",
             f"Matched database metadata records: {metadata_count:,}",
+            f"Resolved subject taxonomies: {len(taxonomy_annotations):,}/"
+            f"{len(subject_tax_ids):,}",
+            f"Taxonomy warnings: {len(taxonomy_warnings):,}",
         ],
     )
     write_step_metrics(
@@ -926,6 +1048,9 @@ def run_diamond_annotation_search(
             "prior_assignments_skipped": len(skipped_ids),
             "queries_with_hits": len(query_ids),
             "metadata_records": metadata_count,
+            "subject_taxon_ids": len(subject_tax_ids),
+            "resolved_subject_taxonomies": len(taxonomy_annotations),
+            "taxonomy_warnings": len(taxonomy_warnings),
         },
     )
 
@@ -1712,13 +1837,24 @@ def run_cdd_domain_search(
     )
 
 
-def _read_diamond_metadata(path: Path) -> dict[tuple[str, str], tuple[str, float]]:
-    metadata: dict[tuple[str, str], tuple[str, float]] = {}
+def _read_diamond_metadata(path: Path) -> dict[tuple[str, str], DiamondMetadata]:
+    metadata: dict[tuple[str, str], DiamondMetadata] = {}
     with path.open("r", encoding="utf-8", newline="") as handle:
         for row in csv.DictReader(handle, delimiter="\t"):
-            metadata[(row["database"], row["subject_id"])] = (
-                row["description"],
-                float(row["weight"]),
+            raw_taxon_id = row.get("subject_taxon_id", "").strip()
+            raw_taxonomy_weight = row.get("taxonomy_weight", "").strip()
+            relation = row.get("taxonomy_relation", "").strip() or "unknown"
+            metadata[(row["database"], row["subject_id"])] = DiamondMetadata(
+                description=row["description"],
+                source_weight=float(row["weight"]),
+                subject_taxon_id=int(raw_taxon_id) if raw_taxon_id else None,
+                subject_organism=row.get("subject_organism", "").strip(),
+                taxonomy_relation=relation,
+                taxonomy_weight=(
+                    float(raw_taxonomy_weight)
+                    if raw_taxonomy_weight
+                    else RELATION_WEIGHTS["unknown"]
+                ),
             )
     return metadata
 
@@ -1749,6 +1885,7 @@ def _read_diamond_hits(path: Path) -> dict[str, list[DiamondHit]]:
 def _clean_description(description: str) -> str | None:
     value = re.sub(r"\s+", " ", description).strip().strip(".;")
     value = re.sub(r"^Cluster:\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"^LOW QUALITY PROTEIN:\s*", "", value, flags=re.IGNORECASE)
     value = re.sub(r"^(?:RecName:\s*Full=|SubName:\s*Full=)", "", value)
     value = re.sub(r"\s*\{ECO:[^}]+\}", "", value)
     value = re.sub(r"\s*\((?:Fragment|Fragments)\)$", "", value, flags=re.IGNORECASE)
@@ -1764,6 +1901,59 @@ def _description_tokens(description: str) -> set[str]:
         for token in re.findall(r"[A-Za-z0-9]+", description.lower())
         if len(token) > 1 and token not in _TOKEN_STOPWORDS
     }
+
+
+def _taxonomy_adjusted_product(
+    product: str,
+    *,
+    hit: DiamondHit,
+    metadata: DiamondMetadata,
+    config: FunctionalAnnotationConfig,
+) -> tuple[str, str]:
+    if (
+        not config.taxonomy.enabled
+        or metadata.taxonomy_relation not in {"cross_kingdom", "cross_domain"}
+        or hit.identity >= config.taxonomy.distant_specificity_identity
+    ):
+        return product, ""
+    adjusted = re.sub(
+        r",?\s+(?:chloroplastic|cytosolic|mitochondrial|nuclear|peroxisomal|secreted)"
+        r"(?:/[a-z]+)?$",
+        "",
+        product,
+        flags=re.IGNORECASE,
+    )
+    adjusted = re.sub(
+        r"\s+(?:isoform|homolog)\s+[A-Za-z]?\d+(?:[-.]\d+)*$",
+        "",
+        adjusted,
+        flags=re.IGNORECASE,
+    )
+    adjusted = re.sub(
+        r"\s+(?:family\s+)?member\s+[A-Za-z]?\d+(?:[-.]\d+)*$",
+        " family protein",
+        adjusted,
+        flags=re.IGNORECASE,
+    )
+    adjusted = re.sub(r"\s+\d+(?:[-.]\d+)*$", "", adjusted)
+    adjusted = re.sub(r"\s+", " ", adjusted).strip().strip(",;.")
+    if not adjusted:
+        return product, ""
+    return adjusted, (
+        "lineage-specific numbering/localization removed from a distant "
+        f"{metadata.taxonomy_relation} hit below "
+        f"{config.taxonomy.distant_specificity_identity:g}% identity"
+        if adjusted != product
+        else ""
+    )
+
+
+def _assignment_confidence(database: str, relation: str) -> str:
+    if relation == "cross_domain":
+        return "low"
+    if database == "uniref90" or relation in {"cross_kingdom", "same_domain", "unknown"}:
+        return "moderate"
+    return "high"
 
 
 def _diamond_assignments(
@@ -1783,7 +1973,10 @@ def _diamond_assignments(
             and hit.query_coverage >= config.min_query_coverage
             and hit.subject_coverage >= config.min_subject_coverage
             and hit.evalue <= config.evalue
-            and metadata.get((hit.database, hit.subject_id), ("", 0.0))[0]
+            and metadata.get(
+                (hit.database, hit.subject_id),
+                DiamondMetadata("", 0.0),
+            ).description
         ]
         if not passing:
             continue
@@ -1791,10 +1984,10 @@ def _diamond_assignments(
         near_top = [
             hit for hit in passing if hit.bitscore >= best_bitscore * config.near_top_bitscore_ratio
         ]
-        candidates: list[tuple[DiamondHit, str, float, set[str], float]] = []
+        candidates: list[DiamondCandidate] = []
         for hit in near_top:
-            raw_description, database_weight = metadata[(hit.database, hit.subject_id)]
-            description = _clean_description(raw_description)
+            hit_metadata = metadata[(hit.database, hit.subject_id)]
+            description = _clean_description(hit_metadata.description)
             if description is None:
                 continue
             tokens = _description_tokens(description)
@@ -1803,38 +1996,76 @@ def _diamond_assignments(
             coverage_factor = math.sqrt(
                 max(0.0, hit.query_coverage / 100.0) * max(0.0, hit.subject_coverage / 100.0)
             )
-            evidence_weight = database_weight * (hit.bitscore / best_bitscore) * coverage_factor
-            candidates.append((hit, description, database_weight, tokens, evidence_weight))
-        total_weight = sum(item[4] for item in candidates)
+            evidence_weight = (
+                hit_metadata.source_weight
+                * hit_metadata.taxonomy_weight
+                * (hit.bitscore / best_bitscore)
+                * coverage_factor
+            )
+            candidates.append(
+                DiamondCandidate(
+                    hit=hit,
+                    description=description,
+                    metadata=hit_metadata,
+                    tokens=tokens,
+                    evidence_weight=evidence_weight,
+                )
+            )
+        total_weight = sum(item.evidence_weight for item in candidates)
         if not candidates or total_weight <= 0:
             continue
         token_weights: dict[str, float] = defaultdict(float)
-        for _hit, _description, _database_weight, tokens, evidence_weight in candidates:
-            for token in tokens:
-                token_weights[token] += evidence_weight
+        for candidate in candidates:
+            for token in candidate.tokens:
+                token_weights[token] += candidate.evidence_weight
 
-        ranked: list[tuple[float, float, float, DiamondHit, str]] = []
-        for hit, description, database_weight, tokens, evidence_weight in candidates:
-            consensus_score = sum(token_weights[token] / total_weight for token in tokens) / len(
-                tokens
+        ranked: list[tuple[float, float, float, DiamondCandidate]] = []
+        for candidate in candidates:
+            consensus_score = sum(
+                token_weights[token] / total_weight for token in candidate.tokens
+            ) / len(candidate.tokens)
+            ranked.append(
+                (
+                    consensus_score,
+                    candidate.evidence_weight,
+                    candidate.metadata.source_weight,
+                    candidate,
+                )
             )
-            ranked.append((consensus_score, evidence_weight, database_weight, hit, description))
-        consensus_score, _evidence_weight, _database_weight, selected, product = max(
+        consensus_score, _evidence_weight, _database_weight, selected_candidate = max(
             ranked,
-            key=lambda item: (item[0], item[1], item[2], item[3].bitscore),
+            key=lambda item: (item[0], item[1], item[2], item[3].hit.bitscore),
         )
         if consensus_score < config.min_token_score:
             continue
+        selected = selected_candidate.hit
+        selected_metadata = selected_candidate.metadata
+        product, taxonomy_adjustment = _taxonomy_adjusted_product(
+            selected_candidate.description,
+            hit=selected,
+            metadata=selected_metadata,
+            config=config,
+        )
+        taxonomy_reason = (
+            f"; taxonomy relation={selected_metadata.taxonomy_relation}, "
+            f"weight={selected_metadata.taxonomy_weight:g}"
+            if selected_metadata.taxonomy_relation
+            else ""
+        )
         assignments[query_id] = Assignment(
             product=product,
             source=selected.database,
             evidence_id=selected.subject_id,
-            confidence="moderate" if selected.database == "uniref90" else "high",
+            confidence=_assignment_confidence(
+                selected.database,
+                selected_metadata.taxonomy_relation,
+            ),
             reason=(
                 "AHRD-like weighted UniRef90 description consensus"
                 if selected.database == "uniref90"
                 else "AHRD-like weighted curated description consensus"
-            ),
+            )
+            + taxonomy_reason,
             quality_code=(
                 ("*" if selected.bitscore > 50 and selected.evalue < 1e-10 else "-")
                 + ("*" if min(selected.query_coverage, selected.subject_coverage) > 60 else "-")
@@ -1846,6 +2077,11 @@ def _diamond_assignments(
             evalue=selected.evalue,
             bitscore=selected.bitscore,
             consensus_score=consensus_score,
+            subject_taxon_id=selected_metadata.subject_taxon_id,
+            subject_organism=selected_metadata.subject_organism,
+            taxonomy_relation=selected_metadata.taxonomy_relation,
+            taxonomy_weight=selected_metadata.taxonomy_weight,
+            taxonomy_adjustment=taxonomy_adjustment,
         )
     return assignments
 
@@ -1862,8 +2098,33 @@ def _combined_diamond_assignments(
             metadata_path=metadata_path,
             config=config,
         ).items():
-            assignments.setdefault(query_id, assignment)
+            previous = assignments.get(query_id)
+            if previous is None or _assignment_rank(assignment) > _assignment_rank(previous):
+                assignments[query_id] = assignment
     return assignments
+
+
+def _assignment_rank(assignment: Assignment) -> tuple[float, ...]:
+    confidence_rank = {"high": 3.0, "moderate": 2.0, "low": 1.0}.get(
+        assignment.confidence,
+        0.0,
+    )
+    source_rank = {
+        "existing": 5.0,
+        "reference": 4.0,
+        "swissprot": 3.0,
+        "uniref90": 2.0,
+        "pfam": 1.0,
+        "cdd": 0.5,
+    }.get(assignment.source.casefold(), 2.5)
+    return (
+        confidence_rank,
+        assignment.taxonomy_weight or 0.0,
+        source_rank,
+        assignment.consensus_score or 0.0,
+        min(assignment.query_coverage or 0.0, assignment.subject_coverage or 0.0),
+        assignment.bitscore or 0.0,
+    )
 
 
 def _read_pfam_metadata(path: Path) -> dict[str, tuple[str, str]]:
@@ -2165,6 +2426,8 @@ def apply_functional_annotations(
     pfam_search_log_path: Path | None = None,
     cdd_search_metrics_path: Path | None = None,
     cdd_search_log_path: Path | None = None,
+    taxonomy_context_path: Path | None = None,
+    name_standardization_summary_path: Path | None = None,
 ) -> None:
     started_at = datetime.now()
     diamond_inputs = [(diamond_hits_path, diamond_metadata_path)]
@@ -2192,7 +2455,15 @@ def apply_functional_annotations(
     updated = 0
     preserved = 0
     hypothetical = 0
+    functional_assignments = 0
+    standardized_rows = 0
+    warning_rows = 0
     source_counts: dict[str, int] = defaultdict(int)
+    standardization_counts: Counter[str] = Counter()
+    warning_counts: Counter[str] = Counter()
+    naming_context = ProductNameContext.from_taxonomy_context(
+        load_taxonomy_context(taxonomy_context_path)
+    )
 
     with annotation_table_path.open("r", encoding="utf-8", newline="") as input_handle:
         reader = csv.DictReader(input_handle, delimiter="\t")
@@ -2233,9 +2504,7 @@ def apply_functional_annotations(
                         or cdd.get(identifier)
                     )
                 if assignment is not None:
-                    row["Description"] = _submission_safe_product(assignment.product)
-                    updated += int(row["Description"] != original)
-                    source_counts[assignment.source] += 1
+                    functional_assignments += 1
                 elif not is_missing:
                     assignment = Assignment(
                         product=original,
@@ -2257,31 +2526,74 @@ def apply_functional_annotations(
                         confidence="none",
                         reason="no acceptable similarity or informative domain evidence",
                     )
-                    hypothetical += 1
+                candidate_product = assignment.product
+                candidate_source = assignment.source
+                standardization = standardize_product_name(
+                    candidate_product,
+                    source=candidate_source,
+                    evidence_id=assignment.evidence_id,
+                    subject_organism=assignment.subject_organism,
+                    context=naming_context,
+                )
+                row["Description"] = standardization.product
+                effective_source = (
+                    candidate_source if standardization.informative else "none"
+                )
+                effective_confidence = (
+                    assignment.confidence if standardization.informative else "none"
+                )
+                effective_reason = assignment.reason
+                if not standardization.informative and candidate_source != "none":
+                    effective_reason += (
+                        "; candidate name rejected by product-name standardization"
+                    )
+                updated += int(row["Description"] != original)
+                standardized_rows += int(bool(standardization.actions))
+                warning_rows += int(bool(standardization.warnings))
+                hypothetical += int(not standardization.informative)
+                source_counts[effective_source] += 1
+                standardization_counts.update(standardization.actions)
+                warning_counts.update(standardization.warnings)
                 writer.writerow(row)
                 evidence_writer.writerow(
                     {
                         "ID": identifier,
                         "Locus_tag": row["Locus_tag"],
                         "original_product": original,
+                        "proposed_product": candidate_product,
                         "assigned_product": row["Description"],
-                        "source": assignment.source,
+                        "candidate_source": candidate_source,
+                        "source": effective_source,
                         "evidence_id": assignment.evidence_id,
-                        "confidence": assignment.confidence,
+                        "confidence": effective_confidence,
+                        "name_standardization": ",".join(standardization.actions),
+                        "name_warnings": ",".join(standardization.warnings),
                         "quality_code": assignment.quality_code,
-                        "reason": assignment.reason,
+                        "reason": effective_reason,
                         "identity": _format_number(assignment.identity),
                         "query_coverage": _format_number(assignment.query_coverage),
                         "subject_coverage": _format_number(assignment.subject_coverage),
                         "evalue": _format_number(assignment.evalue),
                         "bitscore": _format_number(assignment.bitscore),
                         "consensus_score": _format_number(assignment.consensus_score),
+                        "subject_taxon_id": (
+                            str(assignment.subject_taxon_id)
+                            if assignment.subject_taxon_id is not None
+                            else ""
+                        ),
+                        "subject_organism": assignment.subject_organism,
+                        "taxonomy_relation": assignment.taxonomy_relation,
+                        "taxonomy_weight": _format_number(assignment.taxonomy_weight),
+                        "taxonomy_adjustment": assignment.taxonomy_adjustment,
                     }
                 )
 
     details = [
-        f"Rows updated from functional evidence: {updated:,}",
-        f"Existing products preserved: {preserved:,}",
+        f"Rows changed in the final annotation table: {updated:,}",
+        f"Rows with functional-evidence candidates: {functional_assignments:,}",
+        f"Existing products retained as the candidate source: {preserved:,}",
+        f"Rows standardized before family-name consistency: {standardized_rows:,}",
+        f"Rows with residual naming warnings: {warning_rows:,}",
         f"Rows remaining without accepted annotation: {hypothetical:,}",
     ]
     details.extend(
@@ -2290,10 +2602,10 @@ def apply_functional_annotations(
     write_step_log(
         log_path=log_path,
         command=(
-            "msspack functional-annotation assign-products "
+            "msspack functional-annotation assign-and-standardize-products "
             f"--input {annotation_table_path} --output {output_path}"
         ),
-        step="functional-annotation-assign-products",
+        step="functional-annotation-assign-and-standardize-products",
         started_at=started_at,
         count_unit="annotation rows",
         input_total=row_count,
@@ -2303,18 +2615,44 @@ def apply_functional_annotations(
     )
     write_step_metrics(
         metrics_path=metrics_path,
-        step="functional-annotation-assign-products",
+        step="functional-annotation-assign-and-standardize-products",
         count_unit="annotation rows",
         input_total=row_count,
         changed_total=updated,
         output_total=row_count,
         details={
             "existing_products_preserved": preserved,
+            "functional_evidence_candidates": functional_assignments,
+            "standardized_rows": standardized_rows,
+            "residual_warning_rows": warning_rows,
+            "standardization_actions": dict(sorted(standardization_counts.items())),
+            "naming_warnings": dict(sorted(warning_counts.items())),
+            "naming_context": {
+                "domain": naming_context.domain,
+                "kingdom": naming_context.kingdom,
+            },
             "unannotated_rows": hypothetical,
             "source_counts": dict(sorted(source_counts.items())),
             "evidence_path": str(evidence_path),
         },
     )
+    if name_standardization_summary_path is not None:
+        with atomic_text_writer(name_standardization_summary_path) as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=("kind", "code", "count"),
+                delimiter="\t",
+                lineterminator="\n",
+            )
+            writer.writeheader()
+            writer.writerows(
+                {"kind": "action", "code": code, "count": count}
+                for code, count in sorted(standardization_counts.items())
+            )
+            writer.writerows(
+                {"kind": "warning", "code": code, "count": count}
+                for code, count in sorted(warning_counts.items())
+            )
     if (
         domain_comparison_path is not None
         and pfam_search_metrics_path is not None

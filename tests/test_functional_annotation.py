@@ -7,10 +7,16 @@ from unittest.mock import patch
 
 from msspack.config_models import FunctionalAnnotationConfig
 from msspack.functional_annotation import (
+    DiamondHit,
+    DiamondMetadata,
     _cdd_assignments,
+    _combined_diamond_assignments,
+    _diamond_assignments,
+    _fasta_taxonomy,
     _materialize_database_file,
     _pfam_verification,
     _submission_safe_product,
+    _taxonomy_adjusted_product,
     _uniprot_verification,
     _uniref90_download_url,
     apply_functional_annotations,
@@ -21,6 +27,132 @@ from msspack.utils import MSSPackError
 
 
 class FunctionalAnnotationTests(unittest.TestCase):
+    def test_parses_uniprot_and_uniref_taxonomy_headers(self) -> None:
+        self.assertEqual(
+            _fasta_taxonomy(
+                "sp|P1|TEST Test protein OS=Arabidopsis thaliana OX=3702 GN=TEST"
+            ),
+            (3702, "Arabidopsis thaliana"),
+        )
+        self.assertEqual(
+            _fasta_taxonomy(
+                "UniRef90_P1 Cluster protein n=3 Tax=Viridiplantae TaxID=33090 RepID=P1"
+            ),
+            (33090, "Viridiplantae"),
+        )
+
+    def test_taxonomy_weight_selects_the_closer_near_top_description(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            hits = base / "hits.tsv"
+            metadata = base / "metadata.tsv"
+            hits.write_text(
+                "database\tqseqid\tsseqid\tpident\tqlen\tslen\tqcovhsp\t"
+                "scovhsp\tevalue\tbitscore\n"
+                "swissprot\tq1\tplant\t70\t300\t300\t100\t100\t1e-50\t300\n"
+                "swissprot\tq1\tanimal\t70\t300\t300\t100\t100\t1e-50\t300\n",
+                encoding="utf-8",
+            )
+            metadata.write_text(
+                "database\tsubject_id\tdescription\tweight\tsubject_taxon_id\t"
+                "subject_organism\ttaxonomy_relation\ttaxonomy_weight\n"
+                "swissprot\tplant\tPlant-specific kinase\t1\t3702\t"
+                "Arabidopsis thaliana\tsame_order\t1.2\n"
+                "swissprot\tanimal\tAnimal-specific phosphatase\t1\t9606\t"
+                "Homo sapiens\tcross_kingdom\t0.72\n",
+                encoding="utf-8",
+            )
+
+            assignments = _diamond_assignments(
+                hit_path=hits,
+                metadata_path=metadata,
+                config=FunctionalAnnotationConfig(min_token_score=0.5),
+            )
+
+            self.assertEqual(assignments["q1"].product, "Plant-specific kinase")
+            self.assertEqual(assignments["q1"].subject_taxon_id, 3702)
+            self.assertEqual(assignments["q1"].taxonomy_relation, "same_order")
+
+    def test_distant_low_identity_product_loses_lineage_specific_number(self) -> None:
+        product, adjustment = _taxonomy_adjusted_product(
+            "RNA-binding protein 38",
+            hit=DiamondHit(
+                query_id="q1",
+                subject_id="mouse",
+                database="swissprot",
+                identity=36.9,
+                query_length=300,
+                subject_length=300,
+                query_coverage=80.8,
+                subject_coverage=91.6,
+                evalue=1e-30,
+                bitscore=123.0,
+            ),
+            metadata=DiamondMetadata(
+                description="RNA-binding protein 38",
+                source_weight=1.0,
+                subject_taxon_id=10090,
+                subject_organism="Mus musculus",
+                taxonomy_relation="cross_kingdom",
+                taxonomy_weight=0.72,
+            ),
+            config=FunctionalAnnotationConfig(),
+        )
+
+        self.assertEqual(product, "RNA-binding protein")
+        self.assertIn("numbering/localization removed", adjustment)
+
+    def test_closer_uniref_assignment_replaces_distant_swissprot_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            primary_hits = base / "primary.tsv"
+            primary_metadata = base / "primary-metadata.tsv"
+            uniref_hits = base / "uniref.tsv"
+            uniref_metadata = base / "uniref-metadata.tsv"
+            header = (
+                "database\tqseqid\tsseqid\tpident\tqlen\tslen\tqcovhsp\t"
+                "scovhsp\tevalue\tbitscore\n"
+            )
+            metadata_header = (
+                "database\tsubject_id\tdescription\tweight\tsubject_taxon_id\t"
+                "subject_organism\ttaxonomy_relation\ttaxonomy_weight\n"
+            )
+            primary_hits.write_text(
+                header
+                + "swissprot\tq1\tmouse\t45\t300\t300\t90\t90\t1e-40\t250\n",
+                encoding="utf-8",
+            )
+            primary_metadata.write_text(
+                metadata_header
+                + "swissprot\tmouse\tRNA-binding protein 38\t1\t10090\t"
+                "Mus musculus\tcross_kingdom\t0.72\n",
+                encoding="utf-8",
+            )
+            uniref_hits.write_text(
+                header
+                + "uniref90\tq1\tplant\t55\t300\t300\t85\t85\t1e-35\t230\n",
+                encoding="utf-8",
+            )
+            uniref_metadata.write_text(
+                metadata_header
+                + "uniref90\tplant\tLOW QUALITY PROTEIN: Plant RNA-binding protein\t"
+                "0.85\t3702\t"
+                "Arabidopsis thaliana\tsame_order\t1.2\n",
+                encoding="utf-8",
+            )
+
+            assignments = _combined_diamond_assignments(
+                inputs=[
+                    (primary_hits, primary_metadata),
+                    (uniref_hits, uniref_metadata),
+                ],
+                config=FunctionalAnnotationConfig(min_token_score=0.5),
+            )
+
+            self.assertEqual(assignments["q1"].source, "uniref90")
+            self.assertEqual(assignments["q1"].product, "Plant RNA-binding protein")
+            self.assertEqual(assignments["q1"].taxonomy_relation, "same_order")
+
     def test_generated_products_are_safe_for_ddbj_qualifiers(self) -> None:
         self.assertEqual(
             _submission_safe_product('regulatory subunit B" gamma\\delta\tprotein'),
@@ -128,6 +260,7 @@ class FunctionalAnnotationTests(unittest.TestCase):
             pfam_metadata = base / "pfam-metadata.tsv"
             output = base / "annotated.tsv"
             evidence = base / "evidence.tsv"
+            name_summary = base / "name-standardization.tsv"
             annotation.write_text(
                 "ID\tDescription\tLocus_tag\n"
                 "t1\thypothetical protein\tX_1\n"
@@ -175,6 +308,7 @@ class FunctionalAnnotationTests(unittest.TestCase):
                 log_path=base / "assign.log",
                 metrics_path=base / "assign.json",
                 config=FunctionalAnnotationConfig(enabled=True),
+                name_standardization_summary_path=name_summary,
             )
 
             with output.open("r", encoding="utf-8", newline="") as handle:
@@ -187,7 +321,7 @@ class FunctionalAnnotationTests(unittest.TestCase):
                 },
             )
             self.assertEqual(rows["t2"]["Description"], "existing enzyme")
-            self.assertEqual(rows["t3"]["Description"], "Protein kinase domain-containing protein")
+            self.assertEqual(rows["t3"]["Description"], "protein kinase domain-containing protein")
             self.assertEqual(rows["t4"]["Description"], "hypothetical protein")
 
             with evidence.open("r", encoding="utf-8", newline="") as handle:
@@ -195,7 +329,19 @@ class FunctionalAnnotationTests(unittest.TestCase):
             self.assertIn(evidence_rows["t1"]["source"], {"swissprot", "reference"})
             self.assertEqual(evidence_rows["t2"]["source"], "existing")
             self.assertEqual(evidence_rows["t3"]["source"], "pfam")
+            self.assertEqual(
+                evidence_rows["t3"]["proposed_product"],
+                "Protein kinase domain-containing protein",
+            )
+            self.assertEqual(
+                evidence_rows["t3"]["name_standardization"],
+                "lowercased_initial",
+            )
             self.assertEqual(evidence_rows["t4"]["source"], "none")
+            self.assertIn(
+                "action\tlowercased_initial\t1",
+                name_summary.read_text(encoding="utf-8"),
+            )
 
     def test_pfam_fallback_skips_similarity_assignments_and_runs_shards(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

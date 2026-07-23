@@ -11,6 +11,10 @@ from .annotation_consistency import (
     run_family_similarity_search,
 )
 from .annotation_table import build_annotation_table
+from .annotation_taxonomy import (
+    discover_busco_summary_paths,
+    resolve_annotation_taxonomy,
+)
 from .build_manifest import ManifestRecorder
 from .config import MSSPackConfig, load_config
 from .ddbj_tools import describe_installation, list_installed
@@ -85,7 +89,9 @@ class ModulePaths:
     padding_tools: Path
     annotation_table: Path
     annotation_consistency: Path
+    annotation_taxonomy: Path
     functional_annotation: Path
+    product_names: Path
     mss_converter_core: Path
     mss_converter_features: Path
     mss_converter_gaps: Path
@@ -165,7 +171,9 @@ def _resolve_modules() -> ModulePaths:
         padding_tools=module_origin("msspack.padding_tools"),
         annotation_table=module_origin("msspack.annotation_table"),
         annotation_consistency=module_origin("msspack.annotation_consistency"),
+        annotation_taxonomy=module_origin("msspack.annotation_taxonomy"),
         functional_annotation=module_origin("msspack.functional_annotation"),
+        product_names=module_origin("msspack.product_names"),
         mss_converter_core=module_origin("msspack.mss_converter.core"),
         mss_converter_features=module_origin("msspack.mss_converter.features"),
         mss_converter_gaps=module_origin("msspack.mss_converter.gaps"),
@@ -579,14 +587,47 @@ def _build_annotation_artifacts(
             ),
         )
 
+        taxonomy_context = ctx.outputs.final / "functional-annotation-taxonomy.json"
+        taxonomy_metrics = logs / "14a2.functional-annotation-taxonomy.metrics.json"
+        busco_summary_paths = (
+            discover_busco_summary_paths(ctx.outputs.root)
+            if annotation_config.taxonomy.busco_crosscheck
+            else []
+        )
+        ctx.run_step(
+            name="14a2.functional-annotation-resolve-taxonomy",
+            outputs=[
+                taxonomy_context,
+                logs / "14a2.functional-annotation-taxonomy.log",
+                taxonomy_metrics,
+            ],
+            dependencies=[
+                ctx.config_path,
+                ctx.modules.annotation_taxonomy,
+                *busco_summary_paths,
+            ],
+            action=lambda: resolve_annotation_taxonomy(
+                scientific_name=config.sample.scientific_name,
+                configured_busco_lineage=config.busco.lineage_dataset,
+                busco_summary_paths=busco_summary_paths,
+                output_path=taxonomy_context,
+                log_path=logs / "14a2.functional-annotation-taxonomy.log",
+                metrics_path=taxonomy_metrics,
+                cache_dir=config.cache_dir / "functional-annotation" / "taxonomy",
+                config=annotation_config.taxonomy,
+            ),
+        )
+
         diamond_hits = intermediate / "14b.functional-annotation.diamond.tsv"
         diamond_metadata = intermediate / "14b.functional-annotation.diamond-metadata.tsv"
         diamond_provenance = logs / "14b.functional-annotation-primary.database.json"
         diamond_metrics = logs / "14b.functional-annotation-primary-search.metrics.json"
         diamond_dependencies: list[Path] = [
             protein_fasta,
+            taxonomy_context,
             ctx.config_path,
             ctx.modules.functional_annotation,
+            ctx.modules.annotation_taxonomy,
         ]
         if annotation_config.swissprot_fasta:
             diamond_dependencies.append(
@@ -620,6 +661,10 @@ def _build_annotation_artifacts(
                     config=annotation_config,
                     base_dir=config.base_dir,
                     cache_dir=config.cache_dir / "functional-annotation",
+                    taxonomy_context_path=taxonomy_context,
+                    taxonomy_cache_dir=(
+                        config.cache_dir / "functional-annotation" / "taxonomy"
+                    ),
                     source_group="primary",
                     step_name="functional-annotation-primary-search",
                 )
@@ -643,8 +688,10 @@ def _build_annotation_artifacts(
             protein_fasta,
             diamond_hits,
             diamond_metadata,
+            taxonomy_context,
             ctx.config_path,
             ctx.modules.functional_annotation,
+            ctx.modules.annotation_taxonomy,
         ]
         if annotation_config.uniref90_fasta:
             uniref90_dependencies.append(
@@ -671,6 +718,10 @@ def _build_annotation_artifacts(
                     config=annotation_config,
                     base_dir=config.base_dir,
                     cache_dir=config.cache_dir / "functional-annotation",
+                    taxonomy_context_path=taxonomy_context,
+                    taxonomy_cache_dir=(
+                        config.cache_dir / "functional-annotation" / "taxonomy"
+                    ),
                     source_group="uniref90",
                     prior_similarity_inputs=((diamond_hits, diamond_metadata),),
                     step_name="functional-annotation-uniref90-search",
@@ -805,14 +856,21 @@ def _build_annotation_artifacts(
         functional_domain_comparison = (
             ctx.outputs.final / "functional-domain-search-comparison.tsv"
         )
-        functional_metrics = logs / "14f.functional-annotation-assign-products.metrics.json"
+        name_standardization_summary = (
+            ctx.outputs.final / "functional-annotation-name-standardization.tsv"
+        )
+        functional_metrics = (
+            logs
+            / "14f.functional-annotation-assign-and-standardize-products.metrics.json"
+        )
         ctx.run_step(
-            name="14f.functional-annotation-assign-products",
+            name="14f.functional-annotation-assign-and-standardize-products",
             outputs=[
                 functional_annotation_table,
                 functional_evidence,
                 functional_domain_comparison,
-                logs / "14f.functional-annotation-assign-products.log",
+                name_standardization_summary,
+                logs / "14f.functional-annotation-assign-and-standardize-products.log",
                 functional_metrics,
             ],
             dependencies=[
@@ -831,6 +889,8 @@ def _build_annotation_artifacts(
                 logs / "14e.functional-annotation-cdd-search.log",
                 ctx.config_path,
                 ctx.modules.functional_annotation,
+                ctx.modules.product_names,
+                taxonomy_context,
             ],
             action=lambda: apply_functional_annotations(
                 annotation_table_path=annotation_table,
@@ -844,7 +904,10 @@ def _build_annotation_artifacts(
                 cdd_metadata_path=cdd_metadata,
                 output_path=functional_annotation_table,
                 evidence_path=functional_evidence,
-                log_path=logs / "14f.functional-annotation-assign-products.log",
+                log_path=(
+                    logs
+                    / "14f.functional-annotation-assign-and-standardize-products.log"
+                ),
                 metrics_path=functional_metrics,
                 config=annotation_config,
                 missing_product=config.pipeline.replace_product_with,
@@ -853,6 +916,8 @@ def _build_annotation_artifacts(
                 pfam_search_log_path=logs / "14d.functional-annotation-pfam-search.log",
                 cdd_search_metrics_path=cdd_metrics,
                 cdd_search_log_path=logs / "14e.functional-annotation-cdd-search.log",
+                taxonomy_context_path=taxonomy_context,
+                name_standardization_summary_path=name_standardization_summary,
             ),
         )
         annotation_table = functional_annotation_table
@@ -933,6 +998,7 @@ def _build_annotation_artifacts(
                     family_similarity,
                     ctx.config_path,
                     ctx.modules.annotation_consistency,
+                    ctx.modules.product_names,
                 ],
                 action=lambda: audit_annotation_consistency(
                     annotation_table_path=functional_annotation_table,

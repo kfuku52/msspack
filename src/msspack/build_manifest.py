@@ -128,8 +128,16 @@ class ManifestRecorder:
             "fasta": _file_info(self.fasta_path),
         }
         if self.config.functional_annotation.enabled:
+            output_payload["functional_annotation_taxonomy"] = _file_info(
+                self.output_root / "final" / "functional-annotation-taxonomy.json"
+            )
             output_payload["functional_annotation_evidence"] = _file_info(
                 self.output_root / "final" / "functional-annotation.tsv"
+            )
+            output_payload["functional_annotation_name_standardization"] = _file_info(
+                self.output_root
+                / "final"
+                / "functional-annotation-name-standardization.tsv"
             )
             output_payload["functional_domain_search_comparison"] = _file_info(
                 self.output_root / "final" / "functional-domain-search-comparison.tsv"

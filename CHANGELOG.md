@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Resolve the input scientific name through NCBI Taxonomy, cross-check configured or
+  auto-selected BUSCO lineages, and preserve a cached taxonomy provenance artifact.
+- Preserve UniProt/UniRef subject TaxIDs and organisms, weight description consensus by
+  phylogenetic proximity for plants, animals, fungi, and prokaryotes, and generalize
+  lineage-specific names from distant low-identity hits.
+- Continue UniRef90 fallback after moderate/low-confidence Swiss-Prot assignments and
+  choose the strongest combined taxonomic and sequence evidence.
 - Add an optional DIAMOND all-vs-all functional-annotation name-consistency audit with
   stable family IDs, conservative safe-equivalent harmonization, review evidence tables,
   threshold/source plots, Sankey integration, and HTML report links.
@@ -23,6 +30,10 @@
 - Automatically resolve name conflicts without a manual-review requirement: propagate a
   unique higher-priority product only across direct near-identical pairs and retain other
   independently supported family variation.
+- Standardize every functional product against DDBJ/NCBI/EMBL-EBI naming conventions
+  before homolog-family consistency analysis, preserve proposed and standardized names in
+  the evidence table, generalize common cross-domain descriptions, and report all naming
+  actions and residual warnings.
 
 - Add opt-in AHRD-inspired product annotation using DIAMOND against Swiss-Prot or a
   close-reference proteome, with conservative Pfam domain fallback

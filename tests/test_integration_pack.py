@@ -55,6 +55,8 @@ class IntegrationPackTests(unittest.TestCase):
                 'reference_proteins = "reference.faa"\n'
                 'reference_name = "close-reference"\n'
                 "pfam_enabled = false\n"
+                "\n[functional_annotation.taxonomy]\n"
+                "enabled = false\n"
                 "\n[functional_annotation.consistency]\n"
                 "enabled = true\n"
             )
@@ -66,21 +68,52 @@ class IntegrationPackTests(unittest.TestCase):
             self.assertIn("\t\t\tproduct\tATP synthase subunit alpha", annotation_text)
             evidence = outputs.final / "functional-annotation.tsv"
             self.assertTrue(evidence.is_file())
-            self.assertIn("close-reference\tref1\thigh\t***", evidence.read_text(encoding="utf-8"))
+            self.assertIn(
+                "\tclose-reference\tclose-reference\tref1\thigh\t",
+                evidence.read_text(encoding="utf-8"),
+            )
             manifest = json.loads(outputs.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 manifest["outputs"]["functional_annotation_evidence"]["path"],
                 str(evidence),
             )
+            name_standardization = (
+                outputs.final / "functional-annotation-name-standardization.tsv"
+            )
+            self.assertTrue(name_standardization.is_file())
+            self.assertEqual(
+                manifest["outputs"]["functional_annotation_name_standardization"][
+                    "path"
+                ],
+                str(name_standardization),
+            )
+            taxonomy = outputs.final / "functional-annotation-taxonomy.json"
+            self.assertTrue(taxonomy.is_file())
+            self.assertEqual(
+                json.loads(taxonomy.read_text(encoding="utf-8"))["status"],
+                "disabled",
+            )
+            self.assertEqual(
+                manifest["outputs"]["functional_annotation_taxonomy"]["path"],
+                str(taxonomy),
+            )
             stage_names = [stage["name"] for stage in manifest["stages"]]
             self.assertIn("14a.functional-annotation-extract-proteins", stage_names)
+            self.assertIn("14a2.functional-annotation-resolve-taxonomy", stage_names)
             self.assertIn("14b.functional-annotation-primary-search", stage_names)
             self.assertIn("14c.functional-annotation-uniref90-search", stage_names)
             self.assertIn("14d.functional-annotation-pfam-search", stage_names)
             self.assertIn("14e.functional-annotation-cdd-search", stage_names)
-            self.assertIn("14f.functional-annotation-assign-products", stage_names)
+            assignment_stage = (
+                "14f.functional-annotation-assign-and-standardize-products"
+            )
+            self.assertIn(assignment_stage, stage_names)
             self.assertIn("14g.functional-annotation-family-search", stage_names)
             self.assertIn("14h.functional-annotation-consistency-audit", stage_names)
+            self.assertLess(
+                stage_names.index(assignment_stage),
+                stage_names.index("14h.functional-annotation-consistency-audit"),
+            )
             consistency = outputs.final / "functional-annotation-consistency.tsv"
             review = outputs.final / "functional-annotation-conflicts.tsv"
             self.assertTrue(consistency.is_file())

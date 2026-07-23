@@ -60,3 +60,6 @@ the following databases:
   the CC0 1.0 Universal Public Domain Dedication.
 - [NCBI Conserved Domain Database](https://www.ncbi.nlm.nih.gov/Structure/cdd/cdd.shtml),
   used with NCBI BLAST+ and rpsbproc; downloaded data and tools are not redistributed.
+- [NCBI Taxonomy](https://www.ncbi.nlm.nih.gov/taxonomy), queried through the NCBI
+  Datasets API to resolve the submitted scientific name and compare annotation-hit
+  lineages; cached taxonomy metadata is not redistributed with `msspack`.

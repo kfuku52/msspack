@@ -272,6 +272,18 @@ def validate_functional_annotation_config(annotation: FunctionalAnnotationConfig
     ):
         raise ConfigError("Functional annotation is enabled but no annotation source is enabled")
 
+    taxonomy = annotation.taxonomy
+    if taxonomy.target_taxon_id < 0:
+        raise ConfigError(
+            "Config value 'functional_annotation.taxonomy.target_taxon_id' must be >= 0"
+        )
+    _ensure_range(
+        taxonomy.distant_specificity_identity,
+        "functional_annotation.taxonomy.distant_specificity_identity",
+        0,
+        100,
+    )
+
     consistency = annotation.consistency
     for key, value in (
         ("near_identical_identity", consistency.near_identical_identity),

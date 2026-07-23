@@ -9,6 +9,7 @@ from .config_models import (
     BuscoConfig,
     FunctionalAnnotationConfig,
     FunctionalAnnotationConsistencyConfig,
+    FunctionalAnnotationTaxonomyConfig,
     InputsConfig,
     PipelineConfig,
     ProjectConfig,
@@ -150,8 +151,19 @@ SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
         "cdd_data_dir": str,
         "cdd_data_url": str,
         "cdd_evalue": (int, float),
+        "taxonomy": dict,
         "consistency": dict,
     },
+}
+
+FUNCTIONAL_ANNOTATION_TAXONOMY_TYPES: dict[str, ExpectedType] = {
+    "enabled": bool,
+    "target_taxon_id": int,
+    "resolve_scientific_name": bool,
+    "offline": bool,
+    "busco_crosscheck": bool,
+    "strict": bool,
+    "distant_specificity_identity": (int, float),
 }
 
 FUNCTIONAL_ANNOTATION_CONSISTENCY_TYPES: dict[str, ExpectedType] = {
@@ -207,19 +219,24 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
                 raise ConfigError(
                     f"Config value '{section_name}.{key}' must contain only strings"
                 )
-            if section_name == "functional_annotation" and key == "consistency":
+            if section_name == "functional_annotation" and key in {"taxonomy", "consistency"}:
                 assert isinstance(value, dict)
+                nested_schema = (
+                    FUNCTIONAL_ANNOTATION_TAXONOMY_TYPES
+                    if key == "taxonomy"
+                    else FUNCTIONAL_ANNOTATION_CONSISTENCY_TYPES
+                )
                 unknown_consistency_keys = sorted(
-                    set(value) - set(FUNCTIONAL_ANNOTATION_CONSISTENCY_TYPES)
+                    set(value) - set(nested_schema)
                 )
                 if unknown_consistency_keys:
                     dotted = ", ".join(
-                        f"functional_annotation.consistency.{item}"
+                        f"functional_annotation.{key}.{item}"
                         for item in unknown_consistency_keys
                     )
                     raise ConfigError(f"Unknown config key(s): {dotted}")
                 for nested_key, nested_value in value.items():
-                    nested_expected = FUNCTIONAL_ANNOTATION_CONSISTENCY_TYPES[nested_key]
+                    nested_expected = nested_schema[nested_key]
                     nested_numeric_bool = isinstance(nested_value, bool) and (
                         nested_expected is int
                         or nested_expected is float
@@ -230,7 +247,7 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
                     )
                     if nested_numeric_bool or not isinstance(nested_value, nested_expected):
                         raise ConfigError(
-                            "Config value 'functional_annotation.consistency."
+                            f"Config value 'functional_annotation.{key}."
                             f"{nested_key}' must be {_type_label(nested_expected)}, "
                             f"got {type(nested_value).__name__}"
                         )
@@ -389,6 +406,10 @@ def load_busco_config(data: dict[str, Any]) -> BuscoConfig:
 
 def load_functional_annotation_config(data: dict[str, Any]) -> FunctionalAnnotationConfig:
     defaults = FunctionalAnnotationConfig()
+    taxonomy_data = data.get("taxonomy", {})
+    if not isinstance(taxonomy_data, dict):
+        taxonomy_data = {}
+    taxonomy_defaults = FunctionalAnnotationTaxonomyConfig()
     consistency_data = data.get("consistency", {})
     if not isinstance(consistency_data, dict):
         consistency_data = {}
@@ -438,6 +459,35 @@ def load_functional_annotation_config(data: dict[str, Any]) -> FunctionalAnnotat
         cdd_data_dir=str(data.get("cdd_data_dir", defaults.cdd_data_dir)),
         cdd_data_url=str(data.get("cdd_data_url", defaults.cdd_data_url)),
         cdd_evalue=float(data.get("cdd_evalue", defaults.cdd_evalue)),
+        taxonomy=FunctionalAnnotationTaxonomyConfig(
+            enabled=bool(taxonomy_data.get("enabled", taxonomy_defaults.enabled)),
+            target_taxon_id=int(
+                taxonomy_data.get(
+                    "target_taxon_id",
+                    taxonomy_defaults.target_taxon_id,
+                )
+            ),
+            resolve_scientific_name=bool(
+                taxonomy_data.get(
+                    "resolve_scientific_name",
+                    taxonomy_defaults.resolve_scientific_name,
+                )
+            ),
+            offline=bool(taxonomy_data.get("offline", taxonomy_defaults.offline)),
+            busco_crosscheck=bool(
+                taxonomy_data.get(
+                    "busco_crosscheck",
+                    taxonomy_defaults.busco_crosscheck,
+                )
+            ),
+            strict=bool(taxonomy_data.get("strict", taxonomy_defaults.strict)),
+            distant_specificity_identity=float(
+                taxonomy_data.get(
+                    "distant_specificity_identity",
+                    taxonomy_defaults.distant_specificity_identity,
+                )
+            ),
+        ),
         consistency=FunctionalAnnotationConsistencyConfig(
             enabled=bool(consistency_data.get("enabled", consistency_defaults.enabled)),
             harmonize_safe_equivalents=bool(

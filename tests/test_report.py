@@ -160,9 +160,23 @@ class ReportTests(unittest.TestCase):
             ann_path = final_dir / "Demo.ann.txt"
             fasta_path = final_dir / "Demo.fasta"
             evidence_path = final_dir / "functional-annotation.tsv"
+            name_standardization_path = (
+                final_dir / "functional-annotation-name-standardization.tsv"
+            )
+            taxonomy_path = final_dir / "functional-annotation-taxonomy.json"
+            taxonomy_crosscheck_path = busco_dir / "taxonomy-crosscheck.json"
             ann_path.write_text("COMMON\n", encoding="utf-8")
             fasta_path.write_text(">chr1\nACGT\n//\n", encoding="utf-8")
             evidence_path.write_text("ID\tassigned_product\n", encoding="utf-8")
+            name_standardization_path.write_text(
+                "kind\tcode\tcount\n",
+                encoding="utf-8",
+            )
+            taxonomy_path.write_text('{"status": "resolved"}\n', encoding="utf-8")
+            taxonomy_crosscheck_path.write_text(
+                '{"busco_crosschecks": []}\n',
+                encoding="utf-8",
+            )
 
             manifest_path = output_root / "build-manifest.json"
             manifest_path.write_text(
@@ -178,6 +192,12 @@ class ReportTests(unittest.TestCase):
                             "annotation": {"path": str(ann_path)},
                             "fasta": {"path": str(fasta_path)},
                             "functional_annotation_evidence": {"path": str(evidence_path)},
+                            "functional_annotation_name_standardization": {
+                                "path": str(name_standardization_path)
+                            },
+                            "functional_annotation_taxonomy": {
+                                "path": str(taxonomy_path)
+                            },
                         },
                         "stage_summary": {"count": 18, "ran": 18, "reused": 0},
                         "validation": {
@@ -221,6 +241,7 @@ class ReportTests(unittest.TestCase):
                         },
                         "busco": {
                             "enabled": True,
+                            "taxonomy_crosscheck": str(taxonomy_crosscheck_path),
                             "comparisons": {
                                 "cds": {
                                     "comparison_tsv": str(busco_dir / "comparison.tsv"),
@@ -256,6 +277,9 @@ class ReportTests(unittest.TestCase):
             self.assertIn("BUSCO cds", html)
             self.assertIn("00.copy-input-fasta", html)
             self.assertIn("functional annotation evidence", html)
+            self.assertIn("functional annotation taxonomy", html)
+            self.assertIn("product-name standardization", html)
+            self.assertIn("BUSCO taxonomy cross-check", html)
             self.assertIn("Functional annotation name consistency", html)
             self.assertIn("Name review rate by evidence source", html)
             updated_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

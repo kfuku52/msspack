@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import TypedDict
 from xml.sax.saxutils import escape
 
+from .annotation_taxonomy import (
+    discover_busco_summary_paths,
+    resolve_annotation_taxonomy,
+)
 from .chart_primitives import (
     CHART_FONT_SIZE_PT,
     GRID_RGB,
@@ -1158,6 +1162,7 @@ def _update_busco_manifest(
     *,
     busco: BuscoConfig,
     artifacts: BuscoArtifacts,
+    taxonomy_crosscheck_path: Path | None = None,
 ) -> None:
     payload: dict[str, object]
     if manifest_path.exists():
@@ -1169,7 +1174,7 @@ def _update_busco_manifest(
         comparisons["cds"] = _comparison_manifest_entry(artifacts.cds)
     if artifacts.genome is not None:
         comparisons["genome"] = _comparison_manifest_entry(artifacts.genome)
-    payload["busco"] = {
+    busco_payload: dict[str, object] = {
         "enabled": True,
         "command": busco.command,
         "run_cds": busco.run_cds,
@@ -1182,6 +1187,9 @@ def _update_busco_manifest(
         "threads": busco.threads,
         "comparisons": comparisons,
     }
+    if taxonomy_crosscheck_path is not None:
+        busco_payload["taxonomy_crosscheck"] = str(taxonomy_crosscheck_path)
+    payload["busco"] = busco_payload
     write_text(manifest_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
@@ -1332,5 +1340,23 @@ def run_busco_comparison(
                 busco_module,
             ],
         )
-    _update_busco_manifest(outputs.manifest_path, busco=busco, artifacts=artifacts)
+    taxonomy_crosscheck_path: Path | None = None
+    if config.functional_annotation.enabled and config.functional_annotation.taxonomy.enabled:
+        taxonomy_crosscheck_path = artifacts.root / "taxonomy-crosscheck.json"
+        resolve_annotation_taxonomy(
+            scientific_name=config.sample.scientific_name,
+            configured_busco_lineage=busco.lineage_dataset,
+            busco_summary_paths=discover_busco_summary_paths(outputs.root),
+            output_path=taxonomy_crosscheck_path,
+            log_path=artifacts.root / "taxonomy-crosscheck.log",
+            metrics_path=artifacts.root / "taxonomy-crosscheck.metrics.json",
+            cache_dir=config.cache_dir / "functional-annotation" / "taxonomy",
+            config=config.functional_annotation.taxonomy,
+        )
+    _update_busco_manifest(
+        outputs.manifest_path,
+        busco=busco,
+        artifacts=artifacts,
+        taxonomy_crosscheck_path=taxonomy_crosscheck_path,
+    )
     return artifacts

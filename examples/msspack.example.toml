@@ -113,6 +113,17 @@ cdd_data_dir = ""
 cdd_data_url = "https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd"
 cdd_evalue = 0.01
 
+[functional_annotation.taxonomy]
+# Resolve sample.scientific_name through NCBI Taxonomy and use BUSCO lineage
+# results as a cross-check/fallback. Set target_taxon_id to override name lookup.
+enabled = true
+target_taxon_id = 0
+resolve_scientific_name = true
+offline = false
+busco_crosscheck = true
+strict = false
+distant_specificity_identity = 50.0
+
 [functional_annotation.consistency]
 # Optional family-level name audit. One DIAMOND all-vs-all search is reused for
 # near-identical, close-family, and broad-homology sensitivity thresholds.

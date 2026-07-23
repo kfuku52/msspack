@@ -134,6 +134,17 @@ class FunctionalAnnotationConsistencyConfig:
 
 
 @dataclass
+class FunctionalAnnotationTaxonomyConfig:
+    enabled: bool = True
+    target_taxon_id: int = 0
+    resolve_scientific_name: bool = True
+    offline: bool = False
+    busco_crosscheck: bool = True
+    strict: bool = False
+    distant_specificity_identity: float = 50.0
+
+
+@dataclass
 class FunctionalAnnotationConfig:
     enabled: bool = False
     diamond_command: str = "diamond"
@@ -181,6 +192,9 @@ class FunctionalAnnotationConfig:
     cdd_data_dir: str = ""
     cdd_data_url: str = "https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd"
     cdd_evalue: float = 0.01
+    taxonomy: FunctionalAnnotationTaxonomyConfig = field(
+        default_factory=FunctionalAnnotationTaxonomyConfig
+    )
     consistency: FunctionalAnnotationConsistencyConfig = field(
         default_factory=FunctionalAnnotationConsistencyConfig
     )

@@ -35,6 +35,42 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.consistency.family_identity, 72.0)
         self.assertEqual(config.consistency.source_pair_min_pairs, 7)
 
+    def test_loads_and_validates_annotation_taxonomy_config(self) -> None:
+        raw = {
+            "functional_annotation": {
+                "taxonomy": {
+                    "enabled": True,
+                    "target_taxon_id": 45172,
+                    "resolve_scientific_name": False,
+                    "offline": True,
+                    "busco_crosscheck": False,
+                    "strict": True,
+                    "distant_specificity_identity": 55.0,
+                },
+            }
+        }
+
+        _validate_raw_config(raw)
+        config = load_functional_annotation_config(raw["functional_annotation"])
+        validate_functional_annotation_config(config)
+
+        self.assertEqual(config.taxonomy.target_taxon_id, 45172)
+        self.assertFalse(config.taxonomy.resolve_scientific_name)
+        self.assertTrue(config.taxonomy.offline)
+        self.assertFalse(config.taxonomy.busco_crosscheck)
+        self.assertTrue(config.taxonomy.strict)
+        self.assertEqual(config.taxonomy.distant_specificity_identity, 55.0)
+
+    def test_rejects_unknown_annotation_taxonomy_key(self) -> None:
+        with self.assertRaises(ConfigError):
+            _validate_raw_config(
+                {
+                    "functional_annotation": {
+                        "taxonomy": {"unknown_taxonomy_option": True},
+                    }
+                }
+            )
+
     def test_rejects_unknown_annotation_consistency_key(self) -> None:
         with self.assertRaises(ConfigError):
             _validate_raw_config(

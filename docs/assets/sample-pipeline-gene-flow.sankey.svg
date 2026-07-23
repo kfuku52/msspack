@@ -19,13 +19,13 @@
 <path d="M 178.80 215.50 C 200.46 215.50, 219.03 217.25, 240.70 217.25 L 240.70 238.26 C 219.03 238.26, 200.46 236.51, 178.80 236.51 Z" fill="#14b8a6" fill-opacity="0.72" stroke="none"/>
 <path d="M 249.70 103.74 C 271.37 103.74, 289.93 114.49, 311.60 114.49 L 311.60 117.99 C 289.93 117.99, 271.37 107.24, 249.70 107.24 Z" fill="#22c55e" fill-opacity="0.72" stroke="none"/>
 <path d="M 249.70 128.74 C 271.37 128.74, 289.93 117.99, 311.60 117.99 L 311.60 227.51 C 289.93 227.51, 271.37 238.26, 249.70 238.26 Z" fill="#22c55e" fill-opacity="0.72" stroke="none"/>
-<path d="M 320.60 114.49 C 342.26 114.49, 360.83 78.00, 382.50 78.00 L 382.50 132.59 C 360.83 132.59, 342.26 169.08, 320.60 169.08 Z" fill="#2563eb" fill-opacity="0.72" stroke="none"/>
-<path d="M 320.60 169.08 C 342.26 169.08, 360.83 150.59, 382.50 150.59 L 382.50 177.92 C 360.83 177.92, 342.26 196.41, 320.60 196.41 Z" fill="#0d9488" fill-opacity="0.72" stroke="none"/>
+<path d="M 320.60 114.49 C 342.26 114.49, 360.83 78.00, 382.50 78.00 L 382.50 130.27 C 360.83 130.27, 342.26 166.76, 320.60 166.76 Z" fill="#2563eb" fill-opacity="0.72" stroke="none"/>
+<path d="M 320.60 166.76 C 342.26 166.76, 360.83 148.27, 382.50 148.27 L 382.50 177.92 C 360.83 177.92, 342.26 196.41, 320.60 196.41 Z" fill="#0d9488" fill-opacity="0.72" stroke="none"/>
 <path d="M 320.60 196.41 C 342.26 196.41, 360.83 195.92, 382.50 195.92 L 382.50 209.19 C 360.83 209.19, 342.26 209.68, 320.60 209.68 Z" fill="#7c3aed" fill-opacity="0.72" stroke="none"/>
 <path d="M 320.60 209.68 C 342.26 209.68, 360.83 227.19, 382.50 227.19 L 382.50 230.69 C 360.83 230.69, 342.26 213.18, 320.60 213.18 Z" fill="#c026d3" fill-opacity="0.72" stroke="none"/>
 <path d="M 320.60 213.18 C 342.26 213.18, 360.83 252.19, 382.50 252.19 L 382.50 264.00 C 360.83 264.00, 342.26 224.99, 320.60 224.99 Z" fill="#94a3b8" fill-opacity="0.72" stroke="none"/>
-<path d="M 391.50 78.00 C 413.16 78.00, 431.73 115.75, 453.40 115.75 L 453.40 170.34 C 431.73 170.34, 413.16 132.59, 391.50 132.59 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
-<path d="M 391.50 150.59 C 413.16 150.59, 431.73 170.34, 453.40 170.34 L 453.40 197.67 C 431.73 197.67, 413.16 177.92, 391.50 177.92 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
+<path d="M 391.50 78.00 C 413.16 78.00, 431.73 115.75, 453.40 115.75 L 453.40 168.02 C 431.73 168.02, 413.16 130.27, 391.50 130.27 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
+<path d="M 391.50 148.27 C 413.16 148.27, 431.73 168.02, 453.40 168.02 L 453.40 197.67 C 431.73 197.67, 413.16 177.92, 391.50 177.92 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
 <path d="M 391.50 195.92 C 413.16 195.92, 431.73 197.67, 453.40 197.67 L 453.40 210.94 C 431.73 210.94, 413.16 209.19, 391.50 209.19 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
 <path d="M 391.50 227.19 C 413.16 227.19, 431.73 210.94, 453.40 210.94 L 453.40 214.44 C 431.73 214.44, 413.16 230.69, 391.50 230.69 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
 <path d="M 391.50 252.19 C 413.16 252.19, 431.73 214.44, 453.40 214.44 L 453.40 226.25 C 431.73 226.25, 413.16 264.00, 391.50 264.00 Z" fill="#059669" fill-opacity="0.72" stroke="none"/>
@@ -37,8 +37,8 @@
 <rect x="240.70" y="103.74" width="9.00" height="7.00" rx="4" fill="#f59e0b" stroke="#0f172a" stroke-width="0.8"/>
 <rect x="240.70" y="128.74" width="9.00" height="109.52" rx="4" fill="#14b8a6" stroke="#0f172a" stroke-width="0.8"/>
 <rect x="311.60" y="114.49" width="9.00" height="113.02" rx="4" fill="#22c55e" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="382.50" y="78.00" width="9.00" height="54.59" rx="4" fill="#2563eb" stroke="#0f172a" stroke-width="0.8"/>
-<rect x="382.50" y="150.59" width="9.00" height="27.34" rx="4" fill="#0d9488" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="382.50" y="78.00" width="9.00" height="52.27" rx="4" fill="#2563eb" stroke="#0f172a" stroke-width="0.8"/>
+<rect x="382.50" y="148.27" width="9.00" height="29.65" rx="4" fill="#0d9488" stroke="#0f172a" stroke-width="0.8"/>
 <rect x="382.50" y="195.92" width="9.00" height="13.27" rx="4" fill="#7c3aed" stroke="#0f172a" stroke-width="0.8"/>
 <rect x="382.50" y="227.19" width="9.00" height="7.00" rx="4" fill="#c026d3" stroke="#0f172a" stroke-width="0.8"/>
 <rect x="382.50" y="252.19" width="9.00" height="11.81" rx="4" fill="#94a3b8" stroke="#0f172a" stroke-width="0.8"/>
@@ -59,12 +59,12 @@
 <text x="253.70" y="191.50" text-anchor="start" class="count">21,998</text>
 <text x="324.60" y="150.05" text-anchor="start" class="label"><tspan x="324.60" dy="0">No adjustment</tspan></text>
 <text x="324.60" y="162.05" text-anchor="start" class="count">22,001</text>
-<text x="395.50" y="101.29" text-anchor="start" class="label"><tspan x="395.50" dy="0">Swiss-Prot</tspan></text>
-<text x="395.50" y="113.29" text-anchor="start" class="count">10,964</text>
-<text x="395.50" y="160.25" text-anchor="start" class="label"><tspan x="395.50" dy="0">UniRef90</tspan></text>
-<text x="395.50" y="172.25" text-anchor="start" class="count">5,491</text>
+<text x="395.50" y="100.14" text-anchor="start" class="label"><tspan x="395.50" dy="0">Swiss-Prot</tspan></text>
+<text x="395.50" y="112.14" text-anchor="start" class="count">10,499</text>
+<text x="395.50" y="159.09" text-anchor="start" class="label"><tspan x="395.50" dy="0">UniRef90</tspan></text>
+<text x="395.50" y="171.09" text-anchor="start" class="count">5,955</text>
 <text x="395.50" y="200.92" text-anchor="start" class="label"><tspan x="395.50" dy="0">Pfam</tspan></text>
-<text x="395.50" y="212.92" text-anchor="start" class="count">2,665</text>
+<text x="395.50" y="212.92" text-anchor="start" class="count">2,666</text>
 <text x="395.50" y="228.19" text-anchor="start" class="label"><tspan x="395.50" dy="0">CDD</tspan></text>
 <text x="395.50" y="240.19" text-anchor="start" class="count">509</text>
 <text x="395.50" y="257.19" text-anchor="start" class="label"><tspan x="395.50" dy="0">Unannotated</tspan></text>
@@ -109,14 +109,14 @@
 <text x="237.80" y="378.50" class="summary-pie-legend">Missing 3.0%</text>
 <text x="432.00" y="309.00" text-anchor="middle" class="summary-pie-title">Name consistency (n=22,001)</text>
 <text x="432.00" y="322.00" text-anchor="middle" class="summary-pie-note">Close family peer: id&gt;=70%, cov&gt;=80%</text>
-<path d="M 376.60 364.00 L 376.60 346.00 A 18.00 18.00 0 0 1 393.62 358.13 Z" fill="#1d4ed8" stroke="white" stroke-width="0.6"/>
-<path d="M 376.60 364.00 L 393.62 358.13 A 18.00 18.00 0 0 1 394.60 363.61 Z" fill="#d97706" stroke="white" stroke-width="0.6"/>
+<path d="M 376.60 364.00 L 376.60 346.00 A 18.00 18.00 0 0 1 393.70 358.37 Z" fill="#1d4ed8" stroke="white" stroke-width="0.6"/>
+<path d="M 376.60 364.00 L 393.70 358.37 A 18.00 18.00 0 0 1 394.60 363.61 Z" fill="#d97706" stroke="white" stroke-width="0.6"/>
 <path d="M 376.60 364.00 L 394.60 363.61 A 18.00 18.00 0 1 1 365.32 349.97 Z" fill="#64748b" stroke="white" stroke-width="0.6"/>
 <path d="M 376.60 364.00 L 365.32 349.97 A 18.00 18.00 0 0 1 376.60 346.00 Z" fill="#cbd5e1" stroke="white" stroke-width="0.6"/>
 <rect x="401.60" y="334.00" width="6" height="6" rx="1" fill="#1d4ed8"/>
-<text x="410.60" y="340.00" class="summary-pie-legend">Consistent 19.7%</text>
+<text x="410.60" y="340.00" class="summary-pie-legend">Consistent 19.9%</text>
 <rect x="401.60" y="346.00" width="6" height="6" rx="1" fill="#d97706"/>
-<text x="410.60" y="352.00" class="summary-pie-legend">Auto-resolved variation 4.9%</text>
+<text x="410.60" y="352.00" class="summary-pie-legend">Auto-resolved variation 4.7%</text>
 <rect x="401.60" y="358.00" width="6" height="6" rx="1" fill="#64748b"/>
 <text x="410.60" y="364.00" class="summary-pie-legend">No close-family peer 64.6%</text>
 <rect x="401.60" y="370.00" width="6" height="6" rx="1" fill="#cbd5e1"/>

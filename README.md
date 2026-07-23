@@ -213,10 +213,44 @@ offline workflow. Full UniRef90 is very large; `uniref90_taxon_id` downloads a t
 subset from the UniProt REST API and retains the compressed FASTA while building DIAMOND.
 A close-species protein FASTA can also be supplied through `reference_proteins`.
 
+By default, `[functional_annotation.taxonomy]` resolves the required
+`sample.scientific_name` through NCBI Taxonomy. Set `target_taxon_id` to bypass name
+lookup, or set `offline = true` to use only records already present in the taxonomy cache.
+The resolved target TaxID and ranked lineage are written to
+`functional-annotation-taxonomy.json`. A configured BUSCO lineage and any existing BUSCO
+summary JSON files are checked against that lineage; auto-lineage results are recorded as
+independent evidence, while a manually configured BUSCO dataset is explicitly labelled as
+configured evidence. If name resolution is unavailable, the BUSCO lineage is a broad-clade
+fallback. `strict = true` converts an unresolved target or lineage mismatch from a warning
+to an error.
+
+UniProt `OX=` and UniRef `TaxID=` identifiers are retained for every matched subject.
+Description consensus weights hits by shared genus, family, order, class, phylum, kingdom,
+or domain rather than assuming that every input is a plant. Cross-kingdom and cross-domain
+hits remain available for conserved functions but receive lower weights. Low-identity
+distant hits lose terminal lineage-specific numbering or localization before assignment.
+A moderate or low-confidence Swiss-Prot hit does not suppress the UniRef90 fallback, so a
+closer UniRef90 hit can replace it. After `msspack busco`, the report also links a BUSCO
+taxonomy cross-check JSON generated from the completed BUSCO summaries.
+
 The final directory contains `functional-annotation.tsv`, with the original and assigned
-product, database/accession, quality measurements, decision reason, and confidence for
-every transcript. `functional-domain-search-comparison.tsv` records the identical Pfam/CDD
-query count, queries with hits, total hits, informative assignments, duration, and rate.
+product, the pre-standardization proposed product, database/accession, subject organism/TaxID,
+taxonomy relation and weight, quality measurements, decision reason, and confidence for every
+transcript. Before products are written to the annotation table, msspack standardizes them
+against the DDBJ/NCBI/EMBL-EBI protein-naming conventions. This includes lowercase formatting
+outside acronyms and symbols, American spelling, `homolog` to `-like protein` conversion,
+removal of terminal localization and source-organism text, removal of COG categories and
+unqualified database/locus identifiers, concise domain/family wording, and
+`hypothetical protein` for candidates that become uninformative. For a resolved eukaryotic
+target, common bacterial-only Pfam/CDD descriptions are generalized to neutral domain or
+family names instead of being transferred literally.
+
+The `proposed_product`, `assigned_product`, `candidate_source`, `source`,
+`name_standardization`, and `name_warnings` columns preserve every naming decision.
+`functional-annotation-name-standardization.tsv` summarizes action and residual-warning
+counts for the complete run.
+`functional-domain-search-comparison.tsv` records the identical Pfam/CDD query count,
+queries with hits, total hits, informative assignments, duration, and rate.
 DIAMOND rows also include the AHRD-style three-character quality code
 for similarity significance, alignment overlap, and description-token support. DIAMOND
 assignments must pass the configured identity, query coverage, subject coverage,
@@ -230,9 +264,15 @@ The default is deliberately opt-in because the initial databases require substan
 downloads (especially Pfam) and product names should be reviewed before submission. Run
 `msspack doctor --config my_submission.toml` after enabling the option to check DIAMOND,
 HMMER, RPS-BLAST, and rpsbproc. Each optional fallback can be disabled independently.
+Taxonomy lookup is non-fatal by default: if NCBI is unavailable and no cached or BUSCO
+fallback is available, annotation continues with neutral taxonomy weights and records the
+warning in its provenance.
 
 Set `functional_annotation.consistency.enabled = true` to run one additional DIAMOND
 all-vs-all search and audit whether directly aligned proteins receive compatible names.
+Product-name standardization is completed first; all family comparisons, conflict
+classification, automatic resolution, consistency TSVs, and plots therefore use the
+standardized `assigned_product`, never the raw database description.
 The same search is evaluated at near-identical (90% identity and 90% mutual coverage),
 close-family (70% and 80%), and broad-homology (40% and 60%) thresholds by default.
 Connected components define candidate families, but name comparisons use only direct
