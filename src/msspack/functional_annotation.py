@@ -573,7 +573,7 @@ def write_translated_protein_fasta(
                     skipped += 1
                     continue
                 protein = str(
-                    Seq(sequence[:usable_length]).translate(  # type: ignore[no-untyped-call]
+                    Seq(sequence[:usable_length]).translate(
                         table=int(genetic_code)
                     )
                 )

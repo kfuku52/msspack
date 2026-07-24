@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-07-24
 
 - Add `msspack run` for the complete BUSCO-to-report workflow, project-local
   `msspack_db` storage with an absolute shared-root override, database readiness
@@ -45,7 +45,6 @@
   before homolog-family consistency analysis, preserve proposed and standardized names in
   the evidence table, generalize common cross-domain descriptions, and report all naming
   actions and residual warnings.
-
 - Add opt-in AHRD-inspired product annotation using DIAMOND against Swiss-Prot or a
   close-reference proteome, with conservative Pfam domain fallback
 - Add sequential UniRef90 DIAMOND fallback, including disk-saving taxon-scoped downloads

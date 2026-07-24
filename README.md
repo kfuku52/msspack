@@ -8,10 +8,10 @@
 ![Linted with Ruff](https://img.shields.io/badge/lint-ruff-46a2f1)
 ![Type checked with mypy](https://img.shields.io/badge/type%20check-mypy-2a6db2)
 
-`msspack` converts a genome FASTA and GFF3 annotation into validated DDBJ MSS
-`.ann.txt` and `.fasta` files. A single TOML config controls gene-model cleanup,
-submission metadata, optional functional annotation, BUSCO comparisons, plots, and
-an HTML run report.
+`msspack` converts a genome FASTA and GFF3 annotation into DDBJ MSS `.ann.txt` and
+`.fasta` files and can validate them with the official DDBJ tools. A single TOML
+config controls gene-model cleanup, submission metadata, optional functional
+annotation, BUSCO comparisons, plots, and an HTML run report.
 
 For submission requirements, see the DDBJ
 [MSS - Mass Submission System](https://www.ddbj.nig.ac.jp/ddbj/mss-e.html)
@@ -101,9 +101,11 @@ msspack doctor --config my_submission.toml
 msspack run --config my_submission.toml
 ```
 
-`run` prepares the input models, compares BUSCO results, performs functional
-annotation, builds and validates the MSS files, renders the Sankey and supporting
-figures, and writes the HTML report. Individual stages can still be run separately.
+`run` prepares the input models, runs the configured BUSCO comparisons and functional
+annotation, builds the MSS files, runs enabled validation, renders the Sankey and
+supporting figures, and writes the HTML report. Individual stages can still be run
+separately.
+
 For a lighter run:
 
 ```bash
@@ -132,36 +134,49 @@ whose exon coverage is identical to its CDS is rendered as CDS alone. Transcript
 without a CDS remain explicit mRNA features.
 
 rRNA, tRNA, tmRNA, ncRNA, repeat, regulatory, mobile-element, peptide, and other
-recognized INSDC features are retained. Pseudogenes are encoded as DDBJ-compatible
-`misc_feature` records with `locus_tag`, `gene`, and controlled `pseudogene`
-qualifiers because the current DDBJ MSS Parser forbids the INSDC `gene` key for new
-submissions. Common Sequence Ontology aliases such as `miRNA`, `promoter`,
-`tandem_repeat`, and `transposable_element` are mapped to their corresponding INSDC
-feature and controlled qualifier. A non-structural GFF3 type without a direct INSDC
-mapping is retained as `misc_feature` with its original type in `note`; it is never
-silently discarded. GFF3 `start_codon` and `stop_codon` rows remain synchronized
-structural metadata because they are represented by the CDS location rather than
-independent MSS feature keys. See the official
+recognized GFF3 annotations are retained and mapped to DDBJ-supported INSDC feature
+keys. Pseudogenes are encoded as DDBJ-compatible `misc_feature` records with
+`locus_tag`, `gene`, and controlled `pseudogene` qualifiers because the current DDBJ
+MSS Parser forbids the INSDC `gene` key for new submissions. Common Sequence Ontology
+aliases such as `miRNA`, `promoter`, `tandem_repeat`, and `transposable_element` are
+mapped to their corresponding INSDC feature and controlled qualifier. A non-structural
+GFF3 type without a direct INSDC mapping is retained as `misc_feature` with its
+original type in `note`; it is never silently discarded. GFF3 `start_codon` and
+`stop_codon` rows remain synchronized structural metadata because they are represented
+by the CDS location rather than independent MSS feature keys. See the official
 [DDBJ feature-key definitions](https://www.ddbj.nig.ac.jp/ddbj/features-e.html).
 
 ## Command Workflow
 
 ```mermaid
 flowchart LR
-  Inputs["Genome FASTA + GFF3"] --> Run["msspack run"]
-  Config["TOML config"] --> Run
-  DB["Project or shared DB root"] --> Run
-  Run --> Prepare["Normalize models<br/>adjust CDS boundaries"]
-  Prepare --> Busco["BUSCO comparison"]
-  Busco --> Annotate["Functional annotation"]
-  Annotate --> MSS["MSS build + validation"]
-  MSS --> Plot["Sankey + supporting plots"]
-  Plot --> Report["HTML report"]
+  Inputs["Genome FASTA + GFF3"]
+  Config["TOML config"]
+  DB["Project or shared DB root"]
+
+  subgraph Run["msspack run — complete workflow"]
+    direction LR
+    Preflight["msspack doctor checks<br/>Automatic preflight"]
+    Busco["msspack busco<br/>Prepare models + compare BUSCO"]
+    Pack["msspack pack<br/>Prepare models + build MSS<br/>Configured annotation/validation"]
+    Plot["msspack plot<br/>Sankey + supporting plots"]
+    Report["msspack report<br/>HTML report"]
+    Preflight --> Busco --> Pack --> Plot --> Report
+  end
+
+  Inputs --> Preflight
+  Config --> Preflight
+  DB --> Preflight
+
+  style Run fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#111827
 ```
 
-The first BUSCO pass and the final pipeline reuse the same normalized, boundary-adjusted
-intermediates. `pack`, `busco`, `plot`, and `report` remain available for targeted
-reruns.
+`msspack run` is the enclosing orchestrator. The commands shown inside the box are
+the standalone entry points corresponding to its stages; `run` invokes their
+underlying library operations rather than launching nested CLI processes. Config
+settings and `--no-*` options determine which optional work is performed. The BUSCO
+stage and `pack` reuse the same normalized, boundary-adjusted intermediates, and
+`doctor`, `busco`, `pack`, `plot`, and `report` remain available for targeted runs.
 
 | Command | Purpose |
 | --- | --- |
@@ -169,11 +184,12 @@ reruns.
 | `msspack demo --output msspack-demo` | Write the bundled not-for-submission test dataset |
 | `msspack doctor --config my_submission.toml` | Check the config, inputs, and required tools |
 | `msspack tools install` | Download the reviewed DDBJ validation tools |
-| `msspack run --config my_submission.toml` | Run BUSCO, MSS generation and validation, plots, and report |
+| `msspack tools list` | Show installed DDBJ validation tools |
 | `msspack db status --config my_submission.toml` | Show the resolved database root and resource readiness |
-| `msspack pack --config my_submission.toml` | Build and validate the MSS files |
-| `msspack validate --ann FILE --fasta FILE` | Recheck existing MSS files |
+| `msspack run --config my_submission.toml` | Orchestrate configured BUSCO, MSS generation, validation, plots, and report |
 | `msspack busco --config my_submission.toml` | Compare BUSCO results for input and processed sequences |
+| `msspack pack --config my_submission.toml` | Clean models, run configured annotation, then build and validate the MSS files |
+| `msspack validate --ann FILE --fasta FILE` | Validate existing MSS files |
 | `msspack plot --config my_submission.toml` | Render the pipeline Sankey and supporting figures |
 | `msspack report --config my_submission.toml` | Render/reuse plots and write the HTML report |
 
@@ -251,9 +267,10 @@ auto_lineage = true
 threads = 8
 ```
 
-- Functional annotation searches Swiss-Prot and optional taxon-scoped UniRef90, then
-  uses Pfam and CDD as domain fallbacks. Set `uniref90_enabled = true` with an
-  appropriate `uniref90_taxon_id`; downloading full UniRef90 is usually unnecessary.
+- Functional annotation can combine Swiss-Prot, an optional close-reference proteome,
+  UniRef90, Pfam, and CDD. Similarity searches precede the domain fallbacks. Set
+  `uniref90_enabled = true` with an appropriate `uniref90_taxon_id`; downloading full
+  UniRef90 is usually unnecessary.
 - Relative `databases.root` paths are resolved from the TOML file, so downloads go to
   `msspack_db/` beside the config by default. To reuse databases across projects, set
   an absolute path such as `root = "/data/shared/msspack_db"` or pass
@@ -268,8 +285,8 @@ threads = 8
   root and each resource. `--force-compute` removes only analysis caches, not database
   files, and refuses unsafe broad output roots that contain configured data or cache
   directories. Local database paths can still be supplied for offline runs.
-- Taxonomy is inferred from `sample.scientific_name` and cross-checked against BUSCO,
-  without assuming that the input is a plant.
+- For functional annotation, taxonomy is inferred from `sample.scientific_name` and
+  cross-checked against BUSCO without assuming that the input is a plant.
 - Product names are standardized to DDBJ/NCBI/EMBL-EBI conventions before the family
   audit. Uninformative evidence remains `hypothetical protein`. Default
   identity/mutual-coverage thresholds are 90/90%, 70/80%, and 40/60% for
@@ -278,9 +295,9 @@ threads = 8
   Enable `run_genome` only when a genome-level comparison is also needed.
 
 Run `msspack doctor --config my_submission.toml` after enabling optional databases or
-BUSCO. Detailed evidence, naming decisions, consistency tables, timings, and plots are
-written under `final/`, `logs/`, `busco/`, and `plots/` in the configured output
-directory.
+BUSCO. Detailed evidence, naming decisions, consistency tables, timings, plots, and
+the HTML report are written under `final/`, `logs/`, `busco/`, `plots/`, and `report/`
+in the configured output directory.
 
 ## Development
 
