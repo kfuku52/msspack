@@ -214,10 +214,7 @@ unannotated rows.
 The figure below is from a complete example run with Swiss-Prot, taxon-scoped
 UniRef90, Pfam, CDD, BUSCO, and the close-family name-consistency audit enabled.
 
-<img
-  src="https://raw.githubusercontent.com/kfuku52/msspack/main/docs/assets/sample-pipeline-gene-flow.sankey.svg"
-  alt="Example msspack pipeline gene-flow Sankey diagram with BUSCO and name-consistency summaries"
->
+![Example msspack pipeline gene-flow Sankey diagram with BUSCO and name-consistency summaries](docs/assets/sample-pipeline-gene-flow.sankey.svg)
 
 ### Product-name examples
 
