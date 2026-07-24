@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime
 
@@ -8,6 +9,7 @@ from Bio.Data import CodonTable
 from .config_errors import ConfigError
 from .config_models import (
     BuscoConfig,
+    DatabasesConfig,
     FunctionalAnnotationConfig,
     MSSPackConfig,
     PipelineConfig,
@@ -142,6 +144,23 @@ def validate_tools_config(tools: ToolsConfig) -> None:
     ensure_nonempty(tools.java, "tools.java")
     if not JAVA_HEAP_RE.match(tools.java_heap):
         raise ConfigError("Config value 'tools.java_heap' must look like 16G or 512M")
+
+
+def validate_databases_config(databases: DatabasesConfig) -> None:
+    ensure_nonempty(databases.root, "databases.root")
+    for key, value in (
+        ("lock_poll_seconds", databases.lock_poll_seconds),
+        ("lock_timeout_seconds", databases.lock_timeout_seconds),
+        ("lock_heartbeat_seconds", databases.lock_heartbeat_seconds),
+        ("lock_stale_seconds", databases.lock_stale_seconds),
+    ):
+        if not math.isfinite(value) or value <= 0:
+            raise ConfigError(f"Config value 'databases.{key}' must be finite and > 0")
+    if databases.lock_stale_seconds <= databases.lock_heartbeat_seconds:
+        raise ConfigError(
+            "Config value 'databases.lock_stale_seconds' must be greater than "
+            "'databases.lock_heartbeat_seconds'"
+        )
 
 
 def validate_busco_config(busco: BuscoConfig) -> None:
@@ -338,5 +357,6 @@ def validate_config(config: MSSPackConfig) -> None:
     validate_reference_config(config.reference)
     validate_pipeline_config(config.pipeline)
     validate_tools_config(config.tools)
+    validate_databases_config(config.databases)
     validate_busco_config(config.busco)
     validate_functional_annotation_config(config.functional_annotation)

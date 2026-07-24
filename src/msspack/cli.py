@@ -8,6 +8,7 @@ from pathlib import Path
 from . import __version__
 from .busco import cleanup_busco_cache, run_busco_comparison, summarize_busco_artifacts
 from .config import load_config
+from .databases import collect_database_status, render_database_status
 from .ddbj_tools import DDBJ_LICENSE_URL, install_component, list_installed
 from .demo import write_demo_dataset
 from .doctor import doctor_succeeded, render_doctor_report, run_doctor
@@ -17,6 +18,7 @@ from .pipeline_plots import run_pipeline_plots, summarize_pipeline_plots
 from .report import run_html_report
 from .utils import MSSPackError, write_text
 from .validation import validate_existing
+from .workflow import database_directory_override, run_all
 
 
 def _example_config_text() -> str:
@@ -77,6 +79,46 @@ def _build_parser() -> argparse.ArgumentParser:
     pack_parser = subparsers.add_parser("pack", help="build MSS submission files")
     pack_parser.add_argument("--config", required=True, help="config TOML")
     pack_parser.add_argument("--no-validate", action="store_true")
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help="run BUSCO, MSS generation, validation, plots, and report",
+    )
+    run_parser.add_argument("--config", required=True, help="config TOML")
+    run_parser.add_argument(
+        "--db-dir",
+        default="",
+        help="override the configured database root for this run",
+    )
+    run_parser.add_argument(
+        "--force-compute",
+        action="store_true",
+        help="recompute analysis outputs while retaining downloaded databases",
+    )
+    run_parser.add_argument("--no-busco", action="store_true", help="skip BUSCO")
+    run_parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="skip DDBJ Parser/transChecker",
+    )
+    run_parser.add_argument(
+        "--no-report",
+        action="store_true",
+        help="skip the HTML report",
+    )
+
+    db_parser = subparsers.add_parser("db", help="inspect msspack databases")
+    db_subparsers = db_parser.add_subparsers(dest="db_command", required=True)
+    db_status = db_subparsers.add_parser(
+        "status",
+        help="show resolved database paths and readiness",
+    )
+    db_status.add_argument("--config", required=True, help="config TOML")
+    db_status.add_argument(
+        "--db-dir",
+        default="",
+        help="override the configured database root",
+    )
 
     plot_parser = subparsers.add_parser(
         "plot",
@@ -219,6 +261,34 @@ def _handle_pack(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_run(args: argparse.Namespace) -> int:
+    artifacts = run_all(
+        args.config,
+        database_dir=args.db_dir,
+        force_compute=args.force_compute,
+        run_busco=not args.no_busco,
+        validate=not args.no_validate,
+        write_report=not args.no_report,
+    )
+    print(render_database_status(artifacts.database_status))
+    print(artifacts.pipeline.ann_path)
+    print(artifacts.pipeline.fasta_path)
+    print(artifacts.plots.gene_flow_svg)
+    if artifacts.report is not None:
+        print(artifacts.report.index_html)
+    print(f"duration_seconds\t{artifacts.duration_seconds:.3f}")
+    return 0
+
+
+def _handle_db(args: argparse.Namespace) -> int:
+    if args.db_command == "status":
+        with database_directory_override(args.db_dir):
+            status = collect_database_status(load_config(args.config))
+        print(render_database_status(status))
+        return 0
+    raise MSSPackError(f"Unsupported db command: {args.db_command}")
+
+
 def _handle_plot(args: argparse.Namespace) -> int:
     artifacts = run_pipeline_plots(args.config, force=args.force)
     print(artifacts.root)
@@ -291,6 +361,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         "doctor": _handle_doctor,
         "tools": _handle_tools,
         "pack": _handle_pack,
+        "run": _handle_run,
+        "db": _handle_db,
         "plot": _handle_plot,
         "report": _handle_report,
         "busco": _handle_busco,

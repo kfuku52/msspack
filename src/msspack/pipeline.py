@@ -198,6 +198,43 @@ def _build_outputs(config: MSSPackConfig) -> PipelineOutputs:
     )
 
 
+def _initialize_pipeline(
+    config_file: str | Path,
+) -> tuple[MSSPackConfig, Path, PipelineOutputs, ModulePaths, PipelineContext]:
+    config_path = Path(config_file).expanduser().resolve()
+    config = load_config(config_file)
+    outputs = _build_outputs(config)
+    modules = _resolve_modules()
+    manifest = ManifestRecorder(
+        config=config,
+        config_path=config_path,
+        output_root=outputs.root,
+        ann_path=outputs.ann_path,
+        fasta_path=outputs.fasta_path,
+    )
+    return (
+        config,
+        config_path,
+        outputs,
+        modules,
+        PipelineContext(
+            config=config,
+            config_path=config_path,
+            outputs=outputs,
+            modules=modules,
+            manifest=manifest,
+        ),
+    )
+
+
+def prepare_pipeline_for_busco(config_file: str | Path) -> PipelineOutputs:
+    """Prepare normalized FASTA/GFF artifacts required by BUSCO without annotation."""
+    _config, _config_path, outputs, _modules, ctx = _initialize_pipeline(config_file)
+    prepared_inputs = _prepare_inputs(ctx)
+    _prepare_gff(ctx, prepared_inputs)
+    return outputs
+
+
 def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
     config = ctx.config
     input_fasta = config.fasta_path
@@ -613,7 +650,7 @@ def _build_annotation_artifacts(
                 output_path=taxonomy_context,
                 log_path=logs / "14a2.functional-annotation-taxonomy.log",
                 metrics_path=taxonomy_metrics,
-                cache_dir=config.cache_dir / "functional-annotation" / "taxonomy",
+                cache_dir=config.database_dir / "taxonomy",
                 config=annotation_config.taxonomy,
             ),
         )
@@ -660,10 +697,11 @@ def _build_annotation_artifacts(
                     metrics_path=diamond_metrics,
                     config=annotation_config,
                     base_dir=config.base_dir,
-                    cache_dir=config.cache_dir / "functional-annotation",
+                    cache_dir=config.database_dir,
+                    lock_settings=config.database_lock_settings,
                     taxonomy_context_path=taxonomy_context,
                     taxonomy_cache_dir=(
-                        config.cache_dir / "functional-annotation" / "taxonomy"
+                        config.database_dir / "taxonomy"
                     ),
                     source_group="primary",
                     step_name="functional-annotation-primary-search",
@@ -717,10 +755,11 @@ def _build_annotation_artifacts(
                     metrics_path=uniref90_metrics,
                     config=annotation_config,
                     base_dir=config.base_dir,
-                    cache_dir=config.cache_dir / "functional-annotation",
+                    cache_dir=config.database_dir,
+                    lock_settings=config.database_lock_settings,
                     taxonomy_context_path=taxonomy_context,
                     taxonomy_cache_dir=(
-                        config.cache_dir / "functional-annotation" / "taxonomy"
+                        config.database_dir / "taxonomy"
                     ),
                     source_group="uniref90",
                     prior_similarity_inputs=((diamond_hits, diamond_metadata),),
@@ -774,7 +813,8 @@ def _build_annotation_artifacts(
                     metrics_path=pfam_metrics,
                     config=annotation_config,
                     base_dir=config.base_dir,
-                    cache_dir=config.cache_dir / "functional-annotation",
+                    cache_dir=config.database_dir,
+                    lock_settings=config.database_lock_settings,
                     diamond_hits_path=diamond_hits,
                     diamond_metadata_path=diamond_metadata,
                     additional_similarity_inputs=((uniref90_hits, uniref90_metadata),),
@@ -834,7 +874,8 @@ def _build_annotation_artifacts(
                     metrics_path=cdd_metrics,
                     config=annotation_config,
                     base_dir=config.base_dir,
-                    cache_dir=config.cache_dir / "functional-annotation",
+                    cache_dir=config.database_dir,
+                    lock_settings=config.database_lock_settings,
                     similarity_inputs=(
                         (diamond_hits, diamond_metadata),
                         (uniref90_hits, uniref90_metadata),
@@ -1076,24 +1117,8 @@ def _build_annotation_artifacts(
 
 
 def run_pipeline(config_file: str | Path, *, validate: bool = True) -> PipelineOutputs:
-    config_path = Path(config_file).expanduser().resolve()
-    config = load_config(config_file)
-    outputs = _build_outputs(config)
-    modules = _resolve_modules()
-    manifest = ManifestRecorder(
-        config=config,
-        config_path=config_path,
-        output_root=outputs.root,
-        ann_path=outputs.ann_path,
-        fasta_path=outputs.fasta_path,
-    )
-    ctx = PipelineContext(
-        config=config,
-        config_path=config_path,
-        outputs=outputs,
-        modules=modules,
-        manifest=manifest,
-    )
+    config, config_path, outputs, modules, ctx = _initialize_pipeline(config_file)
+    manifest = ctx.manifest
     try:
         prepared_inputs = _prepare_inputs(ctx)
         prepared_gff = _prepare_gff(ctx, prepared_inputs)

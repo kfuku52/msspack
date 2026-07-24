@@ -171,6 +171,15 @@ class ManifestRecorder:
                 "platform": platform.platform(),
             },
             "project": self.config.project.name,
+            "databases": {
+                "root": str(self.config.database_dir),
+                "mode": (
+                    "project"
+                    if self.config.database_dir.is_relative_to(self.config.base_dir)
+                    else "shared"
+                ),
+                "busco_root": str(self.config.busco_database_dir),
+            },
             "config": {
                 "path": str(self.config_path),
                 "sha256": _sha256_file(self.config_path),

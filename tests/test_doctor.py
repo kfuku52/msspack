@@ -145,3 +145,26 @@ class DoctorTests(unittest.TestCase):
             by_name = {check.name: check for check in checks}
             self.assertFalse(by_name["non-empty FASTA records"].ok)
             self.assertFalse(by_name["input format"].ok)
+
+    def test_run_doctor_rejects_database_root_that_is_a_file(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "minimal_pack"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            database_file = base / "not-a-directory"
+            database_file.write_text("file\n", encoding="utf-8")
+            config_path = base / "config.toml"
+            config_path.write_text(
+                (fixture / "config.toml").read_text(encoding="utf-8")
+                + f'\n[databases]\nroot = "{database_file}"\n',
+                encoding="utf-8",
+            )
+            config = load_config(config_path)
+            with patch("msspack.doctor.which", return_value="/usr/bin/tool"), patch(
+                "msspack.doctor._importable", return_value=True
+            ), patch("msspack.doctor.list_installed", return_value={}):
+                checks = run_doctor(config)
+
+        by_name = {check.name: check for check in checks}
+        self.assertFalse(by_name["database root"].ok)
+        self.assertTrue(by_name["database root"].required)
+        self.assertIn("not a directory", by_name["database root"].detail)

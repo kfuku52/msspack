@@ -64,6 +64,15 @@ class IntegrationPackTests(unittest.TestCase):
 
             outputs = run_pipeline(config_path, validate=False)
 
+            database_files = list(
+                (
+                    base
+                    / "msspack_db"
+                    / "diamond"
+                    / "close-reference"
+                ).glob("*/close-reference.dmnd")
+            )
+            self.assertEqual(len(database_files), 1)
             annotation_text = outputs.ann_path.read_text(encoding="utf-8")
             self.assertIn("\t\t\tproduct\tATP synthase subunit alpha", annotation_text)
             evidence = outputs.final / "functional-annotation.tsv"

@@ -8,10 +8,12 @@ from unittest.mock import patch
 from msspack import cli
 from msspack.busco import BuscoArtifacts, BuscoComparisonArtifacts
 from msspack.cli import main
+from msspack.databases import DatabaseStatus
 from msspack.doctor import Check
 from msspack.pipeline import PipelineOutputs
 from msspack.pipeline_plots import PipelinePlotArtifacts
 from msspack.report import ReportArtifacts
+from msspack.workflow import RunArtifacts
 
 
 class CliTests(unittest.TestCase):
@@ -112,6 +114,119 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             stdout.getvalue().splitlines(),
             [str(outputs.ann_path), str(outputs.fasta_path)],
+        )
+
+    def test_main_run_dispatches_full_workflow(self) -> None:
+        outputs = PipelineOutputs(
+            root=Path("/tmp/build"),
+            intermediate=Path("/tmp/build/intermediate"),
+            logs=Path("/tmp/build/logs"),
+            final=Path("/tmp/build/final"),
+            ann_path=Path("/tmp/build/final/sample.ann.txt"),
+            fasta_path=Path("/tmp/build/final/sample.fasta"),
+            manifest_path=Path("/tmp/build/build-manifest.json"),
+        )
+        plots = PipelinePlotArtifacts(
+            root=Path("/tmp/build/plots"),
+            summary_json=Path("/tmp/build/plots/summary.json"),
+            summary_tsv=Path("/tmp/build/plots/summary.tsv"),
+            gene_flow_tsv=Path("/tmp/build/plots/flow.tsv"),
+            gene_flow_svg=Path("/tmp/build/plots/flow.svg"),
+            gene_flow_pdf=Path("/tmp/build/plots/flow.pdf"),
+            event_counts_tsv=Path("/tmp/build/plots/events.tsv"),
+            event_counts_svg=Path("/tmp/build/plots/events.svg"),
+            event_counts_pdf=Path("/tmp/build/plots/events.pdf"),
+            name_consistency_tsv=Path("/tmp/build/plots/names.tsv"),
+            name_consistency_svg=Path("/tmp/build/plots/names.svg"),
+            name_consistency_pdf=Path("/tmp/build/plots/names.pdf"),
+            source_consistency_tsv=Path("/tmp/build/plots/sources.tsv"),
+            source_consistency_svg=Path("/tmp/build/plots/sources.svg"),
+            source_consistency_pdf=Path("/tmp/build/plots/sources.pdf"),
+        )
+        status = DatabaseStatus(
+            root=Path("/shared/msspack-db"),
+            mode="shared",
+            resources=(),
+        )
+        artifacts = RunArtifacts(
+            pipeline=outputs,
+            busco=None,
+            plots=plots,
+            report=None,
+            database_status=status,
+            duration_seconds=12.3456,
+        )
+        stdout = io.StringIO()
+
+        with patch("msspack.cli.run_all", return_value=artifacts) as mocked:
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "run",
+                        "--config",
+                        "/tmp/demo.toml",
+                        "--db-dir",
+                        "/shared/msspack-db",
+                        "--force-compute",
+                        "--no-busco",
+                        "--no-validate",
+                        "--no-report",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        mocked.assert_called_once_with(
+            "/tmp/demo.toml",
+            database_dir="/shared/msspack-db",
+            force_compute=True,
+            run_busco=False,
+            validate=False,
+            write_report=False,
+        )
+        self.assertEqual(
+            stdout.getvalue().splitlines(),
+            [
+                "Database root: /shared/msspack-db",
+                "Database mode: shared",
+                str(outputs.ann_path),
+                str(outputs.fasta_path),
+                str(plots.gene_flow_svg),
+                "duration_seconds\t12.346",
+            ],
+        )
+
+    def test_main_db_status_uses_database_override(self) -> None:
+        status = DatabaseStatus(
+            root=Path("/shared/msspack-db"),
+            mode="shared",
+            resources=(),
+        )
+        stdout = io.StringIO()
+
+        with patch("msspack.cli.load_config", return_value=object()), patch(
+            "msspack.cli.collect_database_status",
+            return_value=status,
+        ) as mocked:
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "db",
+                        "status",
+                        "--config",
+                        "/tmp/demo.toml",
+                        "--db-dir",
+                        "/shared/msspack-db",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        mocked.assert_called_once()
+        self.assertEqual(
+            stdout.getvalue().splitlines(),
+            [
+                "Database root: /shared/msspack-db",
+                "Database mode: shared",
+            ],
         )
 
     def test_main_busco_dispatches_to_busco_module(self) -> None:

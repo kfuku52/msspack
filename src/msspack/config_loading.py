@@ -7,6 +7,7 @@ from typing import Any
 from .config_errors import ConfigError
 from .config_models import (
     BuscoConfig,
+    DatabasesConfig,
     FunctionalAnnotationConfig,
     FunctionalAnnotationConsistencyConfig,
     FunctionalAnnotationTaxonomyConfig,
@@ -94,6 +95,13 @@ SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
         "java": str,
         "gff3sort": str,
         "java_heap": str,
+    },
+    "databases": {
+        "root": str,
+        "lock_poll_seconds": (int, float),
+        "lock_timeout_seconds": (int, float),
+        "lock_heartbeat_seconds": (int, float),
+        "lock_stale_seconds": (int, float),
     },
     "busco": {
         "command": str,
@@ -386,6 +394,25 @@ def load_tools_config(data: dict[str, Any]) -> ToolsConfig:
     )
 
 
+def load_databases_config(data: dict[str, Any]) -> DatabasesConfig:
+    defaults = DatabasesConfig()
+    return DatabasesConfig(
+        root=str(data.get("root", defaults.root)),
+        lock_poll_seconds=float(
+            data.get("lock_poll_seconds", defaults.lock_poll_seconds)
+        ),
+        lock_timeout_seconds=float(
+            data.get("lock_timeout_seconds", defaults.lock_timeout_seconds)
+        ),
+        lock_heartbeat_seconds=float(
+            data.get("lock_heartbeat_seconds", defaults.lock_heartbeat_seconds)
+        ),
+        lock_stale_seconds=float(
+            data.get("lock_stale_seconds", defaults.lock_stale_seconds)
+        ),
+    )
+
+
 def load_busco_config(data: dict[str, Any]) -> BuscoConfig:
     return BuscoConfig(
         command=str(data.get("command", "busco")),
@@ -567,6 +594,7 @@ def load_sections(data: dict[str, Any]) -> dict[str, Any]:
         "st_comment": load_st_comment_config(section(data, "st_comment")),
         "pipeline": load_pipeline_config(section(data, "pipeline")),
         "tools": load_tools_config(section(data, "tools")),
+        "databases": load_databases_config(section(data, "databases")),
         "busco": load_busco_config(section(data, "busco")),
         "functional_annotation": load_functional_annotation_config(
             section(data, "functional_annotation")

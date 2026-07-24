@@ -1,13 +1,18 @@
 import tempfile
 import unittest
+from math import inf, nan
 from pathlib import Path
+from unittest.mock import patch
 
-from msspack.config import ConfigError, load_config
+from msspack.config import ConfigError, DatabasesConfig, load_config
 from msspack.config_loading import (
     _validate_raw_config,
     load_functional_annotation_config,
 )
-from msspack.config_validation import validate_functional_annotation_config
+from msspack.config_validation import (
+    validate_databases_config,
+    validate_functional_annotation_config,
+)
 
 
 class ConfigTests(unittest.TestCase):
@@ -145,6 +150,37 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.fasta_path, (base / "input.fa").resolve())
             self.assertEqual(config.gff_path, (base / "input.gff3").resolve())
             self.assertEqual(config.output_dir, (base / "build" / "Demo").resolve())
+            self.assertEqual(config.database_dir, (base / "msspack_db").resolve())
+            self.assertEqual(
+                config.busco_database_dir,
+                (base / "msspack_db" / "busco").resolve(),
+            )
+
+            shared_root = base / "shared-databases"
+            with patch.dict("os.environ", {"MSSPACK_DB_DIR": str(shared_root)}):
+                self.assertEqual(config.database_dir, shared_root)
+                self.assertEqual(
+                    config.busco_database_dir,
+                    shared_root / "busco",
+                )
+
+    def test_database_lock_settings_must_be_positive(self) -> None:
+        with self.assertRaises(ConfigError):
+            validate_databases_config(DatabasesConfig(lock_poll_seconds=0))
+
+    def test_database_lock_settings_must_be_finite(self) -> None:
+        for value in (nan, inf):
+            with self.subTest(value=value), self.assertRaises(ConfigError):
+                validate_databases_config(DatabasesConfig(lock_poll_seconds=value))
+
+    def test_database_lock_stale_interval_must_exceed_heartbeat(self) -> None:
+        with self.assertRaises(ConfigError):
+            validate_databases_config(
+                DatabasesConfig(
+                    lock_heartbeat_seconds=60,
+                    lock_stale_seconds=60,
+                )
+            )
 
     def test_load_config_rejects_non_table_section(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

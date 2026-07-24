@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .database_lock import DatabaseLockSettings
 from .utils import default_cache_dir, expand_path
 
 
@@ -98,6 +100,15 @@ class ToolsConfig:
     java: str = "java"
     gff3sort: str | None = None
     java_heap: str = "16G"
+
+
+@dataclass
+class DatabasesConfig:
+    root: str = "msspack_db"
+    lock_poll_seconds: float = 5.0
+    lock_timeout_seconds: float = 86_400.0
+    lock_heartbeat_seconds: float = 60.0
+    lock_stale_seconds: float = 900.0
 
 
 @dataclass
@@ -212,6 +223,7 @@ class MSSPackConfig:
     st_comment: StCommentConfig
     pipeline: PipelineConfig
     tools: ToolsConfig
+    databases: DatabasesConfig = field(default_factory=DatabasesConfig)
     busco: BuscoConfig = field(default_factory=BuscoConfig)
     functional_annotation: FunctionalAnnotationConfig = field(
         default_factory=FunctionalAnnotationConfig
@@ -228,6 +240,28 @@ class MSSPackConfig:
         if self.tools.cache_dir:
             return expand_path(self.tools.cache_dir, self.base_dir)
         return default_cache_dir()
+
+    @property
+    def database_dir(self) -> Path:
+        override = os.environ.get("MSSPACK_DB_DIR", "").strip()
+        if override:
+            return expand_path(override, self.base_dir)
+        return expand_path(self.databases.root, self.base_dir)
+
+    @property
+    def database_lock_settings(self) -> DatabaseLockSettings:
+        return DatabaseLockSettings(
+            poll_seconds=self.databases.lock_poll_seconds,
+            timeout_seconds=self.databases.lock_timeout_seconds,
+            heartbeat_seconds=self.databases.lock_heartbeat_seconds,
+            stale_seconds=self.databases.lock_stale_seconds,
+        )
+
+    @property
+    def busco_database_dir(self) -> Path:
+        if self.busco.download_path:
+            return expand_path(self.busco.download_path, self.base_dir)
+        return self.database_dir / "busco"
 
     @property
     def fasta_path(self) -> Path:

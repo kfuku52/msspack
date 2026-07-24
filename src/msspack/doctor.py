@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import gzip
 import importlib.util
+import os
 import platform
 from dataclasses import dataclass
+from pathlib import Path
 
 from .config import MSSPackConfig
 from .ddbj_tools import list_installed
@@ -22,6 +24,63 @@ class Check:
 
 def _importable(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
+
+
+def _directory_target_check(path: Path) -> tuple[bool, str]:
+    resolved = path.expanduser().resolve()
+    filesystem_root = Path(resolved.anchor)
+    if resolved in {filesystem_root, Path.home().resolve()}:
+        return False, f"unsafe broad directory target: {resolved}"
+    if resolved.exists():
+        if not resolved.is_dir():
+            return False, f"exists but is not a directory: {resolved}"
+        if not os.access(resolved, os.W_OK | os.X_OK):
+            return False, f"directory is not writable/searchable: {resolved}"
+        return True, str(resolved)
+
+    existing_parent = resolved.parent
+    while not existing_parent.exists() and existing_parent != existing_parent.parent:
+        existing_parent = existing_parent.parent
+    if not existing_parent.is_dir():
+        return False, f"parent is not a directory: {existing_parent}"
+    if not os.access(existing_parent, os.W_OK | os.X_OK):
+        return False, f"parent is not writable/searchable: {existing_parent}"
+    return True, f"{resolved} (will be created below writable {existing_parent})"
+
+
+def _cdd_prefix_complete(prefix: Path) -> bool:
+    if Path(str(prefix) + ".pal").is_file():
+        return bool(
+            tuple(prefix.parent.glob(prefix.name + ".*.aux"))
+            and tuple(prefix.parent.glob(prefix.name + ".*.rps"))
+        )
+    return all(
+        Path(str(prefix) + suffix).is_file()
+        for suffix in (".aux", ".freq", ".loo", ".rps")
+    )
+
+
+def _cdd_database_complete(path: Path) -> bool:
+    if not path.is_dir():
+        return _cdd_prefix_complete(path)
+    return any(
+        _cdd_prefix_complete(candidate.with_suffix(""))
+        for candidate in (*path.rglob("Cdd.pal"), *path.rglob("Cdd.aux"))
+    )
+
+
+def _cdd_data_complete(path: Path) -> bool:
+    return path.is_dir() and all(
+        (path / local_name).is_file() or (path / remote_name).is_file()
+        for local_name, remote_name in (
+            ("cddid.tbl", "cddid.tbl.gz"),
+            ("cdtrack.txt", "cdtrack.txt"),
+            ("family_superfamily_links", "family_superfamily_links"),
+            ("cddannot.dat", "cddannot.dat.gz"),
+            ("cddannot_generic.dat", "cddannot_generic.dat.gz"),
+            ("bitscore_specific.txt", "bitscore_specific.txt"),
+        )
+    )
 
 
 def _input_checks(config: MSSPackConfig) -> list[Check]:
@@ -235,6 +294,31 @@ def run_doctor(config: MSSPackConfig | None = None) -> list[Check]:
     )
 
     if config is not None:
+        try:
+            config.database_dir.relative_to(config.base_dir)
+        except ValueError:
+            database_mode = "shared"
+        else:
+            database_mode = "project"
+        database_ok, database_detail = _directory_target_check(config.database_dir)
+        checks.append(
+            Check(
+                "database root",
+                database_ok,
+                f"{database_detail} ({database_mode})",
+            )
+        )
+        busco_database_ok, busco_database_detail = _directory_target_check(
+            config.busco_database_dir
+        )
+        checks.append(
+            Check(
+                "BUSCO database root",
+                busco_database_ok,
+                busco_database_detail,
+                required=False,
+            )
+        )
         checks.extend(_input_checks(config))
         annotation = config.functional_annotation
         if annotation.enabled:
@@ -255,22 +339,21 @@ def run_doctor(config: MSSPackConfig | None = None) -> list[Check]:
                         str(resolved),
                     )
                 )
-            for label, configured_path in (
-                ("CDD database", annotation.cdd_database),
-                ("CDD data directory", annotation.cdd_data_dir),
-            ):
-                if not configured_path.strip():
-                    continue
-                resolved = expand_path(configured_path, config.base_dir)
-                exists = (
-                    (resolved / "Cdd.aux").is_file()
-                    if label == "CDD database" and resolved.is_dir()
-                    else resolved.exists()
-                )
+            if annotation.cdd_database.strip():
+                resolved = expand_path(annotation.cdd_database, config.base_dir)
                 checks.append(
                     Check(
-                        f"functional annotation {label}",
-                        exists,
+                        "functional annotation CDD database",
+                        _cdd_database_complete(resolved),
+                        str(resolved),
+                    )
+                )
+            if annotation.cdd_data_dir.strip():
+                resolved = expand_path(annotation.cdd_data_dir, config.base_dir)
+                checks.append(
+                    Check(
+                        "functional annotation CDD data directory",
+                        _cdd_data_complete(resolved),
                         str(resolved),
                     )
                 )

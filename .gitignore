@@ -10,5 +10,6 @@ __pycache__/
 build/
 dist/
 busco_downloads/
+msspack_db/
 *.egg-info/
 *.log

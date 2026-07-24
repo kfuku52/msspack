@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add `msspack run` for the complete BUSCO-to-report workflow, project-local
+  `msspack_db` storage with an absolute shared-root override, database readiness
+  reporting, and amalgkit-style heartbeat locks for concurrent downloads and index
+  builds.
+- Harden shared-database concurrency and recovery: validate lock timing relationships,
+  serialize online BUSCO auto-lineage selection, require complete lineage markers,
+  retain immutable content-addressed CDD versions, validate writable database roots,
+  protect broad `--force-compute` targets, and record failed all-stage runs explicitly.
 - Add `msspack demo` with a compact pseudonymized genome/GFF fixture, deliberately
   invalid submission metadata, deterministic pipeline-event coverage, and an optional
   offline local-reference DIAMOND configuration.

@@ -73,8 +73,7 @@ To try the complete core workflow without preparing input data:
 ```bash
 msspack demo --output msspack-demo
 cd msspack-demo
-msspack pack --config config.toml --no-validate
-msspack report --config config.toml
+msspack run --config config.toml --no-busco --no-validate
 ```
 
 The bundled demo uses a fictional organism, fictional sequence and locus IDs, and
@@ -95,20 +94,23 @@ MIT license. Review the
 before installing or using them. `msspack pack` does not download these tools
 implicitly; when validation is enabled, install them explicitly first.
 
-Check the completed config and runtime environment, then run the pipeline:
+Check the completed config and runtime environment, then run the complete workflow:
 
 ```bash
 msspack doctor --config my_submission.toml
-msspack pack --config my_submission.toml
+msspack run --config my_submission.toml
 ```
 
-BUSCO and the HTML report are optional:
+`run` prepares the input models, compares BUSCO results, performs functional
+annotation, builds and validates the MSS files, renders the Sankey and supporting
+figures, and writes the HTML report. Individual stages can still be run separately.
+For a lighter run:
 
 ```bash
-msspack busco --config my_submission.toml
-msspack report --config my_submission.toml
+msspack run --config my_submission.toml --no-busco --no-validate --no-report
 ```
 
+`--force-compute` rebuilds analysis outputs but retains downloaded databases.
 `report` creates or reuses the pipeline plots. Run
 `msspack plot --config my_submission.toml` only when the standalone Sankey and
 supporting figures are needed without an HTML report.
@@ -146,24 +148,20 @@ independent MSS feature keys. See the official
 
 ```mermaid
 flowchart LR
-  Init["msspack init"] --> Config["Edit TOML"]
-  Config --> Pack["msspack pack<br/>validates by default"]
-  Inputs["Genome FASTA + GFF3"] --> Pack
-  Install["msspack tools install"] --> Pack
-  Config -. preflight .-> Doctor["msspack doctor"]
-  Inputs -. preflight .-> Doctor
-  Pack --> Build["Final MSS files<br/>logs + metrics + manifest"]
-  Build -. recheck existing files .-> Validate["msspack validate"]
-  Install --> Validate
-  Build --> Busco["msspack busco<br/>(optional)"]
-  Build --> Plot["msspack plot<br/>(optional standalone)"]
-  Busco -. adds BUSCO summaries .-> Plot
-  Build --> Report["msspack report<br/>runs/reuses plots"]
-  Busco -. included when present .-> Report
+  Inputs["Genome FASTA + GFF3"] --> Run["msspack run"]
+  Config["TOML config"] --> Run
+  DB["Project or shared DB root"] --> Run
+  Run --> Prepare["Normalize models<br/>adjust CDS boundaries"]
+  Prepare --> Busco["BUSCO comparison"]
+  Busco --> Annotate["Functional annotation"]
+  Annotate --> MSS["MSS build + validation"]
+  MSS --> Plot["Sankey + supporting plots"]
+  Plot --> Report["HTML report"]
 ```
 
-`pack` runs Parser and transChecker unless `--no-validate` is specified. `busco`
-creates or reuses the required `pack` intermediates.
+The first BUSCO pass and the final pipeline reuse the same normalized, boundary-adjusted
+intermediates. `pack`, `busco`, `plot`, and `report` remain available for targeted
+reruns.
 
 | Command | Purpose |
 | --- | --- |
@@ -171,6 +169,8 @@ creates or reuses the required `pack` intermediates.
 | `msspack demo --output msspack-demo` | Write the bundled not-for-submission test dataset |
 | `msspack doctor --config my_submission.toml` | Check the config, inputs, and required tools |
 | `msspack tools install` | Download the reviewed DDBJ validation tools |
+| `msspack run --config my_submission.toml` | Run BUSCO, MSS generation and validation, plots, and report |
+| `msspack db status --config my_submission.toml` | Show the resolved database root and resource readiness |
 | `msspack pack --config my_submission.toml` | Build and validate the MSS files |
 | `msspack validate --ann FILE --fasta FILE` | Recheck existing MSS files |
 | `msspack busco --config my_submission.toml` | Compare BUSCO results for input and processed sequences |
@@ -233,6 +233,9 @@ the complete schema and defaults are in
 Common optional settings are:
 
 ```toml
+[databases]
+root = "msspack_db"
+
 [functional_annotation]
 enabled = true
 pfam_enabled = true
@@ -251,8 +254,20 @@ threads = 8
 - Functional annotation searches Swiss-Prot and optional taxon-scoped UniRef90, then
   uses Pfam and CDD as domain fallbacks. Set `uniref90_enabled = true` with an
   appropriate `uniref90_taxon_id`; downloading full UniRef90 is usually unnecessary.
-- Databases are downloaded once to the msspack cache and reused. Local database paths
-  can be supplied for offline runs.
+- Relative `databases.root` paths are resolved from the TOML file, so downloads go to
+  `msspack_db/` beside the config by default. To reuse databases across projects, set
+  an absolute path such as `root = "/data/shared/msspack_db"` or pass
+  `msspack run --db-dir /data/shared/msspack_db`.
+- Concurrent jobs coordinate each database download and index build with shared
+  heartbeat locks. A waiting job rechecks the completed resource instead of
+  downloading it again; abandoned locks are recovered automatically. CDD data and
+  extracted RPS-BLAST databases are stored as immutable content-addressed versions,
+  so jobs using different sources cannot replace one another's active files. Leave
+  `busco.download_path` empty to place BUSCO data under the same database root.
+- `msspack db status --config my_submission.toml` reports the active project/shared
+  root and each resource. `--force-compute` removes only analysis caches, not database
+  files, and refuses unsafe broad output roots that contain configured data or cache
+  directories. Local database paths can still be supplied for offline runs.
 - Taxonomy is inferred from `sample.scientific_name` and cross-checked against BUSCO,
   without assuming that the input is a plant.
 - Product names are standardized to DDBJ/NCBI/EMBL-EBI conventions before the family

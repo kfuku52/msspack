@@ -31,9 +31,10 @@ from .chart_primitives import (
 )
 from .config import BuscoConfig, MSSPackConfig, load_config
 from .config_validation import validate_busco_config
+from .database_lock import DatabaseLockSettings, acquire_database_lock, database_lock_path
 from .execution import module_origin, run_if_needed
 from .padding_tools import write_spliced_cds_fasta
-from .pipeline import PipelineOutputs, run_pipeline
+from .pipeline import PipelineOutputs, prepare_pipeline_for_busco, run_pipeline
 from .step_logging import count_fasta_records
 from .utils import (
     MSSPackError,
@@ -480,12 +481,59 @@ def _run_busco_once(
     lineage_dataset: str = "",
     use_auto_lineage: bool = False,
     selection_strategy: str = "",
+    auto_database_lock_path: Path | None = None,
+    lock_settings: DatabaseLockSettings | None = None,
 ) -> BuscoSummary:
     if busco.force:
         if summary_json_path.exists():
             summary_json_path.unlink()
         _remove_busco_output_dir(raw_dir)
     ensure_dir(raw_dir)
+
+    def execute() -> None:
+        if use_auto_lineage and auto_database_lock_path is not None:
+            if busco.offline:
+                _execute_and_capture_summary(
+                    busco=busco,
+                    label=label,
+                    input_fasta=input_fasta,
+                    summary_json_path=summary_json_path,
+                    raw_dir=raw_dir,
+                    log_path=log_path,
+                    lineage_dataset=lineage_dataset,
+                    use_auto_lineage=use_auto_lineage,
+                    selection_strategy=selection_strategy,
+                )
+                return
+            with acquire_database_lock(
+                auto_database_lock_path,
+                label=f"BUSCO auto-lineage {busco.auto_lineage_scope} download",
+                settings=lock_settings,
+            ):
+                _execute_and_capture_summary(
+                    busco=busco,
+                    label=label,
+                    input_fasta=input_fasta,
+                    summary_json_path=summary_json_path,
+                    raw_dir=raw_dir,
+                    log_path=log_path,
+                    lineage_dataset=lineage_dataset,
+                    use_auto_lineage=use_auto_lineage,
+                    selection_strategy=selection_strategy,
+                )
+            return
+        _execute_and_capture_summary(
+            busco=busco,
+            label=label,
+            input_fasta=input_fasta,
+            summary_json_path=summary_json_path,
+            raw_dir=raw_dir,
+            log_path=log_path,
+            lineage_dataset=lineage_dataset,
+            use_auto_lineage=use_auto_lineage,
+            selection_strategy=selection_strategy,
+        )
+
     ran = run_if_needed(
         outputs=[summary_json_path],
         dependencies=list(dependencies),
@@ -501,17 +549,7 @@ def _run_busco_once(
             "auto_lineage_scope": busco.auto_lineage_scope,
             "selection_strategy": selection_strategy,
         },
-        action=lambda: _execute_and_capture_summary(
-            busco=busco,
-            label=label,
-            input_fasta=input_fasta,
-            summary_json_path=summary_json_path,
-            raw_dir=raw_dir,
-            log_path=log_path,
-            lineage_dataset=lineage_dataset,
-            use_auto_lineage=use_auto_lineage,
-            selection_strategy=selection_strategy,
-        ),
+        action=execute,
     )
     if not ran and not summary_json_path.exists():
         raise MSSPackError(f"BUSCO summary JSON was not created: {summary_json_path}")
@@ -978,11 +1016,96 @@ def _resolved_busco_config(
         auto_lineage=busco.auto_lineage if auto_lineage is None else auto_lineage,
         auto_lineage_scope=auto_lineage_scope or busco.auto_lineage_scope,
         threads=threads if threads is not None else busco.threads,
-        download_path=busco.download_path,
+        download_path=str(config.busco_database_dir),
         offline=busco.offline,
         force=force or busco.force,
         opt_out_run_stats=busco.opt_out_run_stats,
     )
+
+
+def _busco_lineage_ready(download_path: Path, lineage_dataset: str) -> bool:
+    lineage_dir = download_path / "lineages" / Path(lineage_dataset).name
+    return lineage_dir.is_dir() and (lineage_dir / "dataset.cfg").is_file()
+
+
+def _has_busco_placement_files(download_path: Path, prefix: str) -> bool:
+    placement_dir = download_path / "placement_files"
+    if not placement_dir.is_dir():
+        return False
+    available = [path.name for path in placement_dir.iterdir() if path.is_file()]
+    required_prefixes = (
+        f"supermatrix.aln.{prefix}_odb",
+        f"tree.{prefix}_odb",
+        f"mapping_taxid-lineage.{prefix}_odb",
+        f"mapping_taxids-busco_dataset_name.{prefix}_odb",
+        f"list_of_reference_markers.{prefix}_odb",
+    )
+    return all(
+        any(name.startswith(expected) for name in available)
+        for expected in required_prefixes
+    )
+
+
+def _busco_auto_resources_ready(download_path: Path, scope: str) -> bool:
+    lineages_dir = download_path / "lineages"
+
+    def has_lineage(prefix: str) -> bool:
+        return any(
+            path.is_dir() and (path / "dataset.cfg").is_file()
+            for path in lineages_dir.glob(f"{prefix}_odb*")
+        )
+
+    euk_ready = has_lineage("eukaryota") and _has_busco_placement_files(
+        download_path,
+        "eukaryota",
+    )
+    prok_ready = has_lineage("bacteria") and has_lineage("archaea")
+    if scope == "euk":
+        return euk_ready
+    if scope == "prok":
+        return prok_ready
+    if scope == "all":
+        return euk_ready and prok_ready
+    return False
+
+
+def _prepare_busco_lineage_database(
+    *,
+    config: MSSPackConfig,
+    busco: BuscoConfig,
+) -> None:
+    if busco.offline or not busco.lineage_dataset:
+        return
+    download_path = Path(busco.download_path)
+    if _busco_lineage_ready(download_path, busco.lineage_dataset):
+        return
+    ensure_dir(download_path)
+    lock_path = database_lock_path(
+        download_path,
+        f"busco-{Path(busco.lineage_dataset).name}",
+    )
+    with acquire_database_lock(
+        lock_path,
+        label=f"BUSCO {busco.lineage_dataset} download",
+        settings=config.database_lock_settings,
+    ):
+        if _busco_lineage_ready(download_path, busco.lineage_dataset):
+            return
+        run_command(
+            [
+                busco.command,
+                "--download",
+                busco.lineage_dataset,
+                "--download_path",
+                str(download_path),
+            ],
+            log_path=download_path / "logs" / f"{Path(busco.lineage_dataset).name}.log",
+            env=_busco_env(busco.command),
+        )
+        if not _busco_lineage_ready(download_path, busco.lineage_dataset):
+            raise MSSPackError(
+                f"BUSCO did not prepare lineage {busco.lineage_dataset} under {download_path}"
+            )
 
 
 def _extract_cds_fastas(
@@ -1204,6 +1327,7 @@ def run_busco_comparison(
     auto_lineage_scope: str = "",
     run_genome: bool | None = None,
     run_cds: bool | None = None,
+    prepare_only: bool = False,
 ) -> BuscoArtifacts:
     config = load_config(config_file)
     busco = _resolved_busco_config(
@@ -1217,9 +1341,14 @@ def run_busco_comparison(
         run_cds=run_cds,
     )
     validate_busco_config(busco)
+    _prepare_busco_lineage_database(config=config, busco=busco)
     if clean_cache:
         cleanup_busco_cache()
-    outputs = run_pipeline(config_file, validate=False)
+    outputs = (
+        prepare_pipeline_for_busco(config_file)
+        if prepare_only
+        else run_pipeline(config_file, validate=False)
+    )
     artifacts = _build_busco_artifacts(outputs, busco)
     input_fasta, processed_fasta = _stage_fastas(outputs)
     input_gff, processed_gff = _stage_gffs(outputs)
@@ -1230,6 +1359,10 @@ def run_busco_comparison(
     busco_dependencies = [config_path, busco_module]
     if busco_binary:
         busco_dependencies.append(Path(busco_binary).resolve())
+    auto_lineage_lock_path = database_lock_path(
+        config.busco_database_dir,
+        f"busco-auto-lineage-{busco.auto_lineage_scope}",
+    )
 
     shared_lineage = busco.lineage_dataset
     if artifacts.genome is not None:
@@ -1252,6 +1385,8 @@ def run_busco_comparison(
             selection_strategy="configured-lineage"
             if busco.lineage_dataset
             else ("auto-lineage" if busco.auto_lineage else "configured-lineage"),
+            auto_database_lock_path=auto_lineage_lock_path,
+            lock_settings=config.database_lock_settings,
         )
         shared_lineage = busco.lineage_dataset or genome_input_summary.lineage_dataset
         genome_processed_summary = _run_busco_once(
@@ -1306,6 +1441,8 @@ def run_busco_comparison(
             selection_strategy="configured-lineage"
             if shared_lineage
             else ("auto-lineage" if busco.auto_lineage else "configured-lineage"),
+            auto_database_lock_path=auto_lineage_lock_path,
+            lock_settings=config.database_lock_settings,
         )
         shared_lineage = shared_lineage or cds_input_summary.lineage_dataset
         cds_processed_summary = _run_busco_once(
@@ -1350,7 +1487,7 @@ def run_busco_comparison(
             output_path=taxonomy_crosscheck_path,
             log_path=artifacts.root / "taxonomy-crosscheck.log",
             metrics_path=artifacts.root / "taxonomy-crosscheck.metrics.json",
-            cache_dir=config.cache_dir / "functional-annotation" / "taxonomy",
+            cache_dir=config.database_dir / "taxonomy",
             config=config.functional_annotation.taxonomy,
         )
     _update_busco_manifest(

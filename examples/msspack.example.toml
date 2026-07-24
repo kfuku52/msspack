@@ -68,9 +68,19 @@ replace_product_patterns = [
   "Cullin-4",
 ]
 
+[databases]
+# Relative paths are resolved from this TOML file. Use an absolute shared path
+# to reuse the same databases safely across projects and cluster jobs.
+root = "msspack_db"
+# Lock intervals must be finite and positive; stale must be greater than heartbeat.
+lock_poll_seconds = 5
+lock_timeout_seconds = 86400
+lock_heartbeat_seconds = 60
+lock_stale_seconds = 900
+
 [functional_annotation]
 # Opt-in AHRD-like product assignment. Databases are downloaded once into
-# tools.cache_dir unless local database paths are supplied.
+# databases.root unless local database paths are supplied.
 enabled = false
 diamond_command = "diamond"
 hmmscan_command = "hmmscan"
@@ -156,6 +166,7 @@ lineage_dataset = ""
 auto_lineage = true
 auto_lineage_scope = "all"
 threads = 8
+# Leave empty to use databases.root/busco.
 download_path = ""
 offline = false
 force = false

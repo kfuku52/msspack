@@ -28,6 +28,11 @@ from .annotation_taxonomy import (
     subject_taxonomy_annotations,
 )
 from .config_models import FunctionalAnnotationConfig
+from .database_lock import (
+    DatabaseLockSettings,
+    acquire_database_lock,
+    database_lock_path,
+)
 from .fasta import iter_fasta, reverse_complement, write_fasta_record
 from .gff import GFFRecord, child_ids, read_gff_document
 from .product_names import ProductNameContext, standardize_product_name
@@ -39,6 +44,7 @@ from .utils import (
     copy_or_decompress,
     ensure_dir,
     expand_path,
+    link_or_copy,
     run_command,
     write_text,
 )
@@ -353,7 +359,7 @@ def _copy_binary(source: Path, destination: Path) -> None:
         shutil.copyfileobj(input_handle, output_handle, length=1024 * 1024)
 
 
-def _materialize_database_file(
+def _materialize_database_file_unlocked(
     *,
     local_value: str,
     url: str,
@@ -455,6 +461,54 @@ def _materialize_database_file(
         + "\n",
     )
     return output_path, origin, materialized_sha256, _read_json(provenance_path)
+
+
+def _materialize_database_file(
+    *,
+    local_value: str,
+    url: str,
+    base_dir: Path,
+    cache_dir: Path,
+    database_root: Path | None = None,
+    stem: str,
+    expected_suffix: str,
+    preserve_compression: bool = False,
+    content_addressed: bool = False,
+    lock_settings: DatabaseLockSettings | None = None,
+) -> tuple[Path, str, str, dict[str, object]]:
+    resolved_database_root = database_root or cache_dir
+    lock_path = database_lock_path(resolved_database_root, f"download-{stem}")
+    with acquire_database_lock(
+        lock_path,
+        label=f"{stem} database preparation",
+        settings=lock_settings,
+    ):
+        path, origin, digest, provenance = _materialize_database_file_unlocked(
+            local_value=local_value,
+            url=url,
+            base_dir=base_dir,
+            cache_dir=cache_dir,
+            stem=stem,
+            expected_suffix=expected_suffix,
+            preserve_compression=preserve_compression,
+        )
+        if not content_addressed:
+            return path, origin, digest, provenance
+        suffix = "".join(path.suffixes) or expected_suffix
+        object_path = cache_dir / "objects" / f"{digest}{suffix}"
+        if not object_path.is_file():
+            _copy_binary(path, object_path)
+        if object_path.stat().st_size == 0:
+            raise MSSPackError(f"Content-addressed database file is empty: {object_path}")
+        return (
+            object_path,
+            origin,
+            digest,
+            {
+                **provenance,
+                "content_object_path": str(object_path),
+            },
+        )
 
 
 def _build_transcript_models(gff_path: Path) -> list[TranscriptModel]:
@@ -621,43 +675,71 @@ def _prepare_diamond_database(
     sha256: str,
     source_provenance: dict[str, object],
     cache_dir: Path,
+    database_root: Path,
     command: str,
+    lock_settings: DatabaseLockSettings | None = None,
 ) -> DiamondDatabase:
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "database"
-    database_dir = ensure_dir(cache_dir / safe_name)
+    legacy_dir = cache_dir / safe_name
+    legacy_database_path = legacy_dir / f"{safe_name}.dmnd"
+    legacy_provenance = _read_json(legacy_dir / "database.json")
+    if (
+        legacy_database_path.is_file()
+        and legacy_provenance.get("fasta_sha256") == sha256
+    ):
+        return DiamondDatabase(
+            name,
+            fasta_path,
+            legacy_database_path,
+            weight,
+            origin,
+            sha256,
+            str(source_provenance.get("release", "")),
+            str(source_provenance.get("verification_algorithm", "")),
+            str(source_provenance.get("verification_digest", "")),
+        )
+    version = sha256[:16]
+    database_dir = ensure_dir(cache_dir / safe_name / version)
     database_path = database_dir / f"{safe_name}.dmnd"
     provenance_path = database_dir / "database.json"
-    previous = _read_json(provenance_path)
-    if previous.get("fasta_sha256") != sha256 or not database_path.is_file():
-        temporary_base = database_dir / f".{safe_name}.{os.getpid()}"
-        run_command(
-            [command, "makedb", "--in", str(fasta_path), "--db", str(temporary_base)],
-            log_path=database_dir / "makedb.log",
-        )
-        built_path = Path(str(temporary_base) + ".dmnd")
-        if not built_path.is_file():
-            raise MSSPackError(f"DIAMOND did not create its database: {built_path}")
-        os.replace(built_path, database_path)
-        write_text(
-            provenance_path,
-            json.dumps(
-                {
-                    "database": name,
-                    "origin": origin,
-                    "fasta": str(fasta_path),
-                    "fasta_sha256": sha256,
-                    "release": source_provenance.get("release", ""),
-                    "verification_algorithm": source_provenance.get(
-                        "verification_algorithm", ""
-                    ),
-                    "verification_digest": source_provenance.get("verification_digest", ""),
-                    "diamond_command": command,
-                },
-                indent=2,
-                sort_keys=True,
+    with acquire_database_lock(
+        database_lock_path(database_root, f"diamond-{safe_name}-{version}"),
+        label=f"{name} DIAMOND database build",
+        settings=lock_settings,
+    ):
+        previous = _read_json(provenance_path)
+        if previous.get("fasta_sha256") != sha256 or not database_path.is_file():
+            temporary_base = database_dir / f".{safe_name}.{os.getpid()}"
+            run_command(
+                [command, "makedb", "--in", str(fasta_path), "--db", str(temporary_base)],
+                log_path=database_dir / "makedb.log",
             )
-            + "\n",
-        )
+            built_path = Path(str(temporary_base) + ".dmnd")
+            if not built_path.is_file():
+                raise MSSPackError(f"DIAMOND did not create its database: {built_path}")
+            os.replace(built_path, database_path)
+            write_text(
+                provenance_path,
+                json.dumps(
+                    {
+                        "database": name,
+                        "origin": origin,
+                        "fasta": str(fasta_path),
+                        "fasta_sha256": sha256,
+                        "release": source_provenance.get("release", ""),
+                        "verification_algorithm": source_provenance.get(
+                            "verification_algorithm", ""
+                        ),
+                        "verification_digest": source_provenance.get(
+                            "verification_digest", ""
+                        ),
+                        "diamond_command": command,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+            )
     return DiamondDatabase(
         name,
         fasta_path,
@@ -677,6 +759,7 @@ def _diamond_sources(
     base_dir: Path,
     cache_dir: Path,
     source_group: str,
+    lock_settings: DatabaseLockSettings | None = None,
 ) -> list[DiamondDatabase]:
     downloads_dir = ensure_dir(cache_dir / "downloads")
     database_cache = ensure_dir(cache_dir / "diamond")
@@ -687,8 +770,11 @@ def _diamond_sources(
             url=config.swissprot_url,
             base_dir=base_dir,
             cache_dir=downloads_dir / "swissprot",
+            database_root=cache_dir,
             stem="uniprot_sprot",
             expected_suffix=".fasta",
+            content_addressed=True,
+            lock_settings=lock_settings,
         )
         sources.append(
             _prepare_diamond_database(
@@ -699,7 +785,9 @@ def _diamond_sources(
                 sha256=digest,
                 source_provenance=source_provenance,
                 cache_dir=database_cache,
+                database_root=cache_dir,
                 command=config.diamond_command,
+                lock_settings=lock_settings,
             )
         )
     if source_group == "primary" and config.reference_proteins.strip():
@@ -708,8 +796,11 @@ def _diamond_sources(
             url="",
             base_dir=base_dir,
             cache_dir=downloads_dir / "reference",
+            database_root=cache_dir,
             stem="reference_proteins",
             expected_suffix=".fasta",
+            content_addressed=True,
+            lock_settings=lock_settings,
         )
         sources.append(
             _prepare_diamond_database(
@@ -720,7 +811,9 @@ def _diamond_sources(
                 sha256=digest,
                 source_provenance=source_provenance,
                 cache_dir=database_cache,
+                database_root=cache_dir,
                 command=config.diamond_command,
+                lock_settings=lock_settings,
             )
         )
     if source_group == "uniref90" and config.uniref90_enabled:
@@ -732,6 +825,7 @@ def _diamond_sources(
             url=_uniref90_download_url(config),
             base_dir=base_dir,
             cache_dir=downloads_dir / "uniref90",
+            database_root=cache_dir,
             stem=(
                 f"uniref90-taxon-{config.uniref90_taxon_id}"
                 if config.uniref90_taxon_id > 0
@@ -739,6 +833,8 @@ def _diamond_sources(
             ),
             expected_suffix=".fasta.gz" if preserve_compression else ".fasta",
             preserve_compression=preserve_compression,
+            content_addressed=True,
+            lock_settings=lock_settings,
         )
         sources.append(
             _prepare_diamond_database(
@@ -749,7 +845,9 @@ def _diamond_sources(
                 sha256=digest,
                 source_provenance=source_provenance,
                 cache_dir=database_cache,
+                database_root=cache_dir,
                 command=config.diamond_command,
+                lock_settings=lock_settings,
             )
         )
     if source_group not in {"primary", "uniref90"}:
@@ -809,6 +907,7 @@ def run_diamond_annotation_search(
     config: FunctionalAnnotationConfig,
     base_dir: Path,
     cache_dir: Path,
+    lock_settings: DatabaseLockSettings | None = None,
     taxonomy_context_path: Path | None = None,
     taxonomy_cache_dir: Path | None = None,
     source_group: str = "primary",
@@ -833,6 +932,7 @@ def run_diamond_annotation_search(
         base_dir=base_dir,
         cache_dir=cache_dir,
         source_group=source_group,
+        lock_settings=lock_settings,
     )
     prior_assignments = _combined_diamond_assignments(
         inputs=prior_similarity_inputs,
@@ -1087,6 +1187,7 @@ def _prepare_pfam_database(
     config: FunctionalAnnotationConfig,
     base_dir: Path,
     cache_dir: Path,
+    lock_settings: DatabaseLockSettings | None = None,
 ) -> tuple[Path, Path, dict[str, object]]:
     pfam_dir = ensure_dir(cache_dir / "pfam")
     hmm_path, origin, digest, source_provenance = _materialize_database_file(
@@ -1094,46 +1195,56 @@ def _prepare_pfam_database(
         url=config.pfam_url,
         base_dir=base_dir,
         cache_dir=pfam_dir,
+        database_root=cache_dir,
         stem="Pfam-A",
         expected_suffix=".hmm",
+        content_addressed=True,
+        lock_settings=lock_settings,
     )
-    metadata_path = pfam_dir / "Pfam-A.metadata.tsv"
-    prepared_path = pfam_dir / "Pfam-A.prepared.json"
-    previous = _read_json(prepared_path)
+    metadata_path = hmm_path.with_name(f"{hmm_path.stem}.metadata.tsv")
+    prepared_path = hmm_path.with_name(f"{hmm_path.stem}.prepared.json")
     pressed_paths = [Path(str(hmm_path) + suffix) for suffix in (".h3f", ".h3i", ".h3m", ".h3p")]
-    if previous.get("hmm_sha256") != digest or not all(path.is_file() for path in pressed_paths):
-        for path in pressed_paths:
-            path.unlink(missing_ok=True)
-        run_command(
-            [config.hmmpress_command, "-f", str(hmm_path)],
-            log_path=pfam_dir / "hmmpress.log",
-        )
-        if not all(path.is_file() for path in pressed_paths):
-            raise MSSPackError("hmmpress did not create all four Pfam index files")
-        metadata_count = _parse_pfam_hmm_metadata(hmm_path, metadata_path)
-        write_text(
-            prepared_path,
-            json.dumps(
-                {
-                    "origin": origin,
-                    "hmm_sha256": digest,
-                    "metadata_records": metadata_count,
-                    "hmmpress_command": config.hmmpress_command,
-                },
-                indent=2,
-                sort_keys=True,
+    with acquire_database_lock(
+        database_lock_path(cache_dir, f"pfam-index-{digest[:16]}"),
+        label="Pfam hmmpress build",
+        settings=lock_settings,
+    ):
+        previous = _read_json(prepared_path)
+        if previous.get("hmm_sha256") != digest or not all(
+            path.is_file() for path in pressed_paths
+        ):
+            for path in pressed_paths:
+                path.unlink(missing_ok=True)
+            run_command(
+                [config.hmmpress_command, "-f", str(hmm_path)],
+                log_path=hmm_path.with_name(f"{hmm_path.stem}.hmmpress.log"),
             )
-            + "\n",
-        )
-    elif not metadata_path.is_file():
-        metadata_count = _parse_pfam_hmm_metadata(hmm_path, metadata_path)
-    else:
-        previous_count = previous.get("metadata_records", 0)
-        metadata_count = (
-            previous_count
-            if isinstance(previous_count, int) and not isinstance(previous_count, bool)
-            else 0
-        )
+            if not all(path.is_file() for path in pressed_paths):
+                raise MSSPackError("hmmpress did not create all four Pfam index files")
+            metadata_count = _parse_pfam_hmm_metadata(hmm_path, metadata_path)
+            write_text(
+                prepared_path,
+                json.dumps(
+                    {
+                        "origin": origin,
+                        "hmm_sha256": digest,
+                        "metadata_records": metadata_count,
+                        "hmmpress_command": config.hmmpress_command,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+            )
+        elif not metadata_path.is_file():
+            metadata_count = _parse_pfam_hmm_metadata(hmm_path, metadata_path)
+        else:
+            previous_count = previous.get("metadata_records", 0)
+            metadata_count = (
+                previous_count
+                if isinstance(previous_count, int) and not isinstance(previous_count, bool)
+                else 0
+            )
     return (
         hmm_path,
         metadata_path,
@@ -1195,6 +1306,7 @@ def run_pfam_domain_search(
     config: FunctionalAnnotationConfig,
     base_dir: Path,
     cache_dir: Path,
+    lock_settings: DatabaseLockSettings | None = None,
     diamond_hits_path: Path | None = None,
     diamond_metadata_path: Path | None = None,
     additional_similarity_inputs: Sequence[tuple[Path, Path]] = (),
@@ -1234,6 +1346,7 @@ def run_pfam_domain_search(
         config=config,
         base_dir=base_dir,
         cache_dir=cache_dir,
+        lock_settings=lock_settings,
     )
     copy_or_decompress(cached_metadata_path, metadata_path)
     with tempfile.TemporaryDirectory(prefix="msspack-hmmscan-") as temporary_dir:
@@ -1401,13 +1514,13 @@ def _safe_extract_tar(archive_path: Path, destination: Path) -> None:
                 raise MSSPackError(f"CDD archive contains an unsafe path: {member.name}")
             if member.issym() or member.islnk():
                 raise MSSPackError(f"CDD archive contains an unsupported link: {member.name}")
-        archive.extractall(destination, members=members)  # noqa: S202
+        archive.extractall(destination, members=members, filter="data")  # noqa: S202
 
 
 def _find_cdd_database_prefix(directory: Path) -> Path:
     candidates = sorted(directory.rglob("Cdd.pal"))
-    if candidates:
-        prefix = candidates[0].with_suffix("")
+    for candidate in candidates:
+        prefix = candidate.with_suffix("")
         shard_aux = sorted(prefix.parent.glob(prefix.name + ".*.aux"))
         shard_rps = sorted(prefix.parent.glob(prefix.name + ".*.rps"))
         if shard_aux and shard_rps:
@@ -1427,17 +1540,33 @@ def _find_cdd_database_prefix(directory: Path) -> Path:
     return prefix
 
 
+def _cdd_database_prefix_complete(prefix: Path) -> bool:
+    if Path(str(prefix) + ".pal").is_file():
+        return bool(
+            tuple(prefix.parent.glob(prefix.name + ".*.aux"))
+            and tuple(prefix.parent.glob(prefix.name + ".*.rps"))
+        )
+    return all(
+        Path(str(prefix) + suffix).is_file()
+        for suffix in (".aux", ".freq", ".loo", ".rps")
+    )
+
+
 def _prepare_cdd_data_files(
     *,
     config: FunctionalAnnotationConfig,
     base_dir: Path,
     cache_dir: Path,
+    database_root: Path,
+    lock_settings: DatabaseLockSettings | None = None,
 ) -> tuple[Path, dict[str, object]]:
-    output_dir = ensure_dir(cache_dir / "data")
+    staging_dir = ensure_dir(cache_dir / "data")
+    versions_dir = ensure_dir(cache_dir / "data-versions")
     local_dir = (
         expand_path(config.cdd_data_dir, base_dir) if config.cdd_data_dir.strip() else None
     )
     provenance: dict[str, object] = {}
+    materialized: list[tuple[str, Path, str]] = []
     for remote_name, local_name, stem, suffix in _CDD_DATA_FILE_SPECS:
         local_value = ""
         if local_dir is not None:
@@ -1450,15 +1579,83 @@ def _prepare_cdd_data_files(
             local_value=local_value,
             url=url,
             base_dir=base_dir,
-            cache_dir=output_dir,
+            cache_dir=staging_dir,
+            database_root=database_root,
             stem=stem,
             expected_suffix=suffix,
+            content_addressed=True,
+            lock_settings=lock_settings,
         )
-        expected_path = output_dir / local_name
-        if path != expected_path:
-            os.replace(path, expected_path)
         provenance[local_name] = {"origin": origin, "sha256": digest}
-    return output_dir, provenance
+        materialized.append((local_name, path, digest))
+
+    version_payload = [
+        {"name": local_name, "sha256": digest}
+        for local_name, _path, digest in materialized
+    ]
+    version_digest = hashlib.sha256(
+        json.dumps(version_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    version_dir = versions_dir / version_digest
+    required_names = {local_name for _remote, local_name, _stem, _suffix in _CDD_DATA_FILE_SPECS}
+    with acquire_database_lock(
+        database_lock_path(database_root, f"cdd-data-version-{version_digest[:16]}"),
+        label=f"CDD data version {version_digest[:16]}",
+        settings=lock_settings,
+    ):
+        version_ready = (
+            version_dir.is_dir()
+            and (version_dir / "provenance.json").is_file()
+            and all((version_dir / name).is_file() for name in required_names)
+        )
+        if not version_ready:
+            temporary_dir = Path(
+                tempfile.mkdtemp(prefix=f".{version_digest}.", dir=versions_dir)
+            )
+            try:
+                for local_name, path, _digest in materialized:
+                    link_or_copy(path, temporary_dir / local_name)
+                write_text(
+                    temporary_dir / "provenance.json",
+                    json.dumps(
+                        {
+                            "version_sha256": version_digest,
+                            "files": provenance,
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n",
+                )
+                if version_dir.exists():
+                    shutil.rmtree(version_dir)
+                os.replace(temporary_dir, version_dir)
+            finally:
+                if temporary_dir.exists():
+                    shutil.rmtree(temporary_dir)
+    return version_dir, {
+        "version_sha256": version_digest,
+        "version_path": str(version_dir),
+        "files": provenance,
+    }
+
+
+def _prepared_cdd_version(
+    manifest: dict[str, object],
+    versions_dir: Path,
+) -> tuple[Path, str] | None:
+    digest = manifest.get("archive_sha256")
+    if (
+        not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+    ):
+        return None
+    version_dir = versions_dir / digest
+    try:
+        prefix = _find_cdd_database_prefix(version_dir)
+    except MSSPackError:
+        return None
+    return prefix, digest
 
 
 def _prepare_cdd_database(
@@ -1466,75 +1663,116 @@ def _prepare_cdd_database(
     config: FunctionalAnnotationConfig,
     base_dir: Path,
     cache_dir: Path,
+    lock_settings: DatabaseLockSettings | None = None,
 ) -> tuple[Path, Path, dict[str, object]]:
     cdd_dir = ensure_dir(cache_dir / "cdd")
     data_dir, data_provenance = _prepare_cdd_data_files(
         config=config,
         base_dir=base_dir,
         cache_dir=cdd_dir,
+        database_root=cache_dir,
+        lock_settings=lock_settings,
     )
     if config.cdd_database.strip():
         configured = expand_path(config.cdd_database, base_dir)
-        prefix = configured / "Cdd" if configured.is_dir() else configured
-        _find_cdd_database_prefix(prefix.parent)
+        if configured.is_dir():
+            prefix = _find_cdd_database_prefix(configured)
+        else:
+            prefix = configured
+            if not _cdd_database_prefix_complete(prefix):
+                raise MSSPackError(f"CDD database prefix is incomplete: {prefix}")
         return prefix, data_dir, {
             "origin": str(configured),
             "database_prefix": str(prefix),
             "data_files": data_provenance,
         }
 
-    database_dir = ensure_dir(cdd_dir / "db")
-    prepared_path = cdd_dir / "database.json"
-    previous = _read_json(prepared_path)
-    try:
-        prefix = _find_cdd_database_prefix(database_dir)
-    except MSSPackError:
-        prefix = database_dir / "Cdd"
-    database_available = Path(str(prefix) + ".pal").is_file() or Path(
-        str(prefix) + ".aux"
-    ).is_file()
-    needs_download = not database_available or bool(
-        previous and previous.get("origin") != config.cdd_url
-    )
-    if needs_download:
-        archive_path = cdd_dir / "Cdd_LE.download.tar.gz"
-        _download(config.cdd_url, archive_path)
-        archive_sha256 = _sha256(archive_path)
-        _safe_extract_tar(archive_path, database_dir)
-        archive_path.unlink(missing_ok=True)
-        prefix = _find_cdd_database_prefix(database_dir)
-        write_text(
-            prepared_path,
-            json.dumps(
-                {
-                    "origin": config.cdd_url,
-                    "archive_sha256": archive_sha256,
-                    "database_prefix": str(prefix),
-                    "data_files": data_provenance,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
+    legacy_database_dir = cdd_dir / "db"
+    legacy_manifest_path = cdd_dir / "database.json"
+    legacy_manifest = _read_json(legacy_manifest_path)
+    if legacy_manifest.get("origin") == config.cdd_url:
+        try:
+            legacy_prefix = _find_cdd_database_prefix(legacy_database_dir)
+        except MSSPackError:
+            pass
+        else:
+            return legacy_prefix, data_dir, {
+                **legacy_manifest,
+                "database_prefix": str(legacy_prefix),
+                "data_files": data_provenance,
+                "cache_layout": "legacy-read-only",
+            }
+
+    versions_dir = ensure_dir(cdd_dir / "database-versions")
+    sources_dir = ensure_dir(cdd_dir / "sources")
+    source_key = hashlib.sha256(config.cdd_url.encode("utf-8")).hexdigest()
+    source_manifest_path = sources_dir / f"{source_key}.json"
+    with acquire_database_lock(
+        database_lock_path(cache_dir, f"cdd-source-{source_key[:16]}"),
+        label=f"CDD source {source_key[:16]}",
+        settings=lock_settings,
+    ):
+        previous = _read_json(source_manifest_path)
+        prepared = (
+            _prepared_cdd_version(previous, versions_dir)
+            if previous.get("origin") == config.cdd_url
+            else None
         )
-    elif not previous:
-        write_text(
-            prepared_path,
-            json.dumps(
-                {
-                    "origin": config.cdd_url,
-                    "archive_sha256": "",
-                    "database_prefix": str(prefix),
-                    "data_files": data_provenance,
-                    "recovered_existing_extraction": True,
-                },
-                indent=2,
-                sort_keys=True,
+        if prepared is None:
+            archive_path = sources_dir / f".{source_key}.{os.getpid()}.tar.gz"
+            _download(config.cdd_url, archive_path)
+            archive_sha256 = _sha256(archive_path)
+            try:
+                version_dir = versions_dir / archive_sha256
+                with acquire_database_lock(
+                    database_lock_path(
+                        cache_dir,
+                        f"cdd-database-version-{archive_sha256[:16]}",
+                    ),
+                    label=f"CDD database version {archive_sha256[:16]}",
+                    settings=lock_settings,
+                ):
+                    try:
+                        prefix = _find_cdd_database_prefix(version_dir)
+                    except MSSPackError:
+                        temporary_dir = Path(
+                            tempfile.mkdtemp(
+                                prefix=f".{archive_sha256}.",
+                                dir=versions_dir,
+                            )
+                        )
+                        try:
+                            _safe_extract_tar(archive_path, temporary_dir)
+                            temporary_prefix = _find_cdd_database_prefix(temporary_dir)
+                            relative_prefix = temporary_prefix.relative_to(temporary_dir)
+                            if version_dir.exists():
+                                shutil.rmtree(version_dir)
+                            os.replace(temporary_dir, version_dir)
+                            prefix = version_dir / relative_prefix
+                        finally:
+                            if temporary_dir.exists():
+                                shutil.rmtree(temporary_dir)
+            finally:
+                archive_path.unlink(missing_ok=True)
+            write_text(
+                source_manifest_path,
+                json.dumps(
+                    {
+                        "origin": config.cdd_url,
+                        "archive_sha256": archive_sha256,
+                        "database_prefix": str(prefix),
+                        "cache_layout": "content-addressed",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
             )
-            + "\n",
-        )
+        else:
+            prefix, _archive_sha256 = prepared
     return prefix, data_dir, {
-        **_read_json(prepared_path),
+        **_read_json(source_manifest_path),
+        "database_prefix": str(prefix),
         "data_files": data_provenance,
     }
 
@@ -1685,6 +1923,7 @@ def run_cdd_domain_search(
     config: FunctionalAnnotationConfig,
     base_dir: Path,
     cache_dir: Path,
+    lock_settings: DatabaseLockSettings | None = None,
     similarity_inputs: Sequence[tuple[Path, Path]] = (),
 ) -> None:
     started_at = datetime.now()
@@ -1722,6 +1961,7 @@ def run_cdd_domain_search(
         config=config,
         base_dir=base_dir,
         cache_dir=cache_dir,
+        lock_settings=lock_settings,
     )
     with tempfile.TemporaryDirectory(prefix="msspack-rpsblast-") as temporary_dir:
         temporary_root = Path(temporary_dir)

@@ -1,14 +1,19 @@
 import json
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
+from unittest.mock import patch
 
 from msspack.busco import (
     BuscoArtifacts,
     BuscoComparisonArtifacts,
     _build_busco_command,
+    _busco_auto_resources_ready,
+    _busco_lineage_ready,
     _discover_short_summary,
     _publish_busco_workspace,
+    _run_busco_once,
     _update_busco_manifest,
     _write_comparison_pdf,
     _write_comparison_svg,
@@ -19,9 +24,95 @@ from msspack.busco import (
     summarize_busco_artifacts,
 )
 from msspack.config import BuscoConfig
+from msspack.database_lock import DatabaseLockSettings
 
 
 class BuscoTests(unittest.TestCase):
+    def test_partial_lineage_without_dataset_config_is_not_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            lineage = root / "lineages" / "eukaryota_odb12"
+            lineage.mkdir(parents=True)
+            (lineage / "partial.tmp").write_text("incomplete\n", encoding="utf-8")
+
+            self.assertFalse(_busco_lineage_ready(root, "eukaryota_odb12"))
+            (lineage / "dataset.cfg").write_text("name=eukaryota\n", encoding="utf-8")
+            self.assertTrue(_busco_lineage_ready(root, "eukaryota_odb12"))
+
+    def test_online_auto_lineage_always_uses_shared_database_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            input_fasta = root / "input.fa"
+            input_fasta.write_text(">query\nMA\n", encoding="utf-8")
+            expected_summary = object()
+
+            def run_action(**kwargs: object) -> bool:
+                action = kwargs["action"]
+                assert callable(action)
+                action()
+                return True
+
+            with patch(
+                "msspack.busco._busco_auto_resources_ready",
+                return_value=True,
+            ), patch(
+                "msspack.busco.acquire_database_lock",
+                return_value=nullcontext(),
+            ) as lock_mock, patch(
+                "msspack.busco._execute_and_capture_summary",
+            ) as execute_mock, patch(
+                "msspack.busco.run_if_needed",
+                side_effect=run_action,
+            ), patch(
+                "msspack.busco._read_summary_json",
+                return_value=expected_summary,
+            ):
+                observed = _run_busco_once(
+                    busco=BuscoConfig(
+                        command="busco",
+                        lineage_dataset="",
+                        auto_lineage=True,
+                        auto_lineage_scope="euk",
+                        download_path=str(root / "database"),
+                        offline=False,
+                    ),
+                    label="input",
+                    input_fasta=input_fasta,
+                    summary_json_path=root / "summary.json",
+                    raw_dir=root / "raw",
+                    log_path=root / "busco.log",
+                    dependencies=[input_fasta],
+                    use_auto_lineage=True,
+                    auto_database_lock_path=root / "database/locks/auto.lock",
+                    lock_settings=DatabaseLockSettings(),
+                )
+
+            self.assertIs(observed, expected_summary)
+            lock_mock.assert_called_once()
+            execute_mock.assert_called_once()
+
+    def test_auto_lineage_database_readiness_depends_on_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            for lineage in ("eukaryota_odb12", "bacteria_odb12", "archaea_odb12"):
+                lineage_dir = root / "lineages" / lineage
+                lineage_dir.mkdir(parents=True)
+                (lineage_dir / "dataset.cfg").write_text("name=test\n", encoding="utf-8")
+            placement = root / "placement_files"
+            placement.mkdir()
+            for name in (
+                "supermatrix.aln.eukaryota_odb12.release.faa",
+                "tree.eukaryota_odb12.release.nwk",
+                "mapping_taxid-lineage.eukaryota_odb12.release.txt",
+                "mapping_taxids-busco_dataset_name.eukaryota_odb12.release.txt",
+                "list_of_reference_markers.eukaryota_odb12.release.txt",
+            ):
+                (placement / name).write_text("data\n", encoding="utf-8")
+
+            self.assertTrue(_busco_auto_resources_ready(root, "euk"))
+            self.assertTrue(_busco_auto_resources_ready(root, "prok"))
+            self.assertTrue(_busco_auto_resources_ready(root, "all"))
+
     def test_parse_short_summary_reads_percentages_counts_and_dataset(self) -> None:
         summary_text = """\
 # BUSCO version is: 6.0.0

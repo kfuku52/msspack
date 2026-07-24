@@ -1,11 +1,15 @@
 import csv
 import json
+import shutil
+import tarfile
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
 from msspack.config_models import FunctionalAnnotationConfig
+from msspack.database_lock import DatabaseLockSettings
 from msspack.functional_annotation import (
     DiamondHit,
     DiamondMetadata,
@@ -15,6 +19,7 @@ from msspack.functional_annotation import (
     _fasta_taxonomy,
     _materialize_database_file,
     _pfam_verification,
+    _prepare_cdd_database,
     _submission_safe_product,
     _taxonomy_adjusted_product,
     _uniprot_verification,
@@ -27,6 +32,220 @@ from msspack.utils import MSSPackError
 
 
 class FunctionalAnnotationTests(unittest.TestCase):
+    @staticmethod
+    def _write_cdd_data(directory: Path, marker: str) -> None:
+        directory.mkdir(parents=True)
+        for name in (
+            "cddid.tbl",
+            "cdtrack.txt",
+            "family_superfamily_links",
+            "cddannot.dat",
+            "cddannot_generic.dat",
+            "bitscore_specific.txt",
+        ):
+            (directory / name).write_text(f"{name}\t{marker}\n", encoding="utf-8")
+
+    @staticmethod
+    def _write_cdd_archive(path: Path, marker: str) -> None:
+        source = path.parent / f"source-{marker}"
+        source.mkdir()
+        for suffix in (".aux", ".freq", ".loo", ".rps"):
+            (source / f"Cdd{suffix}").write_text(
+                f"{suffix}\t{marker}\n",
+                encoding="utf-8",
+            )
+        with tarfile.open(path, "w:gz") as archive:
+            for database_file in sorted(source.iterdir()):
+                archive.add(database_file, arcname=f"little_endian/{database_file.name}")
+
+    def test_content_addressed_database_files_do_not_overwrite_prior_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            source = base / "reference.faa"
+            source.write_text(">first\nMA\n", encoding="utf-8")
+            first_path, _origin, first_digest, _provenance = _materialize_database_file(
+                local_value=str(source),
+                url="",
+                base_dir=base,
+                cache_dir=base / "database",
+                database_root=base / "database-root",
+                stem="reference",
+                expected_suffix=".fasta",
+                content_addressed=True,
+            )
+            source.write_text(">second\nMK\n", encoding="utf-8")
+            second_path, _origin, second_digest, _provenance = _materialize_database_file(
+                local_value=str(source),
+                url="",
+                base_dir=base,
+                cache_dir=base / "database",
+                database_root=base / "database-root",
+                stem="reference",
+                expected_suffix=".fasta",
+                content_addressed=True,
+            )
+
+            self.assertNotEqual(first_digest, second_digest)
+            self.assertNotEqual(first_path, second_path)
+            self.assertEqual(first_path.read_text(encoding="utf-8"), ">first\nMA\n")
+            self.assertEqual(second_path.read_text(encoding="utf-8"), ">second\nMK\n")
+
+    def test_cdd_data_sources_get_immutable_version_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            database_prefix = base / "local-cdd" / "Cdd"
+            database_prefix.parent.mkdir()
+            for suffix in (".aux", ".freq", ".loo", ".rps"):
+                Path(str(database_prefix) + suffix).write_text(
+                    f"{suffix}\n",
+                    encoding="utf-8",
+                )
+            first_data = base / "data-first"
+            second_data = base / "data-second"
+            self._write_cdd_data(first_data, "first")
+            self._write_cdd_data(second_data, "second")
+            cache = base / "cache"
+
+            _prefix, first_version, _provenance = _prepare_cdd_database(
+                config=FunctionalAnnotationConfig(
+                    cdd_database=str(database_prefix),
+                    cdd_data_dir=str(first_data),
+                ),
+                base_dir=base,
+                cache_dir=cache,
+            )
+            first_contents = (first_version / "cddid.tbl").read_text(encoding="utf-8")
+            _prefix, second_version, _provenance = _prepare_cdd_database(
+                config=FunctionalAnnotationConfig(
+                    cdd_database=str(database_prefix),
+                    cdd_data_dir=str(second_data),
+                ),
+                base_dir=base,
+                cache_dir=cache,
+            )
+
+            self.assertNotEqual(first_version, second_version)
+            self.assertEqual(first_contents, "cddid.tbl\tfirst\n")
+            self.assertEqual(
+                (first_version / "cddid.tbl").read_text(encoding="utf-8"),
+                "cddid.tbl\tfirst\n",
+            )
+            self.assertEqual(
+                (second_version / "cddid.tbl").read_text(encoding="utf-8"),
+                "cddid.tbl\tsecond\n",
+            )
+
+    def test_cdd_download_sources_do_not_replace_an_active_database(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            data = base / "data"
+            self._write_cdd_data(data, "common")
+            first_archive = base / "first.tar.gz"
+            second_archive = base / "second.tar.gz"
+            self._write_cdd_archive(first_archive, "first")
+            self._write_cdd_archive(second_archive, "second")
+            archives = {
+                "https://example.test/first.tar.gz": first_archive,
+                "https://example.test/second.tar.gz": second_archive,
+            }
+
+            def fake_download(url: str, destination: Path) -> None:
+                shutil.copyfile(archives[url], destination)
+
+            cache = base / "cache"
+            with patch(
+                "msspack.functional_annotation._download",
+                side_effect=fake_download,
+            ):
+                first_prefix, _data_dir, _provenance = _prepare_cdd_database(
+                    config=FunctionalAnnotationConfig(
+                        cdd_url="https://example.test/first.tar.gz",
+                        cdd_data_dir=str(data),
+                    ),
+                    base_dir=base,
+                    cache_dir=cache,
+                )
+                first_contents = Path(str(first_prefix) + ".aux").read_text(
+                    encoding="utf-8"
+                )
+                second_prefix, _data_dir, _provenance = _prepare_cdd_database(
+                    config=FunctionalAnnotationConfig(
+                        cdd_url="https://example.test/second.tar.gz",
+                        cdd_data_dir=str(data),
+                    ),
+                    base_dir=base,
+                    cache_dir=cache,
+                )
+
+            self.assertNotEqual(first_prefix, second_prefix)
+            self.assertEqual(first_contents, ".aux\tfirst\n")
+            self.assertEqual(
+                Path(str(first_prefix) + ".aux").read_text(encoding="utf-8"),
+                ".aux\tfirst\n",
+            )
+            self.assertEqual(
+                Path(str(second_prefix) + ".aux").read_text(encoding="utf-8"),
+                ".aux\tsecond\n",
+            )
+            self.assertEqual(len(tuple((cache / "cdd" / "sources").glob("*.json"))), 2)
+
+    def test_concurrent_cdd_data_sources_remain_internally_consistent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            database_prefix = base / "local-cdd" / "Cdd"
+            database_prefix.parent.mkdir()
+            for suffix in (".aux", ".freq", ".loo", ".rps"):
+                Path(str(database_prefix) + suffix).write_text(
+                    f"{suffix}\n",
+                    encoding="utf-8",
+                )
+            first_data = base / "data-first"
+            second_data = base / "data-second"
+            self._write_cdd_data(first_data, "first")
+            self._write_cdd_data(second_data, "second")
+            settings = DatabaseLockSettings(
+                poll_seconds=0.001,
+                timeout_seconds=5,
+                heartbeat_seconds=0.01,
+                stale_seconds=1,
+            )
+
+            def prepare(data_dir: Path) -> Path:
+                _prefix, version, _provenance = _prepare_cdd_database(
+                    config=FunctionalAnnotationConfig(
+                        cdd_database=str(database_prefix),
+                        cdd_data_dir=str(data_dir),
+                    ),
+                    base_dir=base,
+                    cache_dir=base / "cache",
+                    lock_settings=settings,
+                )
+                return version
+
+            with patch("builtins.print"), ThreadPoolExecutor(max_workers=2) as executor:
+                first_future = executor.submit(prepare, first_data)
+                second_future = executor.submit(prepare, second_data)
+                first_version = first_future.result()
+                second_version = second_future.result()
+
+            self.assertNotEqual(first_version, second_version)
+            for version, marker in (
+                (first_version, "first"),
+                (second_version, "second"),
+            ):
+                for name in (
+                    "cddid.tbl",
+                    "cdtrack.txt",
+                    "family_superfamily_links",
+                    "cddannot.dat",
+                    "cddannot_generic.dat",
+                    "bitscore_specific.txt",
+                ):
+                    self.assertEqual(
+                        (version / name).read_text(encoding="utf-8"),
+                        f"{name}\t{marker}\n",
+                    )
+
     def test_parses_uniprot_and_uniref_taxonomy_headers(self) -> None:
         self.assertEqual(
             _fasta_taxonomy(
