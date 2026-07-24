@@ -1658,6 +1658,22 @@ def _prepared_cdd_version(
     return prefix, digest
 
 
+def _rpsblast_database_prefix(database_prefix: Path, temporary_root: Path) -> Path:
+    resolved_prefix = database_prefix.resolve()
+    if not any(character.isspace() for character in str(resolved_prefix)):
+        return resolved_prefix
+    alias_directory = temporary_root / "cdd-database"
+    try:
+        alias_directory.symlink_to(resolved_prefix.parent, target_is_directory=True)
+    except OSError as exc:
+        raise MSSPackError(
+            "RPS-BLAST cannot use a CDD database path containing whitespace, and "
+            f"msspack could not create a temporary whitespace-free alias for "
+            f"{resolved_prefix.parent}: {exc}"
+        ) from exc
+    return alias_directory / resolved_prefix.name
+
+
 def _prepare_cdd_database(
     *,
     config: FunctionalAnnotationConfig,
@@ -1965,6 +1981,10 @@ def run_cdd_domain_search(
     )
     with tempfile.TemporaryDirectory(prefix="msspack-rpsblast-") as temporary_dir:
         temporary_root = Path(temporary_dir)
+        rpsblast_database_prefix = _rpsblast_database_prefix(
+            database_prefix,
+            temporary_root,
+        )
         query_path = temporary_root / "cdd-fallback.fasta"
         with atomic_text_writer(query_path) as query_handle:
             for record in fallback_records:
@@ -1981,7 +2001,7 @@ def run_cdd_domain_search(
             "-query",
             str(query_path),
             "-db",
-            str(database_prefix),
+            str(rpsblast_database_prefix),
             "-evalue",
             f"{config.cdd_evalue:g}",
             "-outfmt",
@@ -1993,7 +2013,10 @@ def run_cdd_domain_search(
             "-out",
             str(archive_path),
         ]
-        run_command(rpsblast_command, log_path=temporary_root / "rpsblast.log")
+        run_command(
+            rpsblast_command,
+            log_path=log_path.with_name(f"{log_path.stem}.rpsblast.raw.log"),
+        )
         if not archive_path.is_file():
             raise MSSPackError(f"RPS-BLAST did not create its archive output: {archive_path}")
         rpsbproc_command = [
@@ -2013,7 +2036,10 @@ def run_cdd_domain_search(
             "-f",
             "-q",
         ]
-        run_command(rpsbproc_command, log_path=temporary_root / "rpsbproc.log")
+        run_command(
+            rpsbproc_command,
+            log_path=log_path.with_name(f"{log_path.stem}.rpsbproc.raw.log"),
+        )
         if not raw_output.is_file():
             raise MSSPackError(f"rpsbproc did not create its result file: {raw_output}")
         copy_or_decompress(raw_output, output_path)

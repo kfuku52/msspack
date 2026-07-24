@@ -20,6 +20,7 @@ from msspack.functional_annotation import (
     _materialize_database_file,
     _pfam_verification,
     _prepare_cdd_database,
+    _rpsblast_database_prefix,
     _submission_safe_product,
     _taxonomy_adjusted_product,
     _uniprot_verification,
@@ -245,6 +246,17 @@ class FunctionalAnnotationTests(unittest.TestCase):
                         (version / name).read_text(encoding="utf-8"),
                         f"{name}\t{marker}\n",
                     )
+
+    def test_rpsblast_database_prefix_avoids_whitespace(self) -> None:
+        with (
+            tempfile.TemporaryDirectory(prefix="msspack-cdd-source ") as source_dir,
+            tempfile.TemporaryDirectory(prefix="msspack-cdd-alias-") as alias_dir,
+        ):
+            source_prefix = Path(source_dir) / "Cdd"
+            resolved = _rpsblast_database_prefix(source_prefix, Path(alias_dir))
+
+            self.assertNotIn(" ", str(resolved))
+            self.assertEqual(resolved.resolve(), source_prefix.resolve())
 
     def test_parses_uniprot_and_uniref_taxonomy_headers(self) -> None:
         self.assertEqual(
