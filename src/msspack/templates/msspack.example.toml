@@ -60,6 +60,9 @@ validate_in_parallel = true
 feature_with_gap = "misc_feature"
 min_assembly_gap = 50
 min_artificial_intron_size = 10
+# Resolve exact-coordinate gene collisions using translated CDS validity, completeness,
+# CDS length, then intron count. Alternatives: "first" and "keep_all".
+coordinate_duplicate_policy = "longest_valid_cds"
 replace_product_patterns = [
   "\\) transport protein",
   "18S rRNA",
@@ -67,6 +70,11 @@ replace_product_patterns = [
   "Cullin-3A",
   "Cullin-4",
 ]
+
+[plots]
+# Genome-browser-style coordinate duplicate plots show the first N removed genes.
+# The TSV audit output always contains every removed gene.
+coordinate_duplicate_limit = 50
 
 [databases]
 # Relative paths are resolved from this TOML file. Use an absolute shared path

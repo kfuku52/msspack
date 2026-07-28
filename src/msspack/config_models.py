@@ -87,11 +87,17 @@ class PipelineConfig:
     feature_with_gap: str = "misc_feature"
     min_assembly_gap: int = 50
     min_artificial_intron_size: int = 10
+    coordinate_duplicate_policy: str = "longest_valid_cds"
     replace_product_patterns: list[str] = field(default_factory=list)
     replace_product_with: str = "hypothetical protein"
     validate_with_parser: bool = True
     validate_with_transchecker: bool = True
     validate_in_parallel: bool = True
+
+
+@dataclass
+class PlotsConfig:
+    coordinate_duplicate_limit: int = 50
 
 
 @dataclass
@@ -223,6 +229,7 @@ class MSSPackConfig:
     st_comment: StCommentConfig
     pipeline: PipelineConfig
     tools: ToolsConfig
+    plots: PlotsConfig = field(default_factory=PlotsConfig)
     databases: DatabasesConfig = field(default_factory=DatabasesConfig)
     busco: BuscoConfig = field(default_factory=BuscoConfig)
     functional_annotation: FunctionalAnnotationConfig = field(

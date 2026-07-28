@@ -183,12 +183,16 @@ def select_one_mrna_handler(args: argparse.Namespace) -> int:
 
 def drop_duplicate_coordinate_gene_handler(args: argparse.Namespace) -> int:
     input_path = resolved_path(args.input)
+    fasta_path = resolved_path(args.fasta)
     output_path = resolved_path(args.output)
     with managed_log_path(args.log, "drop-duplicate-coordinate-gene.log") as (log_path, keep_log):
         drop_duplicate_coordinate_genes(
             input_path=input_path,
+            fasta_path=fasta_path,
             output_path=output_path,
             log_path=log_path,
+            genetic_code=args.genetic_code,
+            selection_policy=args.policy,
         )
     print_paths(output_path, log_path if keep_log else None)
     return 0

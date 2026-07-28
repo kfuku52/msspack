@@ -159,6 +159,9 @@ class PipelinePlotArtifacts:
     event_counts_tsv: Path
     event_counts_svg: Path
     event_counts_pdf: Path
+    coordinate_duplicates_tsv: Path
+    coordinate_duplicates_svg: Path
+    coordinate_duplicates_pdf: Path
     name_consistency_tsv: Path
     name_consistency_svg: Path
     name_consistency_pdf: Path

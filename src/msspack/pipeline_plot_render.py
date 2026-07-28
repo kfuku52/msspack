@@ -121,6 +121,9 @@ def build_plot_artifacts(output_root: Path) -> PipelinePlotArtifacts:
         event_counts_tsv=root / "pipeline-event-counts.tsv",
         event_counts_svg=root / "pipeline-event-counts.svg",
         event_counts_pdf=root / "pipeline-event-counts.pdf",
+        coordinate_duplicates_tsv=root / "coordinate-duplicate-gene-models.tsv",
+        coordinate_duplicates_svg=root / "coordinate-duplicate-gene-models.svg",
+        coordinate_duplicates_pdf=root / "coordinate-duplicate-gene-models.pdf",
         name_consistency_tsv=root / "functional-annotation-name-consistency.tsv",
         name_consistency_svg=root / "functional-annotation-name-consistency.svg",
         name_consistency_pdf=root / "functional-annotation-name-consistency.pdf",
@@ -2470,6 +2473,7 @@ def update_plot_manifest(
     artifacts: PipelinePlotArtifacts,
     metrics: PipelinePlotMetrics,
     gene_sets: tuple[PipelineGeneSet, ...],
+    coordinate_duplicate_summary: dict[str, object],
     annotation_consistency: AnnotationConsistencySummary | None = None,
 ) -> None:
     if manifest_path.exists():
@@ -2489,6 +2493,12 @@ def update_plot_manifest(
         "event_counts_tsv": str(artifacts.event_counts_tsv),
         "event_counts_svg": str(artifacts.event_counts_svg),
         "event_counts_pdf": str(artifacts.event_counts_pdf),
+        "coordinate_duplicates": {
+            "tsv": str(artifacts.coordinate_duplicates_tsv),
+            "svg": str(artifacts.coordinate_duplicates_svg),
+            "pdf": str(artifacts.coordinate_duplicates_pdf),
+            **coordinate_duplicate_summary,
+        },
         "metrics": metrics.to_dict(),
         "sources": metrics.sources,
         "gene_sets": {gene_set.key: gene_set.to_dict() for gene_set in gene_sets},

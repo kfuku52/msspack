@@ -117,6 +117,18 @@ msspack run --config my_submission.toml --no-busco --no-validate --no-report
 `msspack plot --config my_submission.toml` only when the standalone Sankey and
 supporting figures are needed without an HTML report.
 
+Coordinate duplicate removal also produces a genome-browser-style comparison of
+kept and removed gene models. By default the figure shows the first 50 removed
+genes, while its TSV retains all rows. Set `plots.coordinate_duplicate_limit` in
+the config to change the figure limit.
+
+Exact-coordinate gene collisions use `pipeline.coordinate_duplicate_policy =
+"longest_valid_cds"` by default. Candidates are ranked by valid translated CDS,
+fewer internal stops, start/stop completeness, fewer ambiguous amino acids,
+longer total CDS, and finally fewer introns. This uses only the input GFF3,
+reference FASTA, and configured genetic code. Set the policy to `"first"` for the
+legacy input-order behavior or `"keep_all"` to disable automatic removal.
+
 The species-specific configs in [`examples/`](examples/) are sanitized schema
 examples. Replace every placeholder path and submitter field before use.
 

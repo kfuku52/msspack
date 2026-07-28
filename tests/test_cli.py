@@ -25,7 +25,7 @@ class CliTests(unittest.TestCase):
                 main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "msspack 0.6.0")
+        self.assertEqual(stdout.getvalue().strip(), "msspack 0.7.0")
 
     def test_main_init_writes_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -136,6 +136,9 @@ class CliTests(unittest.TestCase):
             event_counts_tsv=Path("/tmp/build/plots/events.tsv"),
             event_counts_svg=Path("/tmp/build/plots/events.svg"),
             event_counts_pdf=Path("/tmp/build/plots/events.pdf"),
+            coordinate_duplicates_tsv=Path("/tmp/build/plots/duplicates.tsv"),
+            coordinate_duplicates_svg=Path("/tmp/build/plots/duplicates.svg"),
+            coordinate_duplicates_pdf=Path("/tmp/build/plots/duplicates.pdf"),
             name_consistency_tsv=Path("/tmp/build/plots/names.tsv"),
             name_consistency_svg=Path("/tmp/build/plots/names.svg"),
             name_consistency_pdf=Path("/tmp/build/plots/names.pdf"),
@@ -366,6 +369,15 @@ class CliTests(unittest.TestCase):
             event_counts_tsv=Path("/tmp/build/Demo/plots/pipeline-event-counts.tsv"),
             event_counts_svg=Path("/tmp/build/Demo/plots/pipeline-event-counts.svg"),
             event_counts_pdf=Path("/tmp/build/Demo/plots/pipeline-event-counts.pdf"),
+            coordinate_duplicates_tsv=Path(
+                "/tmp/build/Demo/plots/coordinate-duplicate-gene-models.tsv"
+            ),
+            coordinate_duplicates_svg=Path(
+                "/tmp/build/Demo/plots/coordinate-duplicate-gene-models.svg"
+            ),
+            coordinate_duplicates_pdf=Path(
+                "/tmp/build/Demo/plots/coordinate-duplicate-gene-models.pdf"
+            ),
             name_consistency_tsv=Path(
                 "/tmp/build/Demo/plots/functional-annotation-name-consistency.tsv"
             ),
@@ -407,6 +419,8 @@ class CliTests(unittest.TestCase):
                 str(artifacts.gene_flow_pdf),
                 str(artifacts.event_counts_svg),
                 str(artifacts.event_counts_pdf),
+                str(artifacts.coordinate_duplicates_svg),
+                str(artifacts.coordinate_duplicates_pdf),
                 "pipeline-flow\tgenes=100\tdedup_removed=5\ttranscript_changed=20\tremoved_mrnas=23",
             ],
         )

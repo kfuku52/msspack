@@ -189,18 +189,48 @@ def write_single_page_pdf(
     commands: list[str],
     output_path: Path,
 ) -> Path:
-    stream = "\n".join(commands).encode("latin-1")
-    objects = [
+    return write_multi_page_pdf(
+        pages=[(width, height, commands)],
+        output_path=output_path,
+    )
+
+
+def write_multi_page_pdf(
+    *,
+    pages: list[tuple[float, float, list[str]]],
+    output_path: Path,
+) -> Path:
+    if not pages:
+        raise ValueError("PDF output requires at least one page")
+    page_count = len(pages)
+    pages_object_id = 3 + page_count * 2
+    catalog_object_id = pages_object_id + 1
+    objects: list[bytes] = [
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
-        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
-        (
-            f"<< /Type /Page /Parent 5 0 R /MediaBox [0 0 {width:.2f} {height:.2f}] "
-            f"/Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 3 0 R >>"
-        ).encode("latin-1"),
-        b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
-        b"<< /Type /Catalog /Pages 5 0 R >>",
     ]
+    page_object_ids: list[int] = []
+    for page_index, (width, height, commands) in enumerate(pages):
+        stream = "\n".join(commands).encode("latin-1")
+        content_object_id = 3 + page_index * 2
+        page_object_id = content_object_id + 1
+        page_object_ids.append(page_object_id)
+        objects.append(
+            b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream"
+        )
+        objects.append(
+            (
+                f"<< /Type /Page /Parent {pages_object_id} 0 R "
+                f"/MediaBox [0 0 {width:.2f} {height:.2f}] "
+                f"/Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> "
+                f"/Contents {content_object_id} 0 R >>"
+            ).encode("latin-1")
+        )
+    kids = " ".join(f"{object_id} 0 R" for object_id in page_object_ids)
+    objects.append(
+        f"<< /Type /Pages /Kids [{kids}] /Count {page_count} >>".encode("latin-1")
+    )
+    objects.append(f"<< /Type /Catalog /Pages {pages_object_id} 0 R >>".encode("latin-1"))
     pdf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = [0]
     for index, obj in enumerate(objects, start=1):
@@ -215,7 +245,7 @@ def write_single_page_pdf(
         pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
     pdf.extend(
         (
-            f"trailer\n<< /Size {len(objects) + 1} /Root 6 0 R >>\n"
+            f"trailer\n<< /Size {len(objects) + 1} /Root {catalog_object_id} 0 R >>\n"
             f"startxref\n{xref_start}\n%%EOF\n"
         ).encode("latin-1")
     )

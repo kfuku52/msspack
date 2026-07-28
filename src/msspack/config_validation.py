@@ -13,6 +13,7 @@ from .config_models import (
     FunctionalAnnotationConfig,
     MSSPackConfig,
     PipelineConfig,
+    PlotsConfig,
     ProjectConfig,
     ReferenceConfig,
     SampleConfig,
@@ -20,6 +21,7 @@ from .config_models import (
     SubmitterConfig,
     ToolsConfig,
 )
+from .coordinate_duplicates import COORDINATE_DUPLICATE_POLICIES
 
 HOLD_DATE_RE = re.compile(r"^\d{8}$")
 JAVA_HEAP_RE = re.compile(r"^\d+[KMGkmg]$")
@@ -131,6 +133,11 @@ def validate_pipeline_config(pipeline: PipelineConfig) -> None:
         pipeline.min_artificial_intron_size,
         "pipeline.min_artificial_intron_size",
     )
+    ensure_choice(
+        pipeline.coordinate_duplicate_policy,
+        "pipeline.coordinate_duplicate_policy",
+        COORDINATE_DUPLICATE_POLICIES,
+    )
     for pattern in pipeline.replace_product_patterns:
         try:
             re.compile(pattern)
@@ -138,6 +145,13 @@ def validate_pipeline_config(pipeline: PipelineConfig) -> None:
             raise ConfigError(
                 f"Invalid regex in 'pipeline.replace_product_patterns': {pattern!r}: {exc}"
             ) from exc
+
+
+def validate_plots_config(plots: PlotsConfig) -> None:
+    ensure_positive(
+        plots.coordinate_duplicate_limit,
+        "plots.coordinate_duplicate_limit",
+    )
 
 
 def validate_tools_config(tools: ToolsConfig) -> None:
@@ -356,6 +370,7 @@ def validate_config(config: MSSPackConfig) -> None:
     validate_submitter_config(config.submitter)
     validate_reference_config(config.reference)
     validate_pipeline_config(config.pipeline)
+    validate_plots_config(config.plots)
     validate_tools_config(config.tools)
     validate_databases_config(config.databases)
     validate_busco_config(config.busco)

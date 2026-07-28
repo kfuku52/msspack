@@ -297,6 +297,8 @@ def _handle_plot(args: argparse.Namespace) -> int:
     print(artifacts.gene_flow_pdf)
     print(artifacts.event_counts_svg)
     print(artifacts.event_counts_pdf)
+    print(artifacts.coordinate_duplicates_svg)
+    print(artifacts.coordinate_duplicates_pdf)
     if artifacts.name_consistency_svg.exists():
         print(artifacts.name_consistency_svg)
         print(artifacts.name_consistency_pdf)

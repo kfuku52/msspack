@@ -4,6 +4,10 @@ import unittest
 from pathlib import Path
 
 from msspack.chart_primitives import pdf_helvetica_text_width
+from msspack.coordinate_duplicates import (
+    CoordinateDuplicatePair,
+    write_coordinate_duplicate_map,
+)
 from msspack.pipeline_plot_data import load_functional_annotation_summary
 from msspack.pipeline_plot_models import (
     AnnotationConsistencyGroup,
@@ -107,6 +111,61 @@ def _write_step_metrics(
 def _write_id_file(path: Path, identifiers: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(identifiers) + ("\n" if identifiers else ""), encoding="utf-8")
+
+
+def _write_coordinate_duplicate_fixture(
+    gff_path: Path,
+    map_path: Path,
+    *,
+    removed_count: int,
+) -> None:
+    lines = [
+        "##gff-version 3",
+        "chr1\tsrc\tgene\t1\t100\t.\t+\t.\tID=k1",
+        "chr1\tsrc\tmRNA\t1\t100\t.\t+\t.\tID=k1.t1;Parent=k1",
+        "chr1\tsrc\texon\t1\t100\t.\t+\t.\tID=k1.ex1;Parent=k1.t1",
+        "chr1\tsrc\tCDS\t1\t100\t.\t+\t0\tID=k1.cds1;Parent=k1.t1",
+    ]
+    pairs: list[CoordinateDuplicatePair] = []
+    for index in range(1, removed_count + 1):
+        lines.extend(
+            [
+                f"chr1\tsrc\tgene\t1\t100\t.\t+\t.\tID=d{index}",
+                (
+                    f"chr1\tsrc\tmRNA\t1\t100\t.\t+\t.\t"
+                    f"ID=d{index}.t1;Parent=d{index}"
+                ),
+                (
+                    f"chr1\tsrc\texon\t1\t40\t.\t+\t.\t"
+                    f"ID=d{index}.ex1;Parent=d{index}.t1"
+                ),
+                (
+                    f"chr1\tsrc\tCDS\t1\t40\t.\t+\t0\t"
+                    f"ID=d{index}.cds1;Parent=d{index}.t1"
+                ),
+                (
+                    f"chr1\tsrc\texon\t60\t100\t.\t+\t.\t"
+                    f"ID=d{index}.ex2;Parent=d{index}.t1"
+                ),
+                (
+                    f"chr1\tsrc\tCDS\t60\t100\t.\t+\t0\t"
+                    f"ID=d{index}.cds2;Parent=d{index}.t1"
+                ),
+            ]
+        )
+        pairs.append(
+            CoordinateDuplicatePair(
+                group_id="coordinate_duplicate_000001",
+                seqid="chr1",
+                start=1,
+                end=100,
+                strand="+",
+                kept_gene_id="k1",
+                removed_gene_id=f"d{index}",
+            )
+        )
+    gff_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_coordinate_duplicate_map(map_path, pairs)
 
 
 def _write_busco_comparison(path: Path) -> None:
@@ -666,6 +725,14 @@ class PipelinePlotTests(unittest.TestCase):
             intermediate_dir = output_root / "intermediate"
             intermediate_dir.mkdir(parents=True)
             manifest_path.write_text('{"status":"completed"}\n', encoding="utf-8")
+            duplicate_map_path = (
+                log_dir / "06.drop-duplicate-coordinate-gene.duplicate-map.tsv"
+            )
+            _write_coordinate_duplicate_fixture(
+                intermediate_dir / "05.gff.coordinates-trimmed.gff",
+                duplicate_map_path,
+                removed_count=5,
+            )
             _write_step_log(
                 log_dir / "06.drop-duplicate-coordinate-gene.log",
                 step="drop-duplicate-coordinate-gene",
@@ -687,6 +754,7 @@ class PipelinePlotTests(unittest.TestCase):
                     "removed_gene_ids_path": str(
                         log_dir / "06.drop-duplicate-coordinate-gene.changed-gene-ids.txt"
                     ),
+                    "duplicate_map_path": str(duplicate_map_path),
                 },
             )
             _write_step_log(
@@ -833,6 +901,9 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertTrue(artifacts.event_counts_tsv.exists())
             self.assertTrue(artifacts.event_counts_svg.exists())
             self.assertTrue(artifacts.event_counts_pdf.exists())
+            self.assertTrue(artifacts.coordinate_duplicates_tsv.exists())
+            self.assertTrue(artifacts.coordinate_duplicates_svg.exists())
+            self.assertTrue(artifacts.coordinate_duplicates_pdf.exists())
             self.assertTrue(all(not path.exists() for path in legacy_overlap_paths))
             gene_flow_tsv = artifacts.gene_flow_tsv.read_text(encoding="utf-8")
             self.assertNotIn("after_transcript", gene_flow_tsv)
@@ -904,6 +975,12 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertIn('viewBox="0 0 518.40 298.00"', svg_texts[1])
             event_counts_pdf = artifacts.event_counts_pdf.read_bytes().decode("latin-1")
             self.assertIn("/MediaBox [0 0 518.40 298.00]", event_counts_pdf)
+            duplicate_svg = artifacts.coordinate_duplicates_svg.read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("Coordinate duplicate gene models", duplicate_svg)
+            self.assertIn('data-full-label="KEPT k1 / k1.t1"', duplicate_svg)
+            self.assertIn('data-full-label="REMOVED d5 / d5.t1"', duplicate_svg)
             payload = json.loads(artifacts.summary_json.read_text(encoding="utf-8"))
             self.assertEqual(payload["metrics"]["converted_to_misc_genes"], 1)
             self.assertEqual(payload["metrics"]["final_cds_genes"], 94)
@@ -915,6 +992,11 @@ class PipelinePlotTests(unittest.TestCase):
                 str(artifacts.gene_flow_pdf),
             )
             self.assertNotIn("overlap_pdf", manifest["plots"]["pipeline"])
+            duplicate_manifest = manifest["plots"]["pipeline"]["coordinate_duplicates"]
+            self.assertEqual(duplicate_manifest["limit"], 50)
+            self.assertEqual(duplicate_manifest["total_removed_genes"], 5)
+            self.assertEqual(duplicate_manifest["shown_removed_genes"], 5)
+            self.assertFalse(duplicate_manifest["truncated"])
             self.assertEqual(len(summary_lines), 1)
             self.assertIn("dedup_removed=5", summary_lines[0])
             self.assertIn("misc_feature_genes=1", summary_lines[0])

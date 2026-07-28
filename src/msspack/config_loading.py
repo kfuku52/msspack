@@ -13,6 +13,7 @@ from .config_models import (
     FunctionalAnnotationTaxonomyConfig,
     InputsConfig,
     PipelineConfig,
+    PlotsConfig,
     ProjectConfig,
     ReferenceConfig,
     SampleConfig,
@@ -84,11 +85,15 @@ SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
         "feature_with_gap": str,
         "min_assembly_gap": int,
         "min_artificial_intron_size": int,
+        "coordinate_duplicate_policy": str,
         "replace_product_patterns": (str, list),
         "replace_product_with": str,
         "validate_with_parser": bool,
         "validate_with_transchecker": bool,
         "validate_in_parallel": bool,
+    },
+    "plots": {
+        "coordinate_duplicate_limit": int,
     },
     "tools": {
         "cache_dir": str,
@@ -377,11 +382,20 @@ def load_pipeline_config(data: dict[str, Any]) -> PipelineConfig:
         feature_with_gap=str(data.get("feature_with_gap", "misc_feature")),
         min_assembly_gap=int(data.get("min_assembly_gap", 50)),
         min_artificial_intron_size=int(data.get("min_artificial_intron_size", 10)),
+        coordinate_duplicate_policy=str(
+            data.get("coordinate_duplicate_policy", "longest_valid_cds")
+        ),
         replace_product_patterns=listify(data.get("replace_product_patterns", [])),
         replace_product_with=str(data.get("replace_product_with", "hypothetical protein")),
         validate_with_parser=bool(data.get("validate_with_parser", True)),
         validate_with_transchecker=bool(data.get("validate_with_transchecker", True)),
         validate_in_parallel=bool(data.get("validate_in_parallel", True)),
+    )
+
+
+def load_plots_config(data: dict[str, Any]) -> PlotsConfig:
+    return PlotsConfig(
+        coordinate_duplicate_limit=int(data.get("coordinate_duplicate_limit", 50)),
     )
 
 
@@ -593,6 +607,7 @@ def load_sections(data: dict[str, Any]) -> dict[str, Any]:
         "reference": load_reference_config(section(data, "reference")),
         "st_comment": load_st_comment_config(section(data, "st_comment")),
         "pipeline": load_pipeline_config(section(data, "pipeline")),
+        "plots": load_plots_config(section(data, "plots")),
         "tools": load_tools_config(section(data, "tools")),
         "databases": load_databases_config(section(data, "databases")),
         "busco": load_busco_config(section(data, "busco")),

@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Callable
 from typing import cast
 
+from .coordinate_duplicates import COORDINATE_DUPLICATE_POLICIES
 from .internal_cli_handlers import (
     drop_duplicate_coordinate_gene_handler,
     extract_cds_handler,
@@ -155,10 +156,18 @@ def add_internal_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     _add_command(
         internal_subparsers,
         "drop-duplicate-coordinate-gene",
-        help_text="remove genes that duplicate an earlier gene coordinate block",
+        help_text="resolve genes that share an exact coordinate block",
         configure=lambda p: (
             p.add_argument("--input", required=True, help="input GFF"),
+            p.add_argument("--fasta", required=True, help="reference FASTA"),
             p.add_argument("--output", required=True, help="output GFF"),
+            p.add_argument("--genetic-code", default="1", help="NCBI genetic code"),
+            p.add_argument(
+                "--policy",
+                choices=sorted(COORDINATE_DUPLICATE_POLICIES),
+                default="longest_valid_cds",
+                help="coordinate collision selection policy",
+            ),
             p.add_argument("--log", help="optional log file"),
         ),
         handler=drop_duplicate_coordinate_gene_handler,

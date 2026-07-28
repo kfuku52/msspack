@@ -339,6 +339,17 @@ def _render_pipeline_plots(report_root: Path, payload: dict[str, Any]) -> str:
             pipeline.get("event_counts_tsv"),
         ),
     ]
+    coordinate_duplicates = pipeline.get("coordinate_duplicates")
+    if isinstance(coordinate_duplicates, dict):
+        blocks.append(
+            _render_plot_block(
+                report_root,
+                "Coordinate duplicate gene models",
+                coordinate_duplicates.get("svg"),
+                coordinate_duplicates.get("pdf"),
+                coordinate_duplicates.get("tsv"),
+            )
+        )
     annotation_consistency = pipeline.get("annotation_consistency")
     if isinstance(annotation_consistency, dict):
         blocks.extend(

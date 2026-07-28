@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 - 2026-07-28
+
+- Add genome-browser-style coordinate-duplicate gene-model plots in TSV, SVG, and
+  multipage PDF formats, show the first 50 removals by default, and expose a
+  configurable plot limit in pipeline reports and manifests.
+- Select exact-coordinate duplicate genes from the input GFF3 and reference FASTA
+  using translated-CDS validity, internal stops, start/stop completeness, ambiguous
+  amino acids, CDS length, intron count, and stable input-order tie breaking.
+- Record kept and removed transcripts, selection evidence, splice motifs, decision
+  reasons, and low-confidence flags in a backward-compatible duplicate audit map;
+  retain legacy `first` and opt-out `keep_all` policies.
+
 ## 0.6.0 - 2026-07-24
 
 - Add `msspack run` for the complete BUSCO-to-report workflow, project-local

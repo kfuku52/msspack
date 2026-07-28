@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from msspack.coordinate_duplicates import read_coordinate_duplicate_map
 from msspack.gff import (
     iter_gff_records,
     parse_attributes,
@@ -9,11 +10,254 @@ from msspack.gff import (
     sort_gff_file_precise,
     write_gff_document,
 )
-from msspack.gff_cleanup import fix_gff_semicolons_file, trim_gff_to_fasta_bounds
+from msspack.gff_cleanup import (
+    drop_duplicate_coordinate_genes,
+    fix_gff_semicolons_file,
+    trim_gff_to_fasta_bounds,
+)
 from msspack.utils import MSSPackError
 
 
 class GffSortTests(unittest.TestCase):
+    def test_duplicate_coordinate_cleanup_records_kept_removed_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            source = base / "input.gff3"
+            output = base / "output.gff3"
+            duplicate_map = base / "duplicates.tsv"
+            source.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t100\t.\t+\t.\tID=kept",
+                        "chr1\tsrc\tmRNA\t1\t100\t.\t+\t.\tID=kept.t1;Parent=kept",
+                        "chr1\tsrc\tgene\t1\t100\t.\t+\t.\tID=removed1",
+                        (
+                            "chr1\tsrc\tmRNA\t1\t100\t.\t+\t.\t"
+                            "ID=removed1.t1;Parent=removed1"
+                        ),
+                        "chr1\tsrc\tgene\t1\t100\t.\t+\t.\tID=removed2",
+                        "chr1\tsrc\tgene\t1\t100\t.\t-\t.\tID=opposite_strand",
+                        "chr2\tsrc\tgene\t1\t100\t.\t+\t.\tID=other_seqid",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = drop_duplicate_coordinate_genes(
+                input_path=source,
+                output_path=output,
+                log_path=base / "output.log",
+                selection_policy="first",
+                removed_gene_ids_path=base / "removed.txt",
+                duplicate_map_path=duplicate_map,
+                metrics_path=base / "metrics.json",
+            )
+
+            self.assertEqual(result["removed_gene_ids"], ["removed1", "removed2"])
+            output_text = output.read_text(encoding="utf-8")
+            self.assertIn("ID=kept\n", output_text)
+            self.assertNotIn("ID=removed1", output_text)
+            self.assertNotIn("ID=removed2", output_text)
+            self.assertIn("ID=opposite_strand", output_text)
+            map_lines = duplicate_map.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(map_lines), 3)
+            self.assertIn("\tkept\tremoved1", map_lines[1])
+            self.assertIn("\tkept\tremoved2", map_lines[2])
+
+    def test_duplicate_coordinate_cleanup_prefers_longer_valid_cds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            fasta = base / "input.fa"
+            source = base / "input.gff3"
+            output = base / "output.gff3"
+            duplicate_map = base / "duplicates.tsv"
+            fasta.write_text(">chr1\nATGAAACCCGGGTAA\n", encoding="utf-8")
+            source.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t15\t.\t+\t.\tID=short",
+                        "chr1\tsrc\tmRNA\t1\t15\t.\t+\t.\tID=short.t1;Parent=short",
+                        "chr1\tsrc\tCDS\t1\t6\t.\t+\t0\tParent=short.t1",
+                        "chr1\tsrc\tCDS\t10\t15\t.\t+\t0\tParent=short.t1",
+                        "chr1\tsrc\tgene\t1\t15\t.\t+\t.\tID=long",
+                        "chr1\tsrc\tmRNA\t1\t15\t.\t+\t.\tID=long.t1;Parent=long",
+                        "chr1\tsrc\tCDS\t1\t15\t.\t+\t0\tParent=long.t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = drop_duplicate_coordinate_genes(
+                input_path=source,
+                fasta_path=fasta,
+                output_path=output,
+                log_path=base / "output.log",
+                duplicate_map_path=duplicate_map,
+            )
+
+            self.assertEqual(result["removed_gene_ids"], ["short"])
+            pair = read_coordinate_duplicate_map(duplicate_map)[0]
+            self.assertEqual(pair.kept_gene_id, "long")
+            self.assertEqual(pair.removed_gene_id, "short")
+            self.assertEqual(pair.kept_transcript_id, "long.t1")
+            self.assertEqual(pair.removed_transcript_id, "short.t1")
+            self.assertEqual(pair.kept_cds_length, 15)
+            self.assertEqual(pair.removed_cds_length, 12)
+            self.assertEqual(pair.kept_intron_count, 0)
+            self.assertEqual(pair.removed_intron_count, 1)
+            self.assertEqual(pair.selection_reason, "longer_cds")
+            self.assertTrue(pair.low_confidence)
+            output_text = output.read_text(encoding="utf-8")
+            self.assertIn("ID=long", output_text)
+            self.assertNotIn("ID=short", output_text)
+
+    def test_duplicate_coordinate_cleanup_rejects_longer_cds_with_internal_stop(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            fasta = base / "input.fa"
+            source = base / "input.gff3"
+            output = base / "output.gff3"
+            duplicate_map = base / "duplicates.tsv"
+            fasta.write_text(">chr1\nATGTAACCCTAA\n", encoding="utf-8")
+            source.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t12\t.\t+\t.\tID=long",
+                        "chr1\tsrc\tmRNA\t1\t12\t.\t+\t.\tID=long.t1;Parent=long",
+                        "chr1\tsrc\tCDS\t1\t12\t.\t+\t0\tParent=long.t1",
+                        "chr1\tsrc\tgene\t1\t12\t.\t+\t.\tID=clean",
+                        "chr1\tsrc\tmRNA\t1\t12\t.\t+\t.\tID=clean.t1;Parent=clean",
+                        "chr1\tsrc\tCDS\t1\t3\t.\t+\t0\tParent=clean.t1",
+                        "chr1\tsrc\tCDS\t7\t12\t.\t+\t0\tParent=clean.t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            drop_duplicate_coordinate_genes(
+                input_path=source,
+                fasta_path=fasta,
+                output_path=output,
+                log_path=base / "output.log",
+                duplicate_map_path=duplicate_map,
+            )
+
+            pair = read_coordinate_duplicate_map(duplicate_map)[0]
+            self.assertEqual(pair.kept_gene_id, "clean")
+            self.assertEqual(pair.removed_gene_id, "long")
+            self.assertEqual(pair.kept_internal_stops, 0)
+            self.assertEqual(pair.removed_internal_stops, 1)
+            self.assertEqual(pair.kept_cds_length, 9)
+            self.assertEqual(pair.removed_cds_length, 12)
+            self.assertEqual(pair.selection_reason, "fewer_internal_stops")
+            self.assertFalse(pair.low_confidence)
+
+    def test_duplicate_coordinate_cleanup_uses_best_transcript_per_gene(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            fasta = base / "input.fa"
+            source = base / "input.gff3"
+            duplicate_map = base / "duplicates.tsv"
+            fasta.write_text(">chr1\nATGAAACCCGGGTAA\n", encoding="utf-8")
+            source.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t15\t.\t+\t.\tID=multi",
+                        "chr1\tsrc\tmRNA\t1\t15\t.\t+\t.\tID=multi.short;Parent=multi",
+                        "chr1\tsrc\tCDS\t1\t6\t.\t+\t0\tParent=multi.short",
+                        "chr1\tsrc\tCDS\t10\t15\t.\t+\t0\tParent=multi.short",
+                        "chr1\tsrc\tmRNA\t1\t15\t.\t+\t.\tID=multi.long;Parent=multi",
+                        "chr1\tsrc\tCDS\t1\t15\t.\t+\t0\tParent=multi.long",
+                        "chr1\tsrc\tgene\t1\t15\t.\t+\t.\tID=partial",
+                        "chr1\tsrc\tmRNA\t1\t12\t.\t+\t.\tID=partial.t1;Parent=partial",
+                        "chr1\tsrc\tCDS\t1\t12\t.\t+\t0\tParent=partial.t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            drop_duplicate_coordinate_genes(
+                input_path=source,
+                fasta_path=fasta,
+                output_path=base / "output.gff3",
+                log_path=base / "output.log",
+                duplicate_map_path=duplicate_map,
+            )
+
+            pair = read_coordinate_duplicate_map(duplicate_map)[0]
+            self.assertEqual(pair.kept_gene_id, "multi")
+            self.assertEqual(pair.kept_transcript_id, "multi.long")
+            self.assertEqual(pair.selection_reason, "more_complete_boundaries")
+
+    def test_duplicate_coordinate_cleanup_translates_minus_strand_cds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            fasta = base / "input.fa"
+            source = base / "input.gff3"
+            duplicate_map = base / "duplicates.tsv"
+            fasta.write_text(">chr1\nTTAGGGTTTCAT\n", encoding="utf-8")
+            source.write_text(
+                "\n".join(
+                    [
+                        "chr1\tsrc\tgene\t1\t12\t.\t-\t.\tID=complete",
+                        "chr1\tsrc\tmRNA\t1\t12\t.\t-\t.\tID=complete.t1;Parent=complete",
+                        "chr1\tsrc\tCDS\t1\t12\t.\t-\t0\tParent=complete.t1",
+                        "chr1\tsrc\tgene\t1\t12\t.\t-\t.\tID=partial",
+                        "chr1\tsrc\tmRNA\t1\t12\t.\t-\t.\tID=partial.t1;Parent=partial",
+                        "chr1\tsrc\tCDS\t4\t12\t.\t-\t0\tParent=partial.t1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            drop_duplicate_coordinate_genes(
+                input_path=source,
+                fasta_path=fasta,
+                output_path=base / "output.gff3",
+                log_path=base / "output.log",
+                duplicate_map_path=duplicate_map,
+            )
+
+            pair = read_coordinate_duplicate_map(duplicate_map)[0]
+            self.assertEqual(pair.kept_gene_id, "complete")
+            self.assertTrue(pair.kept_complete)
+            self.assertFalse(pair.removed_complete)
+            self.assertEqual(pair.selection_reason, "more_complete_boundaries")
+
+    def test_duplicate_coordinate_cleanup_can_keep_all_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            source = base / "input.gff3"
+            duplicate_map = base / "duplicates.tsv"
+            source.write_text(
+                "chr1\tsrc\tgene\t1\t10\t.\t+\t.\tID=first\n"
+                "chr1\tsrc\tgene\t1\t10\t.\t+\t.\tID=second\n",
+                encoding="utf-8",
+            )
+
+            result = drop_duplicate_coordinate_genes(
+                input_path=source,
+                output_path=base / "output.gff3",
+                log_path=base / "output.log",
+                selection_policy="keep_all",
+                duplicate_map_path=duplicate_map,
+            )
+
+            self.assertEqual(result["removed_gene_ids"], [])
+            self.assertEqual(result["coordinate_collision_groups"], 1)
+            self.assertEqual(read_coordinate_duplicate_map(duplicate_map), ())
+            self.assertEqual(
+                base.joinpath("output.gff3").read_text(encoding="utf-8"),
+                source.read_text(encoding="utf-8"),
+            )
+
     def test_attributes_reject_invalid_percent_escapes(self) -> None:
         with self.assertRaisesRegex(ValueError, "percent escape"):
             parse_attributes("ID=bad%ZZ")

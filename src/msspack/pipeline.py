@@ -79,6 +79,7 @@ class ModulePaths:
     fasta_steps: Path
     gap_normalization: Path
     gff_cleanup: Path
+    coordinate_duplicates: Path
     submission_render: Path
     gff: Path
     gff_adjustments: Path
@@ -161,6 +162,7 @@ def _resolve_modules() -> ModulePaths:
         fasta_steps=module_origin("msspack.fasta_steps"),
         gap_normalization=module_origin("msspack.gap_normalization"),
         gff_cleanup=module_origin("msspack.gff_cleanup"),
+        coordinate_duplicates=module_origin("msspack.coordinate_duplicates"),
         submission_render=module_origin("msspack.submission_render"),
         gff=module_origin("msspack.gff"),
         gff_adjustments=module_origin("msspack.gff_adjustments"),
@@ -391,6 +393,7 @@ def _prepare_gff(ctx: PipelineContext, inputs: PreparedInputs) -> PreparedGff:
 
     dedup_gff = intermediate / "06.gff.duplicate-genes-removed.gff"
     dedup_removed_gene_ids = logs / "06.drop-duplicate-coordinate-gene.changed-gene-ids.txt"
+    dedup_duplicate_map = logs / "06.drop-duplicate-coordinate-gene.duplicate-map.tsv"
     dedup_metrics = logs / "06.drop-duplicate-coordinate-gene.metrics.json"
     ctx.run_step(
         name="06.drop-duplicate-coordinate-gene",
@@ -398,14 +401,25 @@ def _prepare_gff(ctx: PipelineContext, inputs: PreparedInputs) -> PreparedGff:
             dedup_gff,
             logs / "06.drop-duplicate-coordinate-gene.log",
             dedup_removed_gene_ids,
+            dedup_duplicate_map,
             dedup_metrics,
         ],
-        dependencies=[trimmed_gff, ctx.modules.gff_cleanup],
+        dependencies=[
+            trimmed_gff,
+            inputs.downstream_fasta,
+            ctx.config_path,
+            ctx.modules.gff_cleanup,
+            ctx.modules.coordinate_duplicates,
+        ],
         action=lambda: drop_duplicate_coordinate_genes(
             input_path=trimmed_gff,
+            fasta_path=inputs.downstream_fasta,
             output_path=dedup_gff,
             log_path=logs / "06.drop-duplicate-coordinate-gene.log",
+            genetic_code=config.sample.genetic_code,
+            selection_policy=config.pipeline.coordinate_duplicate_policy,
             removed_gene_ids_path=dedup_removed_gene_ids,
+            duplicate_map_path=dedup_duplicate_map,
             metrics_path=dedup_metrics,
         ),
     )
