@@ -252,9 +252,9 @@ def _tracks_for_gene(
         )
     if gene_level_roots:
         gene_level_records: dict[int, GFFRecord] = {}
-        for root in gene_level_roots:
+        for gene_level_root in gene_level_roots:
             for index, record in _collect_track_records(
-                root=root,
+                root=gene_level_root,
                 children_by_parent=children_by_parent,
             ):
                 gene_level_records[index] = record
