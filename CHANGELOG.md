@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 - 2026-07-29
+
+- Treat BUSCO raw output as temporary: remove it after a summary is durably cached,
+  retain it when BUSCO or summary parsing fails, and clean up raw output left by
+  successful cached runs.
+- Stop recording temporary BUSCO raw and short-summary paths in durable summary JSON
+  while continuing to read summaries written by earlier releases.
+
 ## 0.7.0 - 2026-07-28
 
 - Add genome-browser-style coordinate-duplicate gene-model plots in TSV, SVG, and

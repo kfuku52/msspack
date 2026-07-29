@@ -302,6 +302,8 @@ threads = 8
   near-identical, close-family, and broad homologs.
 - BUSCO compares CDS derived from the input and boundary-adjusted GFF by default.
   Enable `run_genome` only when a genome-level comparison is also needed.
+- Successful BUSCO runs discard their raw working directories after caching the
+  structured summaries. Failed runs retain raw output for diagnostics.
 
 Run `msspack doctor --config my_submission.toml` after enabling optional databases or
 BUSCO. Detailed evidence, naming decisions, consistency tables, timings, plots, and
