@@ -66,6 +66,26 @@ def ensure_date(value: str, key: str, fmt: str) -> None:
         raise ConfigError(f"Config value '{key}' must match {fmt}") from exc
 
 
+def ensure_collection_date(value: str, key: str) -> None:
+    if not value:
+        return
+    parts = value.split("/")
+    if len(parts) not in {1, 2}:
+        raise ConfigError(
+            f"Config value '{key}' must match YYYY-MM-DD or YYYY-MM-DD/YYYY-MM-DD"
+        )
+    try:
+        dates = [datetime.strptime(part, "%Y-%m-%d") for part in parts]
+    except ValueError as exc:
+        raise ConfigError(
+            f"Config value '{key}' must match YYYY-MM-DD or YYYY-MM-DD/YYYY-MM-DD"
+        ) from exc
+    if len(dates) == 2 and dates[0] > dates[1]:
+        raise ConfigError(
+            f"Config value '{key}' range start must not be after its end"
+        )
+
+
 def ensure_choice(value: str, key: str, choices: set[str]) -> None:
     if value not in choices:
         raise ConfigError(f"Config value '{key}' must be one of: {', '.join(sorted(choices))}")
@@ -86,7 +106,7 @@ def validate_sample_config(sample: SampleConfig) -> None:
     ensure_nonempty(sample.locus_tag, "sample.locus_tag")
     ensure_positive(sample.locus_tag_digits, "sample.locus_tag_digits")
     ensure_nonempty(sample.scientific_name, "sample.scientific_name")
-    ensure_date(sample.collection_date, "sample.collection_date", "%Y-%m-%d")
+    ensure_collection_date(sample.collection_date, "sample.collection_date")
     try:
         genetic_code = int(sample.genetic_code)
     except ValueError as exc:

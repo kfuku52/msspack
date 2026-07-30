@@ -216,6 +216,54 @@ class MssConverterTests(unittest.TestCase):
             self.assertNotIn("\tintron\t", text)
             self.assertIn("\tCDS\tjoin(1..30,61..90)\tlocus_tag\tRed000000100", text)
 
+    def test_single_base_cds_segment_does_not_break_intron_size_detection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            fasta = base / "genome.fa"
+            gff = base / "annotation.gff3"
+            annotation = base / "annotation.tsv"
+            output = base / "output.ann.txt"
+            fasta.write_text(">chr1\n" + "A" * 30 + "\n", encoding="utf-8")
+            gff.write_text(
+                "\n".join(
+                    [
+                        "##gff-version 3",
+                        "chr1\tsrc\tgene\t1\t22\t.\t+\t.\tID=g1",
+                        "chr1\tsrc\tmRNA\t1\t22\t.\t+\t.\tID=tx1;Parent=g1",
+                        "chr1\tsrc\tCDS\t1\t3\t.\t+\t0\tID=cds1;Parent=tx1",
+                        "chr1\tsrc\tCDS\t10\t10\t.\t+\t0\tID=cds2;Parent=tx1",
+                        "chr1\tsrc\tCDS\t20\t22\t.\t+\t0\tID=cds3;Parent=tx1",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            annotation.write_text(
+                "ID\tDescription\n"
+                "tx1\ttest protein\n",
+                encoding="utf-8",
+            )
+
+            summary = convert_gff_to_mss(
+                ConversionOptions(
+                    fasta_path=fasta,
+                    gff_path=gff,
+                    annotation_path=annotation,
+                    output_path=output,
+                    locus_tag_prefix="One",
+                    organism_name="Test organism",
+                    minimum_intron_size_cutoff=10,
+                )
+            )
+
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("\tCDS\tjoin(1..3,10,20..22)", text)
+            self.assertIn(
+                "\t\t\tartificial_location\tlow-quality sequence region",
+                text,
+            )
+            self.assertEqual(summary.overall_counts["small_introns"], 1)
+
     def test_retains_mrna_without_cds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

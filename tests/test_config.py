@@ -11,6 +11,7 @@ from msspack.config_loading import (
     load_pipeline_config,
 )
 from msspack.config_validation import (
+    ensure_collection_date,
     validate_databases_config,
     validate_functional_annotation_config,
     validate_pipeline_config,
@@ -18,6 +19,19 @@ from msspack.config_validation import (
 
 
 class ConfigTests(unittest.TestCase):
+    def test_collection_date_accepts_an_iso_date_range(self) -> None:
+        ensure_collection_date(
+            "2020-06-10/2020-10-14",
+            "sample.collection_date",
+        )
+
+    def test_collection_date_rejects_a_reversed_range(self) -> None:
+        with self.assertRaises(ConfigError):
+            ensure_collection_date(
+                "2020-10-14/2020-06-10",
+                "sample.collection_date",
+            )
+
     def test_loads_and_validates_nested_annotation_consistency_config(self) -> None:
         raw = {
             "functional_annotation": {

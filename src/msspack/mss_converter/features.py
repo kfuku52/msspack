@@ -410,12 +410,10 @@ def build_mrna_text(
 
     joined_location = strand_prefix + joint_prefix + position + joint_suffix + strand_suffix
 
-    intron_sizes: list[int] = []
-    for end_start in position.split(".."):
-        if "," in end_start:
-            end_val, start_val = end_start.split(",")
-            intron_size = int(start_val.strip("><")) - int(end_val.strip("><")) - 1
-            intron_sizes.append(intron_size)
+    intron_sizes = [
+        right.start - left.end - 1
+        for left, right in zip(cds_by_position, cds_by_position[1:], strict=False)
+    ]
     out = render_cds_feature(
         joined_location=joined_location,
         locus_tag_prefix=locus_tag_prefix,

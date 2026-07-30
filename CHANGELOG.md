@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.2 - 2026-07-30
+
+- Accept ISO 8601 collection-date intervals in addition to single dates, and reject
+  ranges whose start is later than their end.
+- Calculate intron sizes directly from adjacent CDS coordinates so one-base CDS
+  segments are converted without location-string parsing failures.
+
 ## 0.7.1 - 2026-07-29
 
 - Treat BUSCO raw output as temporary: remove it after a summary is durably cached,
