@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.3 - 2026-07-31
+
+- Map functional-annotation evidence back to source GFF gene IDs when custom
+  submission locus tags are used, so pipeline Sankey plots can reconcile gene
+  events with annotation and consistency groups.
+- Improve Sankey and event-count label placement for large unchanged groups
+  and long event descriptions.
+
 ## 0.7.2 - 2026-07-30
 
 - Accept ISO 8601 collection-date intervals in addition to single dates, and reject

@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 
+from .gff import parse_attributes
 from .pipeline_plot_models import (
     GENE_SET_SPECS,
     SANKEY_COLORS,
@@ -368,12 +369,63 @@ def _annotation_source_sort_key(source: str) -> tuple[int, str]:
     return 0, normalized
 
 
+def _load_plot_gene_id_map(output_root: Path) -> dict[str, str]:
+    gff_path = output_root / "intermediate" / "12.gff.final-sorted.gff"
+    if not gff_path.is_file():
+        return {}
+
+    gene_ids: set[str] = set()
+    parents_by_id: dict[str, str] = {}
+    with gff_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip() or line.startswith("#"):
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) != 9:
+                raise MSSPackError(
+                    f"Expected 9 GFF columns at {gff_path}:{line_number}, found {len(fields)}"
+                )
+            try:
+                attributes = parse_attributes(fields[8])
+            except ValueError as exc:
+                raise MSSPackError(
+                    f"Invalid GFF attributes at {gff_path}:{line_number}: {exc}"
+                ) from exc
+            identifier = attributes.get("ID", "").strip()
+            if not identifier:
+                continue
+            if fields[2].casefold() in {"gene", "pseudogene"}:
+                gene_ids.add(identifier)
+            parent = attributes.get("Parent", "").split(",", 1)[0].strip()
+            if parent:
+                parents_by_id[identifier] = parent
+
+    gene_id_map = {identifier: identifier for identifier in gene_ids}
+    for identifier in parents_by_id:
+        current = identifier
+        visited: set[str] = set()
+        while current not in gene_ids and current in parents_by_id and current not in visited:
+            visited.add(current)
+            current = parents_by_id[current]
+        if current in gene_ids:
+            gene_id_map[identifier] = current
+    return gene_id_map
+
+
+def _plot_gene_identifier(row: dict[str, str], gene_id_map: dict[str, str]) -> str:
+    feature_id = row["ID"].strip()
+    if feature_id in gene_id_map:
+        return gene_id_map[feature_id]
+    return row["Locus_tag"].strip() or feature_id
+
+
 def load_functional_annotation_summary(
     output_root: Path,
 ) -> FunctionalAnnotationSummary | None:
     evidence_path = output_root / "final" / "functional-annotation.tsv"
     if not evidence_path.is_file():
         return None
+    gene_id_map = _load_plot_gene_id_map(output_root)
     grouped_ids: dict[str, list[str]] = {}
     seen_ids: set[str] = set()
     with evidence_path.open("r", encoding="utf-8", newline="") as handle:
@@ -385,7 +437,7 @@ def load_functional_annotation_summary(
                 f"{evidence_path}"
             )
         for row in reader:
-            identifier = row["Locus_tag"].strip() or row["ID"].strip()
+            identifier = _plot_gene_identifier(row, gene_id_map)
             source = row["source"].strip() or "none"
             if not identifier:
                 raise MSSPackError(
@@ -436,6 +488,7 @@ def load_annotation_consistency_summary(
             "Functional annotation consistency outputs are incomplete; missing: "
             + ", ".join(str(path) for path in missing)
         )
+    gene_id_map = _load_plot_gene_id_map(output_root)
     styles = {
         "consistent": (
             "Consistent",
@@ -469,7 +522,7 @@ def load_annotation_consistency_summary(
                 f"and name_consistency columns: {audit_path}"
             )
         for row in reader:
-            identifier = row["Locus_tag"].strip() or row["ID"].strip()
+            identifier = _plot_gene_identifier(row, gene_id_map)
             status = row["name_consistency"].strip()
             if status in {"no_comparable_family", "no_near_identical_peer"}:
                 # Backward-compatible reading of audit tables written before

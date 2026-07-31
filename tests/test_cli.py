@@ -25,7 +25,7 @@ class CliTests(unittest.TestCase):
                 main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "msspack 0.7.2")
+        self.assertEqual(stdout.getvalue().strip(), "msspack 0.7.3")
 
     def test_main_init_writes_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

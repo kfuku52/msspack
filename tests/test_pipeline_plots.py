@@ -20,7 +20,10 @@ from msspack.pipeline_plot_models import (
     SankeyNode,
 )
 from msspack.pipeline_plot_render import (
+    EVENT_COUNTS_SUBTITLE,
     SANKEY_HEIGHT,
+    _LaidOutNode,
+    _sankey_label_y,
     _sankey_layout,
     build_sankey,
     load_sankey_busco_summaries,
@@ -230,6 +233,32 @@ def _sankey_gene_sets(groups: dict[str, list[str]]) -> tuple[PipelineGeneSet, ..
 
 
 class PipelinePlotTests(unittest.TestCase):
+    def test_large_no_adjustment_label_is_offset_from_the_center(self) -> None:
+        node = _LaidOutNode(
+            node=SankeyNode(
+                "padding_unchanged",
+                "No adjustment",
+                4,
+                100,
+                "#22c55e",
+            ),
+            x=100.0,
+            y=80.0,
+            width=9.0,
+            height=100.0,
+        )
+
+        self.assertEqual(_sankey_label_y(node, total_stages=6), 115.0)
+
+    def test_event_counts_subtitle_fits_the_chart_width(self) -> None:
+        self.assertLessEqual(
+            pdf_helvetica_text_width(
+                EVENT_COUNTS_SUBTITLE,
+                size=8,
+            ),
+            7.2 * 72.0 - 32.0,
+        )
+
     def test_pdf_helvetica_text_width_uses_real_character_widths(self) -> None:
         self.assertAlmostEqual(
             pdf_helvetica_text_width("Input", size=8, bold=True),
@@ -551,6 +580,44 @@ class PipelinePlotTests(unittest.TestCase):
         self.assertEqual(
             {group.key: group.count for group in summary.groups},
             {"swissprot": 1, "pfam": 1, "none": 1},
+        )
+
+    def test_load_functional_annotation_summary_maps_custom_locus_tags_to_gene_ids(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_root = Path(tmp_dir)
+            final_dir = output_root / "final"
+            intermediate_dir = output_root / "intermediate"
+            final_dir.mkdir()
+            intermediate_dir.mkdir()
+            (intermediate_dir / "12.gff.final-sorted.gff").write_text(
+                "\n".join(
+                    [
+                        "##gff-version 3",
+                        "chr1\t.\tgene\t1\t90\t.\t+\t.\tID=g1",
+                        "chr1\t.\tmRNA\t1\t90\t.\t+\t.\tID=g1.t1;Parent=g1",
+                        "chr1\t.\tgene\t101\t190\t.\t+\t.\tID=g2",
+                        "chr1\t.\tmRNA\t101\t190\t.\t+\t.\tID=g2.t1;Parent=g2",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (final_dir / "functional-annotation.tsv").write_text(
+                "ID\tLocus_tag\tsource\n"
+                "g1.t1\tDemo_g1\tswissprot\n"
+                "g2.t1\tDemo_g2\tpfam\n",
+                encoding="utf-8",
+            )
+
+            summary = load_functional_annotation_summary(output_root)
+
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertEqual(
+            {group.key: group.locus_tags for group in summary.groups},
+            {"swissprot": ("g1",), "pfam": ("g2",)},
         )
 
     def test_load_sankey_busco_summaries_maps_results_to_measured_stages(self) -> None:
