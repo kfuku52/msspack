@@ -13,6 +13,7 @@ from .config_models import (
     FunctionalAnnotationConfig,
     MSSPackConfig,
     PipelineConfig,
+    PlotsConfig,
     ProjectConfig,
     ReferenceConfig,
     SampleConfig,
@@ -20,6 +21,7 @@ from .config_models import (
     SubmitterConfig,
     ToolsConfig,
 )
+from .coordinate_duplicates import COORDINATE_DUPLICATE_POLICIES
 
 HOLD_DATE_RE = re.compile(r"^\d{8}$")
 JAVA_HEAP_RE = re.compile(r"^\d+[KMGkmg]$")
@@ -64,6 +66,26 @@ def ensure_date(value: str, key: str, fmt: str) -> None:
         raise ConfigError(f"Config value '{key}' must match {fmt}") from exc
 
 
+def ensure_collection_date(value: str, key: str) -> None:
+    if not value:
+        return
+    parts = value.split("/")
+    if len(parts) not in {1, 2}:
+        raise ConfigError(
+            f"Config value '{key}' must match YYYY-MM-DD or YYYY-MM-DD/YYYY-MM-DD"
+        )
+    try:
+        dates = [datetime.strptime(part, "%Y-%m-%d") for part in parts]
+    except ValueError as exc:
+        raise ConfigError(
+            f"Config value '{key}' must match YYYY-MM-DD or YYYY-MM-DD/YYYY-MM-DD"
+        ) from exc
+    if len(dates) == 2 and dates[0] > dates[1]:
+        raise ConfigError(
+            f"Config value '{key}' range start must not be after its end"
+        )
+
+
 def ensure_choice(value: str, key: str, choices: set[str]) -> None:
     if value not in choices:
         raise ConfigError(f"Config value '{key}' must be one of: {', '.join(sorted(choices))}")
@@ -84,7 +106,7 @@ def validate_sample_config(sample: SampleConfig) -> None:
     ensure_nonempty(sample.locus_tag, "sample.locus_tag")
     ensure_positive(sample.locus_tag_digits, "sample.locus_tag_digits")
     ensure_nonempty(sample.scientific_name, "sample.scientific_name")
-    ensure_date(sample.collection_date, "sample.collection_date", "%Y-%m-%d")
+    ensure_collection_date(sample.collection_date, "sample.collection_date")
     try:
         genetic_code = int(sample.genetic_code)
     except ValueError as exc:
@@ -131,6 +153,11 @@ def validate_pipeline_config(pipeline: PipelineConfig) -> None:
         pipeline.min_artificial_intron_size,
         "pipeline.min_artificial_intron_size",
     )
+    ensure_choice(
+        pipeline.coordinate_duplicate_policy,
+        "pipeline.coordinate_duplicate_policy",
+        COORDINATE_DUPLICATE_POLICIES,
+    )
     for pattern in pipeline.replace_product_patterns:
         try:
             re.compile(pattern)
@@ -138,6 +165,13 @@ def validate_pipeline_config(pipeline: PipelineConfig) -> None:
             raise ConfigError(
                 f"Invalid regex in 'pipeline.replace_product_patterns': {pattern!r}: {exc}"
             ) from exc
+
+
+def validate_plots_config(plots: PlotsConfig) -> None:
+    ensure_positive(
+        plots.coordinate_duplicate_limit,
+        "plots.coordinate_duplicate_limit",
+    )
 
 
 def validate_tools_config(tools: ToolsConfig) -> None:
@@ -356,6 +390,7 @@ def validate_config(config: MSSPackConfig) -> None:
     validate_submitter_config(config.submitter)
     validate_reference_config(config.reference)
     validate_pipeline_config(config.pipeline)
+    validate_plots_config(config.plots)
     validate_tools_config(config.tools)
     validate_databases_config(config.databases)
     validate_busco_config(config.busco)

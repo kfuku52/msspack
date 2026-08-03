@@ -74,7 +74,11 @@ class DemoDatasetTests(unittest.TestCase):
             self.assertTrue(outputs.ann_path.is_file())
             self.assertTrue(outputs.fasta_path.is_file())
             self.assertTrue(plots.gene_flow_svg.is_file())
+            self.assertTrue(plots.coordinate_duplicates_svg.is_file())
             self.assertTrue(report.index_html.is_file())
+            duplicate_svg = plots.coordinate_duplicates_svg.read_text(encoding="utf-8")
+            self.assertIn("MSSPACK_TEST_GENE_0006", duplicate_svg)
+            self.assertIn("MSSPACK_TEST_GENE_0007", duplicate_svg)
             self.assertIn(
                 "MSSPACK_TEST_GENE_0010",
                 (

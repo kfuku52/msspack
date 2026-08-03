@@ -13,6 +13,7 @@ from msspack.busco import (
     _busco_lineage_ready,
     _discover_short_summary,
     _publish_busco_workspace,
+    _read_summary_json,
     _run_busco_once,
     _update_busco_manifest,
     _write_comparison_pdf,
@@ -25,6 +26,7 @@ from msspack.busco import (
 )
 from msspack.config import BuscoConfig
 from msspack.database_lock import DatabaseLockSettings
+from msspack.utils import MSSPackError
 
 
 class BuscoTests(unittest.TestCase):
@@ -149,6 +151,153 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
         self.assertEqual(summary.selection_strategy, "auto-lineage")
         self.assertEqual(summary.input_sequence_count, 2)
         self.assertEqual(summary.to_dict()["input_sequence_count"], 2)
+        self.assertNotIn("raw_output_dir", summary.to_dict())
+        self.assertNotIn("short_summary_path", summary.to_dict())
+
+    def test_successful_busco_run_removes_raw_output_after_persisting_summary(self) -> None:
+        summary_text = """\
+# BUSCO version is: 6.0.0
+# The lineage dataset is: embryophyta_odb12
+# BUSCO was run in mode: genome
+C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            input_fasta = root / "input.fa"
+            input_fasta.write_text(">query\nATG\n", encoding="utf-8")
+            summary_json = root / "summary.json"
+            raw_root = root / "raw"
+            raw_dir = raw_root / "input"
+
+            def create_busco_output(command: list[str], **_kwargs: object) -> None:
+                out_path = Path(command[command.index("--out_path") + 1])
+                run_dir = out_path / "run"
+                run_dir.mkdir(parents=True)
+                (run_dir / "short_summary.txt").write_text(summary_text, encoding="utf-8")
+
+            with patch("msspack.busco.run_command", side_effect=create_busco_output):
+                summary = _run_busco_once(
+                    busco=BuscoConfig(command="busco", mode="genome"),
+                    label="input",
+                    input_fasta=input_fasta,
+                    summary_json_path=summary_json,
+                    raw_dir=raw_dir,
+                    log_path=root / "busco.log",
+                    dependencies=[input_fasta],
+                    lineage_dataset="embryophyta_odb12",
+                )
+
+            payload = json.loads(summary_json.read_text(encoding="utf-8"))
+            self.assertEqual(summary.complete_pct, 98.6)
+            self.assertFalse(raw_dir.exists())
+            self.assertFalse(raw_root.exists())
+            self.assertNotIn("raw_output_dir", payload)
+            self.assertNotIn("short_summary_path", payload)
+
+    def test_failed_busco_run_retains_raw_output_for_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            input_fasta = root / "input.fa"
+            input_fasta.write_text(">query\nATG\n", encoding="utf-8")
+            summary_json = root / "summary.json"
+            raw_dir = root / "raw" / "input"
+
+            def fail_with_diagnostic(command: list[str], **_kwargs: object) -> None:
+                out_path = Path(command[command.index("--out_path") + 1])
+                out_path.mkdir(parents=True, exist_ok=True)
+                (out_path / "diagnostic.txt").write_text("failed\n", encoding="utf-8")
+                raise MSSPackError("BUSCO failed")
+
+            with patch("msspack.busco.run_command", side_effect=fail_with_diagnostic):
+                with self.assertRaisesRegex(MSSPackError, "BUSCO failed"):
+                    _run_busco_once(
+                        busco=BuscoConfig(command="busco", mode="genome"),
+                        label="input",
+                        input_fasta=input_fasta,
+                        summary_json_path=summary_json,
+                        raw_dir=raw_dir,
+                        log_path=root / "busco.log",
+                        dependencies=[input_fasta],
+                        lineage_dataset="embryophyta_odb12",
+                    )
+
+            self.assertTrue((raw_dir / "diagnostic.txt").is_file())
+            self.assertFalse(summary_json.exists())
+
+    def test_cached_busco_summary_removes_existing_raw_output(self) -> None:
+        summary_text = """\
+# BUSCO version is: 6.0.0
+# The lineage dataset is: embryophyta_odb12
+# BUSCO was run in mode: genome
+C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            input_fasta = root / "input.fa"
+            input_fasta.write_text(">query\nATG\n", encoding="utf-8")
+            short_summary = root / "short_summary.txt"
+            short_summary.write_text(summary_text, encoding="utf-8")
+            summary_json = root / "summary.json"
+            _write_summary_json(
+                parse_short_summary(
+                    short_summary,
+                    label="input",
+                    input_fasta=input_fasta,
+                    raw_output_dir=root / "raw" / "input",
+                ),
+                summary_json,
+            )
+            raw_root = root / "raw"
+            raw_dir = raw_root / "input"
+            raw_dir.mkdir(parents=True)
+            (raw_dir / "old-output.txt").write_text("cached\n", encoding="utf-8")
+
+            with patch("msspack.busco.run_if_needed", return_value=False):
+                summary = _run_busco_once(
+                    busco=BuscoConfig(command="busco", mode="genome"),
+                    label="input",
+                    input_fasta=input_fasta,
+                    summary_json_path=summary_json,
+                    raw_dir=raw_dir,
+                    log_path=root / "busco.log",
+                    dependencies=[input_fasta],
+                    lineage_dataset="embryophyta_odb12",
+                )
+
+            self.assertEqual(summary.complete_pct, 98.6)
+            self.assertFalse(raw_dir.exists())
+            self.assertFalse(raw_root.exists())
+
+    def test_read_summary_json_accepts_legacy_raw_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            summary_path = root / "summary.json"
+            payload = {
+                "label": "input",
+                "input_fasta": str(root / "input.fa"),
+                "raw_output_dir": str(root / "raw" / "input"),
+                "short_summary_path": str(root / "raw" / "input" / "short_summary.txt"),
+                "mode": "genome",
+                "lineage_dataset": "embryophyta_odb12",
+                "busco_version": "6.0.0",
+                "percentages": {
+                    "complete": 98.6,
+                    "single_copy": 97.4,
+                    "duplicated": 1.2,
+                    "fragmented": 0.5,
+                    "missing": 0.9,
+                },
+                "counts": {"total_buscos": 425},
+            }
+            summary_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            summary = _read_summary_json(summary_path)
+
+        self.assertEqual(summary.raw_output_dir, root / "raw" / "input")
+        self.assertEqual(
+            summary.short_summary_path,
+            root / "raw" / "input" / "short_summary.txt",
+        )
 
     def test_parse_short_summary_accepts_transcriptome_mode(self) -> None:
         summary_text = """\

@@ -13,6 +13,13 @@ from .annotation_consistency_plots import (
     write_source_consistency_svg,
 )
 from .config import load_config
+from .coordinate_duplicate_plots import (
+    build_coordinate_duplicate_plot_data,
+    coordinate_duplicate_plot_summary,
+    write_coordinate_duplicate_pdf,
+    write_coordinate_duplicate_plot_tsv,
+    write_coordinate_duplicate_svg,
+)
 from .execution import module_origin, run_if_needed
 from .pipeline_plot_data import (
     collect_pipeline_plot_data,
@@ -70,6 +77,8 @@ def run_pipeline_plots(
         module_origin("msspack.pipeline_plot_models"),
         module_origin("msspack.pipeline_plot_render"),
         module_origin("msspack.annotation_consistency_plots"),
+        module_origin("msspack.coordinate_duplicates"),
+        module_origin("msspack.coordinate_duplicate_plots"),
     ]
     required_logs = [
         log_dir / "06.drop-duplicate-coordinate-gene.log",
@@ -88,6 +97,9 @@ def run_pipeline_plots(
             artifacts.event_counts_tsv,
             artifacts.event_counts_svg,
             artifacts.event_counts_pdf,
+            artifacts.coordinate_duplicates_tsv,
+            artifacts.coordinate_duplicates_svg,
+            artifacts.coordinate_duplicates_pdf,
             artifacts.name_consistency_tsv,
             artifacts.name_consistency_svg,
             artifacts.name_consistency_pdf,
@@ -107,6 +119,34 @@ def run_pipeline_plots(
     )
     busco_summaries = load_sankey_busco_summaries(output_root)
     events = build_event_counts(bundle.metrics)
+    dedup_record = bundle.records["drop_duplicate_coordinate_gene"]
+    duplicate_map_value = dedup_record.details.get("duplicate_map_path")
+    duplicate_map_path = (
+        Path(str(duplicate_map_value))
+        if duplicate_map_value
+        else log_dir / "06.drop-duplicate-coordinate-gene.duplicate-map.tsv"
+    )
+    source_gff = output_root / "intermediate" / "05.gff.coordinates-trimmed.gff"
+    duplicate_plot_data = build_coordinate_duplicate_plot_data(
+        source_gff=source_gff,
+        duplicate_map=duplicate_map_path,
+    )
+    if duplicate_plot_data.total_removed_genes != bundle.metrics.duplicate_removed_genes:
+        raise MSSPackError(
+            "Coordinate duplicate plot found "
+            f"{duplicate_plot_data.total_removed_genes:,} removed genes; expected "
+            f"{bundle.metrics.duplicate_removed_genes:,}"
+        )
+    duplicate_limit = config.plots.coordinate_duplicate_limit
+    duplicate_summary = coordinate_duplicate_plot_summary(
+        duplicate_plot_data,
+        duplicate_limit,
+    )
+    duplicate_dependencies = [
+        source_gff,
+        *([duplicate_map_path] if duplicate_map_path.exists() else []),
+        *module_paths,
+    ]
     busco_comparison_path = output_root / "busco" / "cds" / "comparison.json"
     busco_dependencies = [busco_comparison_path] if busco_comparison_path.exists() else []
     dependency_paths = [
@@ -190,6 +230,34 @@ def run_pipeline_plots(
         dependencies=[artifacts.summary_json, artifacts.event_counts_tsv, *module_paths],
         action=lambda: write_event_counts_pdf(events, artifacts.event_counts_pdf),
     )
+    run_if_needed(
+        outputs=[artifacts.coordinate_duplicates_tsv],
+        dependencies=duplicate_dependencies,
+        action=lambda: write_coordinate_duplicate_plot_tsv(
+            duplicate_plot_data,
+            artifacts.coordinate_duplicates_tsv,
+        ),
+    )
+    run_if_needed(
+        outputs=[artifacts.coordinate_duplicates_svg],
+        dependencies=[artifacts.coordinate_duplicates_tsv, *module_paths],
+        cache_key={"limit": duplicate_limit},
+        action=lambda: write_coordinate_duplicate_svg(
+            duplicate_plot_data,
+            artifacts.coordinate_duplicates_svg,
+            limit=duplicate_limit,
+        ),
+    )
+    run_if_needed(
+        outputs=[artifacts.coordinate_duplicates_pdf],
+        dependencies=[artifacts.coordinate_duplicates_tsv, *module_paths],
+        cache_key={"limit": duplicate_limit},
+        action=lambda: write_coordinate_duplicate_pdf(
+            duplicate_plot_data,
+            artifacts.coordinate_duplicates_pdf,
+            limit=duplicate_limit,
+        ),
+    )
     if bundle.annotation_consistency is not None:
         consistency = bundle.annotation_consistency
         run_if_needed(
@@ -247,6 +315,7 @@ def run_pipeline_plots(
         artifacts=artifacts,
         metrics=bundle.metrics,
         gene_sets=bundle.gene_sets,
+        coordinate_duplicate_summary=duplicate_summary,
         annotation_consistency=bundle.annotation_consistency,
     )
     return artifacts

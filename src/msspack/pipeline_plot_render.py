@@ -44,6 +44,9 @@ SANKEY_LOWER_BAND_TOP_GAP = 8.0
 SANKEY_BUSCO_BAND_HEIGHT = SANKEY_BUSCO_HEIGHT - SANKEY_HEIGHT - SANKEY_LOWER_BAND_TOP_GAP
 SANKEY_SUMMARY_ROW_HEIGHT = 136.0
 SANKEY_LINK_OPACITY = 0.72
+EVENT_COUNTS_SUBTITLE = (
+    "Step-level counts. Removed mRNAs are transcripts; all other bars are genes."
+)
 SANKEY_BUSCO_COLORS = {
     "single_copy": "#2ca25f",
     "duplicated": "#3b82f6",
@@ -121,6 +124,9 @@ def build_plot_artifacts(output_root: Path) -> PipelinePlotArtifacts:
         event_counts_tsv=root / "pipeline-event-counts.tsv",
         event_counts_svg=root / "pipeline-event-counts.svg",
         event_counts_pdf=root / "pipeline-event-counts.pdf",
+        coordinate_duplicates_tsv=root / "coordinate-duplicate-gene-models.tsv",
+        coordinate_duplicates_svg=root / "coordinate-duplicate-gene-models.svg",
+        coordinate_duplicates_pdf=root / "coordinate-duplicate-gene-models.pdf",
         name_consistency_tsv=root / "functional-annotation-name-consistency.tsv",
         name_consistency_svg=root / "functional-annotation-name-consistency.svg",
         name_consistency_pdf=root / "functional-annotation-name-consistency.pdf",
@@ -1034,7 +1040,7 @@ def _sankey_label_anchor(node: _LaidOutNode, total_stages: int) -> tuple[float, 
 
 
 def _sankey_label_y(node: _LaidOutNode, total_stages: int) -> float:
-    if total_stages > 6 and node.node.id == "padding_unchanged" and node.height >= 60.0:
+    if node.node.id == "padding_unchanged" and node.height >= 60.0:
         return node.y + node.height * 0.35
     return node.y + min(max(node.height / 2.0, 9.0), node.height - 2.0)
 
@@ -2290,11 +2296,11 @@ def _nice_axis_max(max_count: int) -> int:
 
 def _event_chart_geometry(events: list[EventCount]) -> tuple[float, ...]:
     width = SANKEY_WIDTH
-    left = 190.0
+    left = 220.0
     top = 78.0
     bar_height = 16.0
     row_gap = 31.0
-    bar_width = 273.0
+    bar_width = 243.0
     height = top + max(0, len(events) - 1) * row_gap + bar_height + 18.0
     return width, height, left, top, bar_height, row_gap, bar_width
 
@@ -2318,7 +2324,7 @@ def write_event_counts_svg(events: list[EventCount], output_path: Path) -> Path:
         f"<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .label{{font-size:{SVG_FONT_SIZE};font-weight:700}} .unit{{font-size:{SVG_FONT_SIZE};fill:#64748b}} .value{{font-size:{SVG_FONT_SIZE};fill:#334155}} .tick{{font-size:{SVG_FONT_SIZE};fill:#6b7280}}</style>",
         '<rect width="100%" height="100%" fill="white"/>',
         '<text x="16" y="16" class="title">Pipeline event counts</text>',
-        '<text x="16" y="31" class="subtitle">Step-level counts from packaging logs. Removed mRNAs are transcript counts; the other bars are gene counts.</text>',
+        f'<text x="16" y="31" class="subtitle">{EVENT_COUNTS_SUBTITLE}</text>',
     ]
     for tick in _event_ticks(axis_max):
         x = left + bar_width * tick / axis_max
@@ -2380,7 +2386,7 @@ def write_event_counts_pdf(events: list[EventCount], output_path: Path) -> Path:
             page_height=height,
             x=16,
             y_top=31,
-            text="Step-level counts from packaging logs. Removed mRNAs are transcript counts; the other bars are gene counts.",
+            text=EVENT_COUNTS_SUBTITLE,
             font="F1",
             size=CHART_FONT_SIZE_PT,
             color=MUTED_RGB,
@@ -2470,6 +2476,7 @@ def update_plot_manifest(
     artifacts: PipelinePlotArtifacts,
     metrics: PipelinePlotMetrics,
     gene_sets: tuple[PipelineGeneSet, ...],
+    coordinate_duplicate_summary: dict[str, object],
     annotation_consistency: AnnotationConsistencySummary | None = None,
 ) -> None:
     if manifest_path.exists():
@@ -2489,6 +2496,12 @@ def update_plot_manifest(
         "event_counts_tsv": str(artifacts.event_counts_tsv),
         "event_counts_svg": str(artifacts.event_counts_svg),
         "event_counts_pdf": str(artifacts.event_counts_pdf),
+        "coordinate_duplicates": {
+            "tsv": str(artifacts.coordinate_duplicates_tsv),
+            "svg": str(artifacts.coordinate_duplicates_svg),
+            "pdf": str(artifacts.coordinate_duplicates_pdf),
+            **coordinate_duplicate_summary,
+        },
         "metrics": metrics.to_dict(),
         "sources": metrics.sources,
         "gene_sets": {gene_set.key: gene_set.to_dict() for gene_set in gene_sets},

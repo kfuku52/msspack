@@ -76,8 +76,6 @@ BUSCO_COMPARISON_WIDTH_PT = BUSCO_COMPARISON_WIDTH_IN * PDF_POINTS_PER_INCH
 class BuscoSummary:
     label: str
     input_fasta: Path
-    raw_output_dir: Path
-    short_summary_path: Path
     mode: str
     lineage_dataset: str
     busco_version: str
@@ -94,13 +92,13 @@ class BuscoSummary:
     missing_count: int | None = None
     selection_strategy: str = ""
     input_sequence_count: int | None = None
+    raw_output_dir: Path | None = None
+    short_summary_path: Path | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
             "label": self.label,
             "input_fasta": str(self.input_fasta),
-            "raw_output_dir": str(self.raw_output_dir),
-            "short_summary_path": str(self.short_summary_path),
             "mode": self.mode,
             "lineage_dataset": self.lineage_dataset,
             "busco_version": self.busco_version,
@@ -208,7 +206,7 @@ def _build_comparison_artifacts(root: Path, name: str) -> BuscoComparisonArtifac
     return BuscoComparisonArtifacts(
         root=group_root,
         logs_dir=ensure_dir(group_root / "logs"),
-        raw_root=ensure_dir(group_root / "raw"),
+        raw_root=group_root / "raw",
         input_fasta=input_fasta,
         processed_fasta=processed_fasta,
         input_summary_json=group_root / "input.summary.json",
@@ -288,6 +286,14 @@ def _busco_env(command0: str) -> dict[str, str] | None:
 
 def _remove_busco_output_dir(path: Path) -> None:
     _remove_busco_path(path)
+
+
+def _cleanup_successful_busco_output(raw_dir: Path) -> None:
+    _remove_busco_output_dir(raw_dir)
+    try:
+        raw_dir.parent.rmdir()
+    except OSError:
+        pass
 
 
 def _remove_busco_path(path: Path) -> None:
@@ -432,11 +438,11 @@ def _read_summary_json(path: Path) -> BuscoSummary:
     input_sequence_count = _optional_int(data.get("input_sequence_count"))
     if input_sequence_count is None and input_fasta.is_file():
         input_sequence_count = count_fasta_records(input_fasta)
+    raw_output_dir = data.get("raw_output_dir")
+    short_summary_path = data.get("short_summary_path")
     return BuscoSummary(
         label=str(data["label"]),
         input_fasta=input_fasta,
-        raw_output_dir=Path(str(data["raw_output_dir"])),
-        short_summary_path=Path(str(data["short_summary_path"])),
         mode=str(data["mode"]),
         lineage_dataset=str(data["lineage_dataset"]),
         busco_version=str(data["busco_version"]),
@@ -453,6 +459,8 @@ def _read_summary_json(path: Path) -> BuscoSummary:
         fragmented_count=_optional_int(counts.get("fragmented")),
         missing_count=_optional_int(counts.get("missing")),
         input_sequence_count=input_sequence_count,
+        raw_output_dir=Path(str(raw_output_dir)) if raw_output_dir else None,
+        short_summary_path=Path(str(short_summary_path)) if short_summary_path else None,
     )
 
 
@@ -553,7 +561,9 @@ def _run_busco_once(
     )
     if not ran and not summary_json_path.exists():
         raise MSSPackError(f"BUSCO summary JSON was not created: {summary_json_path}")
-    return _read_summary_json(summary_json_path)
+    summary = _read_summary_json(summary_json_path)
+    _cleanup_successful_busco_output(raw_dir)
+    return summary
 
 
 def _execute_and_capture_summary(

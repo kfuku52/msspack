@@ -4,18 +4,34 @@ from math import inf, nan
 from pathlib import Path
 from unittest.mock import patch
 
-from msspack.config import ConfigError, DatabasesConfig, load_config
+from msspack.config import ConfigError, DatabasesConfig, PipelineConfig, load_config
 from msspack.config_loading import (
     _validate_raw_config,
     load_functional_annotation_config,
+    load_pipeline_config,
 )
 from msspack.config_validation import (
+    ensure_collection_date,
     validate_databases_config,
     validate_functional_annotation_config,
+    validate_pipeline_config,
 )
 
 
 class ConfigTests(unittest.TestCase):
+    def test_collection_date_accepts_an_iso_date_range(self) -> None:
+        ensure_collection_date(
+            "2020-06-10/2020-10-14",
+            "sample.collection_date",
+        )
+
+    def test_collection_date_rejects_a_reversed_range(self) -> None:
+        with self.assertRaises(ConfigError):
+            ensure_collection_date(
+                "2020-10-14/2020-06-10",
+                "sample.collection_date",
+            )
+
     def test_loads_and_validates_nested_annotation_consistency_config(self) -> None:
         raw = {
             "functional_annotation": {
@@ -138,6 +154,11 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.sample.locus_tag_digits, 6)
             self.assertEqual(config.submission.datatype, "WGS")
             self.assertTrue(config.pipeline.run_gapjust)
+            self.assertEqual(
+                config.pipeline.coordinate_duplicate_policy,
+                "longest_valid_cds",
+            )
+            self.assertEqual(config.plots.coordinate_duplicate_limit, 50)
             self.assertEqual(config.tools.java, "java")
             self.assertEqual(config.busco.command, "busco")
             self.assertTrue(config.busco.auto_lineage)
@@ -163,6 +184,42 @@ class ConfigTests(unittest.TestCase):
                     config.busco_database_dir,
                     shared_root / "busco",
                 )
+
+    def test_coordinate_duplicate_plot_limit_is_configurable(self) -> None:
+        raw = {"plots": {"coordinate_duplicate_limit": 125}}
+
+        _validate_raw_config(raw)
+
+        from msspack.config_loading import load_plots_config
+        from msspack.config_validation import validate_plots_config
+
+        plots = load_plots_config(raw["plots"])
+        validate_plots_config(plots)
+        self.assertEqual(plots.coordinate_duplicate_limit, 125)
+
+    def test_coordinate_duplicate_plot_limit_must_be_positive(self) -> None:
+        from msspack.config import PlotsConfig
+        from msspack.config_validation import validate_plots_config
+
+        with self.assertRaises(ConfigError):
+            validate_plots_config(PlotsConfig(coordinate_duplicate_limit=0))
+
+    def test_coordinate_duplicate_selection_policy_is_configurable(self) -> None:
+        raw = {"pipeline": {"coordinate_duplicate_policy": "first"}}
+
+        _validate_raw_config(raw)
+        pipeline = load_pipeline_config(raw["pipeline"])
+        validate_pipeline_config(pipeline)
+
+        self.assertEqual(pipeline.coordinate_duplicate_policy, "first")
+
+    def test_coordinate_duplicate_selection_policy_rejects_unknown_value(
+        self,
+    ) -> None:
+        with self.assertRaises(ConfigError):
+            validate_pipeline_config(
+                PipelineConfig(coordinate_duplicate_policy="unsupported")
+            )
 
     def test_database_lock_settings_must_be_positive(self) -> None:
         with self.assertRaises(ConfigError):

@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.7.3 - 2026-07-31
+
+- Map functional-annotation evidence back to source GFF gene IDs when custom
+  submission locus tags are used, so pipeline Sankey plots can reconcile gene
+  events with annotation and consistency groups.
+- Improve Sankey and event-count label placement for large unchanged groups
+  and long event descriptions.
+
+## 0.7.2 - 2026-07-30
+
+- Accept ISO 8601 collection-date intervals in addition to single dates, and reject
+  ranges whose start is later than their end.
+- Calculate intron sizes directly from adjacent CDS coordinates so one-base CDS
+  segments are converted without location-string parsing failures.
+
+## 0.7.1 - 2026-07-29
+
+- Treat BUSCO raw output as temporary: remove it after a summary is durably cached,
+  retain it when BUSCO or summary parsing fails, and clean up raw output left by
+  successful cached runs.
+- Stop recording temporary BUSCO raw and short-summary paths in durable summary JSON
+  while continuing to read summaries written by earlier releases.
+
+## 0.7.0 - 2026-07-28
+
+- Add genome-browser-style coordinate-duplicate gene-model plots in TSV, SVG, and
+  multipage PDF formats, show the first 50 removals by default, and expose a
+  configurable plot limit in pipeline reports and manifests.
+- Select exact-coordinate duplicate genes from the input GFF3 and reference FASTA
+  using translated-CDS validity, internal stops, start/stop completeness, ambiguous
+  amino acids, CDS length, intron count, and stable input-order tie breaking.
+- Record kept and removed transcripts, selection evidence, splice motifs, decision
+  reasons, and low-confidence flags in a backward-compatible duplicate audit map;
+  retain legacy `first` and opt-out `keep_all` policies.
+
 ## 0.6.0 - 2026-07-24
 
 - Add `msspack run` for the complete BUSCO-to-report workflow, project-local

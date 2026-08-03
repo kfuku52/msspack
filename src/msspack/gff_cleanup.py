@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from datetime import datetime
 from pathlib import Path
 
+from .coordinate_duplicates import (
+    CoordinateGene,
+    build_coordinate_gene_candidates,
+    identify_coordinate_duplicate_pairs,
+    write_coordinate_duplicate_map,
+)
 from .fasta import iter_fasta
-from .gff import parse_attributes
+from .gff import GFFRecord, parse_attributes
 from .step_logging import write_id_list, write_step_log, write_step_metrics
 from .utils import MSSPackError, atomic_text_writer, ensure_dir
 
@@ -122,16 +128,20 @@ def trim_gff_to_fasta_bounds(
 def drop_duplicate_coordinate_genes(
     *,
     input_path: Path,
+    fasta_path: Path | None = None,
     output_path: Path,
     log_path: Path,
+    genetic_code: str = "1",
+    selection_policy: str = "longest_valid_cds",
     removed_gene_ids_path: Path | None = None,
+    duplicate_map_path: Path | None = None,
     metrics_path: Path | None = None,
 ) -> dict[str, object]:
     started_at = datetime.now()
     lines: list[tuple[bool, str, tuple[str, int, int, str] | None, str | None, str | None]] = []
     parent_to_children: dict[str, list[str]] = defaultdict(list)
-    coords_to_gene: dict[tuple[str, int, int, str], str] = {}
-    removed_gene_ids: list[str] = []
+    coordinate_genes: list[CoordinateGene] = []
+    records: list[GFFRecord] = []
     input_gene_total = 0
 
     with input_path.open("r", encoding="utf-8") as handle:
@@ -152,6 +162,8 @@ def drop_duplicate_coordinate_genes(
             if len(fields) < 9:
                 lines.append((False, line, None, None, None))
                 continue
+            record = GFFRecord.from_line(line)
+            records.append(record)
             attr = parse_attributes(fields[8])
             rec_id = attr.get("ID")
             parent = attr.get("Parent")
@@ -159,15 +171,42 @@ def drop_duplicate_coordinate_genes(
             if fields[2] == "gene" and rec_id is not None:
                 input_gene_total += 1
                 coord_key = (fields[0], int(fields[3]), int(fields[4]), fields[6])
-                if coord_key in coords_to_gene:
-                    removed_gene_ids.append(rec_id)
-                else:
-                    coords_to_gene[coord_key] = rec_id
+                coordinate_genes.append(
+                    CoordinateGene(
+                        gene_id=rec_id,
+                        seqid=fields[0],
+                        start=coord_key[1],
+                        end=coord_key[2],
+                        strand=fields[6],
+                    )
+                )
             if rec_id and parent:
                 for parent_id in parent.split(","):
                     parent_to_children[parent_id].append(rec_id)
             lines.append((True, line, coord_key, rec_id, parent))
 
+    coordinate_counts: dict[tuple[str, int, int, str], int] = defaultdict(int)
+    for gene in coordinate_genes:
+        coordinate_counts[gene.coordinate_key] += 1
+    collision_groups = sum(1 for count in coordinate_counts.values() if count > 1)
+
+    if selection_policy == "longest_valid_cds":
+        if fasta_path is None:
+            raise MSSPackError(
+                "The longest_valid_cds coordinate duplicate policy requires a reference FASTA"
+            )
+        coordinate_genes = list(
+            build_coordinate_gene_candidates(
+                records=records,
+                fasta_path=fasta_path,
+                genetic_code=genetic_code,
+            )
+        )
+    duplicate_pairs = identify_coordinate_duplicate_pairs(
+        coordinate_genes,
+        policy=selection_policy,
+    )
+    removed_gene_ids = [pair.removed_gene_id for pair in duplicate_pairs]
     to_remove = set()
     queue = deque(removed_gene_ids)
     while queue:
@@ -193,17 +232,30 @@ def drop_duplicate_coordinate_genes(
 
     write_step_log(
         log_path=log_path,
-        command=f"msspack internal drop-duplicate-coordinate-gene --input {input_path} --output {output_path}",
+        command=(
+            f"msspack internal drop-duplicate-coordinate-gene --input {input_path} "
+            f"--output {output_path} --policy {selection_policy}"
+        ),
         step="drop-duplicate-coordinate-gene",
         started_at=started_at,
         count_unit="genes",
         input_total=input_gene_total,
         changed_total=len(removed_gene_ids),
         output_total=input_gene_total - len(removed_gene_ids),
-        details=[f"Output feature count: {kept:,}"],
+        details=[
+            f"Output feature count: {kept:,}",
+            f"Coordinate collision groups: {collision_groups:,}",
+            f"Selection policy: {selection_policy}",
+            (
+                "Low-confidence selections: "
+                f"{sum(pair.low_confidence for pair in duplicate_pairs):,}"
+            ),
+        ],
     )
     if removed_gene_ids_path is not None:
         write_id_list(removed_gene_ids_path, removed_gene_ids)
+    if duplicate_map_path is not None:
+        write_coordinate_duplicate_map(duplicate_map_path, duplicate_pairs)
     if metrics_path is not None:
         write_step_metrics(
             metrics_path=metrics_path,
@@ -214,14 +266,28 @@ def drop_duplicate_coordinate_genes(
             output_total=input_gene_total - len(removed_gene_ids),
             details={
                 "output_feature_count": kept,
+                "coordinate_collision_groups": collision_groups,
+                "selection_policy": selection_policy,
+                "selection_reasons": dict(
+                    sorted(
+                        Counter(pair.selection_reason for pair in duplicate_pairs).items()
+                    )
+                ),
+                "low_confidence_selections": sum(
+                    pair.low_confidence for pair in duplicate_pairs
+                ),
                 "removed_gene_ids_path": str(removed_gene_ids_path) if removed_gene_ids_path else "",
+                "duplicate_map_path": str(duplicate_map_path) if duplicate_map_path else "",
             },
         )
     return {
         "removed_gene_ids": removed_gene_ids,
+        "duplicate_gene_pairs": duplicate_pairs,
         "input_gene_total": input_gene_total,
         "output_gene_total": input_gene_total - len(removed_gene_ids),
         "output_feature_count": kept,
+        "coordinate_collision_groups": collision_groups,
+        "selection_policy": selection_policy,
     }
 
 
