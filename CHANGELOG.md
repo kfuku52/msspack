@@ -2,9 +2,13 @@
 
 ## Unreleased
 
+## 0.7.4 - 2026-08-06
+
 - Record structured DDBJ Parser and transChecker results, including tool versions,
   diagnostics, translated FASTA record counts, and failure state, and show the
   results in the pipeline Sankey and HTML report.
+- Use the newest validation summary from either a full pack run or explicit
+  `msspack validate`, including its current logs and translated FASTA links.
 - Require transChecker AA and nucleotide record counts to match the final annotation's
   CDS count, preserve skipped-tool state after sequential failures, and reject
   contradictory validation summary JSON.
