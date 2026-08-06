@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.7.5 - 2026-08-06
+
+- Install the minimum supported ReportLab version in the minimum-runtime CI job.
+
 ## 0.7.4 - 2026-08-06
 
 - Record structured DDBJ Parser and transChecker results, including tool versions,
