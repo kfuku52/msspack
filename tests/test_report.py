@@ -163,6 +163,7 @@ class ReportTests(unittest.TestCase):
             taxonomy_path = final_dir / "functional-annotation-taxonomy.json"
             taxonomy_crosscheck_path = busco_dir / "taxonomy-crosscheck.json"
             validation_summary_path = final_dir / "ddbj-validation-summary.json"
+            validated_aa_path = final_dir / "validation" / "transChecker.aa.fasta"
             ann_path.write_text("COMMON\n", encoding="utf-8")
             fasta_path.write_text(">chr1\nACGT\n//\n", encoding="utf-8")
             evidence_path.write_text("ID\tassigned_product\n", encoding="utf-8")
@@ -175,6 +176,8 @@ class ReportTests(unittest.TestCase):
                 '{"busco_crosschecks": []}\n',
                 encoding="utf-8",
             )
+            validated_aa_path.parent.mkdir(parents=True)
+            validated_aa_path.write_text(">cds1\nM\n", encoding="utf-8")
             validation_summary_path.write_text(
                 json.dumps(
                     {
@@ -200,7 +203,7 @@ class ReportTests(unittest.TestCase):
                                 "status": "passed",
                                 "version": "2.26",
                                 "log_path": str(logs_dir / "transchecker.log"),
-                                "outputs": {},
+                                "outputs": {"aa_fasta": str(validated_aa_path)},
                                 "warning_count": 0,
                                 "error_count": 0,
                                 "record_counts": {"aa_fasta": 2, "nuc_fasta": 2},
@@ -328,6 +331,7 @@ class ReportTests(unittest.TestCase):
             self.assertIn("6.80", html)
             self.assertIn("AA 2 / nucleotide 2 records", html)
             self.assertIn("validation_summary</a>", html)
+            self.assertIn("validation/transChecker.aa.fasta", html)
             self.assertNotIn("missing-parser.log", html)
             self.assertNotIn("missing-transchecker.log", html)
             self.assertNotIn("missing-aa.fasta", html)

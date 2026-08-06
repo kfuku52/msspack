@@ -611,9 +611,7 @@ def collect_pipeline_plot_data(output_root: Path, log_dir: Path) -> PipelinePlot
             "Functional annotation consistency evidence contains "
             f"{annotation_consistency.total:,} genes; expected {metrics.genes_after_padding:,}"
         )
-    validation_summary = load_validation_summary(
-        output_root / "final" / "ddbj-validation-summary.json"
-    )
+    validation_summary = load_pipeline_validation_summary(output_root)
     return PipelinePlotDataBundle(
         records=records,
         metrics=metrics,
@@ -629,6 +627,20 @@ def collect_pipeline_plot_data(output_root: Path, log_dir: Path) -> PipelinePlot
             validation_summary,
         ),
     )
+
+
+def load_pipeline_validation_summary(output_root: Path) -> ValidationSummary | None:
+    """Load the newest validation summary produced by pack or explicit validate."""
+    final_dir = output_root / "final"
+    candidates = (
+        final_dir / "ddbj-validation-summary.json",
+        final_dir / "validation" / "ddbj-validation-summary.json",
+    )
+    existing = [path for path in candidates if path.is_file()]
+    if not existing:
+        return None
+    newest = max(existing, key=lambda path: path.stat().st_mtime_ns)
+    return load_validation_summary(newest)
 
 
 def parse_pipeline_plot_metrics(log_dir: Path) -> PipelinePlotMetrics:

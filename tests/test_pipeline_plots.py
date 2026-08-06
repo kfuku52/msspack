@@ -8,7 +8,10 @@ from msspack.coordinate_duplicates import (
     CoordinateDuplicatePair,
     write_coordinate_duplicate_map,
 )
-from msspack.pipeline_plot_data import load_functional_annotation_summary
+from msspack.pipeline_plot_data import (
+    load_functional_annotation_summary,
+    load_pipeline_validation_summary,
+)
 from msspack.pipeline_plot_models import (
     AnnotationConsistencyGroup,
     AnnotationConsistencySummary,
@@ -235,6 +238,46 @@ def _sankey_gene_sets(groups: dict[str, list[str]]) -> tuple[PipelineGeneSet, ..
 
 
 class PipelinePlotTests(unittest.TestCase):
+    def test_load_pipeline_validation_summary_supports_explicit_validate_output(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_root = Path(tmp_dir)
+            summary_path = (
+                output_root / "final" / "validation" / "ddbj-validation-summary.json"
+            )
+            summary_path.parent.mkdir(parents=True)
+            summary_path.write_text(
+                json.dumps(
+                    ValidationSummary(
+                        path=summary_path,
+                        status="passed",
+                        checks=tuple(
+                            ValidationCheckResult(
+                                component=component,
+                                label=label,
+                                status="passed",
+                                version=None,
+                                log_path=None,
+                                output_paths={},
+                            )
+                            for component, label in (
+                                ("parser", "Parser"),
+                                ("transchecker", "transChecker"),
+                            )
+                        ),
+                    ).to_dict()
+                ),
+                encoding="utf-8",
+            )
+
+            summary = load_pipeline_validation_summary(output_root)
+
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertEqual(summary.path, summary_path)
+        self.assertEqual(summary.status, "passed")
+
     def test_sankey_renders_ddbj_validation_band_in_svg_and_pdf(self) -> None:
         stage_labels = ["Input", "Final feature fate"]
         nodes = [

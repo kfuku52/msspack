@@ -279,11 +279,18 @@ def _render_validation_section(report_root: Path, payload: dict[str, Any]) -> st
         )
         if isinstance(plotted_validation, dict):
             summary_path_value = plotted_validation.get("summary_json")
+    current_outputs: dict[str, object] = dict(outputs) if isinstance(outputs, dict) else {}
     if isinstance(summary_path_value, str):
         summary = load_validation_summary(Path(summary_path_value))
         if summary is not None:
+            current_outputs["validation_summary"] = str(summary.path)
             rows: list[str] = []
             for check in summary.checks:
+                if check.log_path is not None:
+                    current_outputs[f"{check.component}_log"] = str(check.log_path)
+                current_outputs.update(
+                    {key: str(path) for key, path in check.output_paths.items()}
+                )
                 records = check.record_counts or {}
                 if check.component == "transchecker" and records:
                     detail = (
@@ -309,8 +316,8 @@ def _render_validation_section(report_root: Path, payload: dict[str, Any]) -> st
                 "<th>Result</th><th>Details</th></tr></thead>"
                 f"<tbody>{''.join(rows)}</tbody></table>"
             )
-    if isinstance(outputs, dict):
-        parts.append(_render_link_list(report_root, outputs, existing_only=True))
+    if current_outputs:
+        parts.append(_render_link_list(report_root, current_outputs, existing_only=True))
     parts.append("</section>")
     return "".join(parts)
 
