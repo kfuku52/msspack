@@ -17,6 +17,7 @@ from msspack.pipeline_plot_models import (
     PipelineGeneSet,
     PipelinePlotMetrics,
     SankeyBuscoSummary,
+    SankeyLink,
     SankeyNode,
 )
 from msspack.pipeline_plot_render import (
@@ -35,6 +36,7 @@ from msspack.pipeline_plots import (
     run_pipeline_plots,
     summarize_pipeline_plots,
 )
+from msspack.validation import ValidationCheckResult, ValidationSummary
 
 
 def _write_step_log(
@@ -233,6 +235,68 @@ def _sankey_gene_sets(groups: dict[str, list[str]]) -> tuple[PipelineGeneSet, ..
 
 
 class PipelinePlotTests(unittest.TestCase):
+    def test_sankey_renders_ddbj_validation_band_in_svg_and_pdf(self) -> None:
+        stage_labels = ["Input", "Final feature fate"]
+        nodes = [
+            SankeyNode("start", "Input genes", 0, 2, "#334155"),
+            SankeyNode("final_cds", "Final CDS genes", 1, 2, "#059669"),
+        ]
+        links = [SankeyLink("start", "final_cds", 2, "#059669")]
+        summary = ValidationSummary(
+            path=Path("/tmp/ddbj-validation-summary.json"),
+            status="passed",
+            checks=(
+                ValidationCheckResult(
+                    component="parser",
+                    label="Parser",
+                    status="passed",
+                    version="6.80",
+                    log_path=Path("/tmp/parser.log"),
+                    output_paths={},
+                ),
+                ValidationCheckResult(
+                    component="transchecker",
+                    label="transChecker",
+                    status="passed",
+                    version="2.26",
+                    log_path=Path("/tmp/transchecker.log"),
+                    output_paths={},
+                    record_counts={"aa_fasta": 2, "nuc_fasta": 2},
+                ),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            svg_path = Path(tmp_dir) / "validation.svg"
+            pdf_path = Path(tmp_dir) / "validation.pdf"
+            write_sankey_svg(
+                stage_labels,
+                nodes,
+                links,
+                svg_path,
+                validation_summary=summary,
+            )
+            write_sankey_pdf(
+                stage_labels,
+                nodes,
+                links,
+                pdf_path,
+                validation_summary=summary,
+            )
+            svg_text = svg_path.read_text(encoding="utf-8")
+            pdf_text = pdf_path.read_bytes().decode("latin-1")
+
+        self.assertIn('viewBox="0 0 518.40 368.00"', svg_text)
+        self.assertIn("DDBJ official validation (final MSS files)", svg_text)
+        self.assertIn("Parser v6.80", svg_text)
+        self.assertIn("transChecker v2.26", svg_text)
+        self.assertEqual(svg_text.count(">PASS</text>"), 2)
+        self.assertIn("Translated CDS: AA 2 / nucleotide 2", svg_text)
+        self.assertRegex(
+            pdf_text,
+            r"/MediaBox \[\s*0\s+0\s+518\.4(?:0)?\s+368(?:\.0+)?\s*\]",
+        )
+        self.assertEqual(pdf_text.count("/FontFile2"), 2)
+
     def test_large_no_adjustment_label_is_offset_from_the_center(self) -> None:
         node = _LaidOutNode(
             node=SankeyNode(
@@ -262,7 +326,7 @@ class PipelinePlotTests(unittest.TestCase):
     def test_pdf_helvetica_text_width_uses_real_character_widths(self) -> None:
         self.assertAlmostEqual(
             pdf_helvetica_text_width("Input", size=8, bold=True),
-            19.552,
+            23.91796875,
         )
 
     def test_sankey_layout_keeps_large_gene_flows_inside_plot_area(self) -> None:
@@ -497,7 +561,10 @@ class PipelinePlotTests(unittest.TestCase):
         self.assertIn("Auto-resolved family variation 1 (25.0%)", svg_text)
         self.assertIn(">Adjusted</tspan>", svg_text)
         self.assertIn(">No adjustment</tspan>", svg_text)
-        self.assertIn("/MediaBox [0 0 518.40 408.00]", pdf_text)
+        self.assertRegex(
+            pdf_text,
+            r"/MediaBox \[\s*0\s+0\s+518\.4(?:0)?\s+408(?:\.0+)?\s*\]",
+        )
 
         busco_summaries = (
             SankeyBuscoSummary(
@@ -560,7 +627,10 @@ class PipelinePlotTests(unittest.TestCase):
         self.assertIn('fill-opacity="0.72"', combined_svg)
         self.assertEqual(combined_svg.count('stroke-dasharray="3 2"'), 3)
         self.assertEqual(combined_svg.count('height="132.00" rx="4"'), 3)
-        self.assertIn("/MediaBox [0 0 518.40 432.00]", combined_pdf)
+        self.assertRegex(
+            combined_pdf,
+            r"/MediaBox \[\s*0\s+0\s+518\.4(?:0)?\s+432(?:\.0+)?\s*\]",
+        )
 
     def test_load_functional_annotation_summary_groups_evidence_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1017,7 +1087,10 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertIn(">Input CDS (CDS input n=95)</text>", svg_texts[0])
             self.assertIn(">Boundary-adjusted CDS (CDS input n=95)</text>", svg_texts[0])
             gene_flow_pdf = artifacts.gene_flow_pdf.read_bytes().decode("latin-1")
-            self.assertIn("/MediaBox [0 0 518.40 420.00]", gene_flow_pdf)
+            self.assertRegex(
+                gene_flow_pdf,
+                r"/MediaBox \[\s*0\s+0\s+518\.4(?:0)?\s+420(?:\.0+)?\s*\]",
+            )
             self.assertIn("(mRNA)", gene_flow_pdf)
             self.assertIn("(selection)", gene_flow_pdf)
             self.assertIn("(Coordinate)", gene_flow_pdf)
@@ -1041,7 +1114,10 @@ class PipelinePlotTests(unittest.TestCase):
             self.assertIn('width="7.2in"', svg_texts[1])
             self.assertIn('viewBox="0 0 518.40 298.00"', svg_texts[1])
             event_counts_pdf = artifacts.event_counts_pdf.read_bytes().decode("latin-1")
-            self.assertIn("/MediaBox [0 0 518.40 298.00]", event_counts_pdf)
+            self.assertRegex(
+                event_counts_pdf,
+                r"/MediaBox \[\s*0\s+0\s+518\.4(?:0)?\s+298(?:\.0+)?\s*\]",
+            )
             duplicate_svg = artifacts.coordinate_duplicates_svg.read_text(
                 encoding="utf-8"
             )

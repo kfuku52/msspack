@@ -136,6 +136,9 @@ class PipelineCacheTests(unittest.TestCase):
                     include_transchecker=True,
                 ),
                 {
+                    "validation_summary": (
+                        ann.parent / "validation" / "ddbj-validation-summary.json"
+                    ),
                     "parser_log": ann.parent / "logs" / "parser.log",
                     "transchecker_log": ann.parent / "logs" / "transchecker.log",
                     "aa_fasta": ann.parent / "validation" / "transChecker.aa.fasta",

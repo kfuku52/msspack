@@ -162,6 +162,7 @@ class ReportTests(unittest.TestCase):
             )
             taxonomy_path = final_dir / "functional-annotation-taxonomy.json"
             taxonomy_crosscheck_path = busco_dir / "taxonomy-crosscheck.json"
+            validation_summary_path = final_dir / "ddbj-validation-summary.json"
             ann_path.write_text("COMMON\n", encoding="utf-8")
             fasta_path.write_text(">chr1\nACGT\n//\n", encoding="utf-8")
             evidence_path.write_text("ID\tassigned_product\n", encoding="utf-8")
@@ -172,6 +173,45 @@ class ReportTests(unittest.TestCase):
             taxonomy_path.write_text('{"status": "resolved"}\n', encoding="utf-8")
             taxonomy_crosscheck_path.write_text(
                 '{"busco_crosschecks": []}\n',
+                encoding="utf-8",
+            )
+            validation_summary_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "passed",
+                        "attempted": True,
+                        "checks": {
+                            "parser": {
+                                "component": "parser",
+                                "label": "Parser",
+                                "status": "passed",
+                                "version": "6.80",
+                                "log_path": str(logs_dir / "parser.log"),
+                                "outputs": {},
+                                "warning_count": 0,
+                                "error_count": 0,
+                                "record_counts": {},
+                                "message": None,
+                            },
+                            "transchecker": {
+                                "component": "transchecker",
+                                "label": "transChecker",
+                                "status": "passed",
+                                "version": "2.26",
+                                "log_path": str(logs_dir / "transchecker.log"),
+                                "outputs": {},
+                                "warning_count": 0,
+                                "error_count": 0,
+                                "record_counts": {"aa_fasta": 2, "nuc_fasta": 2},
+                                "message": None,
+                            },
+                        },
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
                 encoding="utf-8",
             )
 
@@ -198,8 +238,16 @@ class ReportTests(unittest.TestCase):
                         },
                         "stage_summary": {"count": 18, "ran": 18, "reused": 0},
                         "validation": {
-                            "enabled": False,
-                            "outputs": {},
+                            "enabled": True,
+                            "outputs": {
+                                "validation_summary": str(validation_summary_path),
+                                "parser_log": str(logs_dir / "missing-parser.log"),
+                                "transchecker_log": str(
+                                    logs_dir / "missing-transchecker.log"
+                                ),
+                                "aa_fasta": str(final_dir / "missing-aa.fasta"),
+                                "nuc_fasta": str(final_dir / "missing-nuc.fasta"),
+                            },
                         },
                         "plots": {
                             "pipeline": {
@@ -276,6 +324,14 @@ class ReportTests(unittest.TestCase):
             self.assertIn("BUSCO taxonomy cross-check", html)
             self.assertIn("Functional annotation name consistency", html)
             self.assertIn("Name review rate by evidence source", html)
+            self.assertIn("Parser", html)
+            self.assertIn("6.80", html)
+            self.assertIn("AA 2 / nucleotide 2 records", html)
+            self.assertIn("validation_summary</a>", html)
+            self.assertNotIn("missing-parser.log", html)
+            self.assertNotIn("missing-transchecker.log", html)
+            self.assertNotIn("missing-aa.fasta", html)
+            self.assertNotIn("missing-nuc.fasta", html)
             updated_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(updated_manifest["report"]["index_html"], str(artifacts.index_html))
 

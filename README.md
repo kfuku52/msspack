@@ -219,14 +219,24 @@ boundary-adjusted CDS sets. A name-consistency pie appears in the same summary r
 that audit is enabled. Zero-count branches are omitted from the Sankey but remain
 available in the event-count plot and TSV files.
 
+When either official DDBJ validation tool is enabled, the Sankey adds a final-MSS
+validation band with the Parser and transChecker versions and PASS/FAIL status. Parser
+diagnostic counts and transChecker translated-CDS counts are also retained in a
+structured JSON summary and shown in the HTML report with links to the full logs.
+transChecker passes only when both output record counts match the final annotation's
+CDS count; a tool skipped after an earlier failure is reported as NOT RUN.
+
 Functional annotation adds a stage ordered by assignment priority: Swiss-Prot, an
 optional close-reference database, UniRef90, Pfam, CDD, preserved products, and
 unannotated rows.
 
-The figure below is from a complete example run with Swiss-Prot, taxon-scoped
-UniRef90, Pfam, CDD, BUSCO, and the close-family name-consistency audit enabled.
+The figure below is from the complete Pluau run with Swiss-Prot, taxon-scoped
+UniRef90, Pfam, CDD, BUSCO, the close-family name-consistency audit, and official
+DDBJ Parser/transChecker validation enabled.
 
-![Example msspack pipeline gene-flow Sankey diagram with BUSCO and name-consistency summaries](docs/assets/sample-pipeline-gene-flow.sankey.svg)
+![Pluau msspack pipeline gene-flow Sankey diagram with BUSCO, name-consistency, and DDBJ validation summaries](docs/assets/sample-pipeline-gene-flow.sankey.svg)
+
+[Download the PDF version](docs/assets/sample-pipeline-gene-flow.sankey.pdf).
 
 ### Product-name examples
 

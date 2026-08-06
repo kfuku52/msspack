@@ -8,6 +8,7 @@ import re
 import shlex
 import shutil
 import stat
+import sys
 import tarfile
 import urllib.request
 import zipfile
@@ -217,7 +218,10 @@ def _extract_tar_safely(archive: tarfile.TarFile, destination: Path) -> None:
         _safe_member_path(destination, member.name)
         if member.issym() or member.islnk() or member.isdev():
             raise MSSPackError(f"Unsupported tar member: {member.name}")
-        archive.extract(member, destination)
+        if sys.version_info >= (3, 12):
+            archive.extract(member, destination, filter="data")
+        else:  # pragma: no cover - Python 3.11 compatibility
+            archive.extract(member, destination)
 
 
 def _is_valid_installation(root: Path, component: str) -> bool:

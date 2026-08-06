@@ -1663,12 +1663,21 @@ def _rpsblast_database_prefix(database_prefix: Path, temporary_root: Path) -> Pa
     if not any(character.isspace() for character in str(resolved_prefix)):
         return resolved_prefix
     alias_directory = temporary_root / "cdd-database"
+    source_files = sorted(
+        path
+        for path in resolved_prefix.parent.glob(f"{resolved_prefix.name}.*")
+        if path.is_file()
+    )
+    if not source_files:
+        raise MSSPackError(f"CDD database prefix has no files: {resolved_prefix}")
     try:
-        alias_directory.symlink_to(resolved_prefix.parent, target_is_directory=True)
+        alias_directory.mkdir(parents=True)
+        for source_file in source_files:
+            link_or_copy(source_file, alias_directory / source_file.name)
     except OSError as exc:
         raise MSSPackError(
             "RPS-BLAST cannot use a CDD database path containing whitespace, and "
-            f"msspack could not create a temporary whitespace-free alias for "
+            f"msspack could not materialize a temporary whitespace-free alias for "
             f"{resolved_prefix.parent}: {exc}"
         ) from exc
     return alias_directory / resolved_prefix.name

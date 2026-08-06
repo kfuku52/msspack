@@ -58,7 +58,12 @@ from .utils import (
     ensure_dir,
     expand_path,
 )
-from .validation import ValidationArtifacts, ValidationOptions, run_validation
+from .validation import (
+    ValidationArtifacts,
+    ValidationOptions,
+    run_validation,
+    write_validation_not_run_summary,
+)
 
 
 @dataclass
@@ -1161,37 +1166,56 @@ def run_pipeline(config_file: str | Path, *, validate: bool = True) -> PipelineO
             ),
         )
 
+        validation_options = ValidationOptions.from_config(config)
+        validation_artifacts = ValidationArtifacts(
+            ann_path=outputs.ann_path,
+            fasta_path=outputs.fasta_path,
+            logs_dir=outputs.logs,
+            output_dir=outputs.final,
+        )
+        validation_requested = (
+            validation_options.run_parser or validation_options.run_transchecker
+        )
+        installed_tools = (
+            list_installed(config.cache_dir) if validate and validation_requested else {}
+        )
+        tool_details = {
+            component: describe_installation(installed_tools[component])
+            for component in ("parser", "transchecker")
+            if component in installed_tools
+        }
+        validation_manifest_options = {
+            "run_parser": validation_options.run_parser,
+            "run_transchecker": validation_options.run_transchecker,
+            "parallel": validation_options.parallel,
+            "heap": validation_options.heap,
+            "java": validation_options.java_cmd,
+            "tools": tool_details,
+        }
         if validate:
-            validation_options = ValidationOptions.from_config(config)
+            manifest.set_validation(
+                enabled=validation_requested,
+                result_paths={
+                    "validation_summary": validation_artifacts.validation_summary,
+                },
+                options=validation_manifest_options,
+            )
             validation_outputs = run_validation(
                 options=validation_options,
-                artifacts=ValidationArtifacts(
-                    ann_path=outputs.ann_path,
-                    fasta_path=outputs.fasta_path,
-                    logs_dir=outputs.logs,
-                    output_dir=outputs.final,
-                ),
+                artifacts=validation_artifacts,
             )
-            installed_tools = list_installed(config.cache_dir)
-            tool_details = {
-                component: describe_installation(installed_tools[component])
-                for component in ("parser", "transchecker")
-                if component in installed_tools
-            }
             manifest.set_validation(
-                enabled=True,
+                enabled=validation_requested,
                 result_paths=validation_outputs,
-                options={
-                    "run_parser": validation_options.run_parser,
-                    "run_transchecker": validation_options.run_transchecker,
-                    "parallel": validation_options.parallel,
-                    "heap": validation_options.heap,
-                    "java": validation_options.java_cmd,
-                    "tools": tool_details,
-                },
+                options=validation_manifest_options,
             )
         else:
-            manifest.set_validation(enabled=False)
+            write_validation_not_run_summary(artifacts=validation_artifacts)
+            manifest.set_validation(
+                enabled=False,
+                result_paths={"validation_summary": validation_artifacts.validation_summary},
+                options=validation_manifest_options,
+            )
 
         manifest.mark_completed()
         return outputs

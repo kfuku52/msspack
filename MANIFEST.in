@@ -1,7 +1,7 @@
 include CHANGELOG.md
 include CONTRIBUTING.md
 include RELEASE.md
-recursive-include docs *.png *.svg
+recursive-include docs *.pdf *.png *.svg
 recursive-include examples *.toml
 recursive-include scripts *.py
 recursive-include src/msspack/demo_data *.fa *.faa *.gff3 *.json *.md *.toml

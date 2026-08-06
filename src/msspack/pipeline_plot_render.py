@@ -33,6 +33,7 @@ from .pipeline_plot_models import (
 )
 from .step_logging import count_fasta_records
 from .utils import MSSPackError, ensure_dir, write_text
+from .validation import ValidationCheckResult, ValidationSummary
 
 PDF_POINTS_PER_INCH = 72.0
 SANKEY_WIDTH_IN = 7.2
@@ -43,6 +44,8 @@ SANKEY_CONSISTENCY_BAND_HEIGHT = 112.0
 SANKEY_LOWER_BAND_TOP_GAP = 8.0
 SANKEY_BUSCO_BAND_HEIGHT = SANKEY_BUSCO_HEIGHT - SANKEY_HEIGHT - SANKEY_LOWER_BAND_TOP_GAP
 SANKEY_SUMMARY_ROW_HEIGHT = 136.0
+SANKEY_VALIDATION_BAND_HEIGHT = 72.0
+SANKEY_VALIDATION_BAND_GAP = 8.0
 SANKEY_LINK_OPACITY = 0.72
 EVENT_COUNTS_SUBTITLE = (
     "Step-level counts. Removed mRNAs are transcripts; all other bars are genes."
@@ -58,6 +61,11 @@ SANKEY_BUSCO_LABELS = {
     "duplicated": "Duplicated",
     "fragmented": "Fragmented",
     "missing": "Missing",
+}
+SANKEY_VALIDATION_STATUS_STYLES = {
+    "passed": ("PASS", "#dcfce7", "#166534"),
+    "failed": ("FAIL", "#fee2e2", "#991b1b"),
+    "not_run": ("NOT RUN", "#f1f5f9", "#475569"),
 }
 SANKEY_STAGE_LABELS = {
     "Input": "Input\nGFF",
@@ -1130,22 +1138,33 @@ def _sankey_band_geometry(
     *,
     has_consistency: bool,
     busco_count: int,
-) -> tuple[float, float | None, float | None]:
+    has_validation: bool = False,
+) -> tuple[float, float | None, float | None, float | None]:
     next_top = SANKEY_HEIGHT + SANKEY_LOWER_BAND_TOP_GAP
     consistency_top: float | None = None
+    busco_top: float | None = None
     if has_consistency and busco_count == 2:
-        return next_top + SANKEY_SUMMARY_ROW_HEIGHT, next_top, next_top
-    if has_consistency:
+        consistency_top = next_top
+        busco_top = next_top
+        height = next_top + SANKEY_SUMMARY_ROW_HEIGHT
+    elif has_consistency:
         consistency_top = next_top
         next_top += SANKEY_CONSISTENCY_BAND_HEIGHT
-    busco_top = next_top if busco_count else None
-    if busco_top is not None:
-        height = busco_top + SANKEY_BUSCO_BAND_HEIGHT
-    elif consistency_top is not None:
         height = consistency_top + SANKEY_CONSISTENCY_BAND_HEIGHT
     else:
         height = SANKEY_HEIGHT
-    return height, consistency_top, busco_top
+    if busco_count and busco_top is None:
+        busco_top = next_top
+        height = busco_top + SANKEY_BUSCO_BAND_HEIGHT
+    validation_top: float | None = None
+    if has_validation:
+        validation_top = height + (
+            SANKEY_LOWER_BAND_TOP_GAP
+            if height == SANKEY_HEIGHT
+            else SANKEY_VALIDATION_BAND_GAP
+        )
+        height = validation_top + SANKEY_VALIDATION_BAND_HEIGHT
+    return height, consistency_top, busco_top, validation_top
 
 
 def _consistency_pie_label(node: SankeyNode, total: int) -> str:
@@ -1483,6 +1502,68 @@ def _append_busco_svg(
         )
 
 
+def _validation_check_detail(check: ValidationCheckResult) -> str:
+    records = check.record_counts or {}
+    if check.component == "transchecker" and records:
+        aa_count = records.get("aa_fasta")
+        nuc_count = records.get("nuc_fasta")
+        if aa_count is not None and nuc_count is not None:
+            return f"Translated CDS: AA {aa_count:,} / nucleotide {nuc_count:,}"
+    return f"Diagnostics: {check.error_count:,} errors / {check.warning_count:,} warnings"
+
+
+def _append_validation_svg(
+    parts: list[str],
+    summary: ValidationSummary,
+    *,
+    width: float,
+    top_y: float,
+) -> None:
+    parts.append(
+        f'<line x1="16" y1="{top_y:.2f}" x2="{width - 16.0:.2f}" y2="{top_y:.2f}" '
+        'stroke="#cbd5e1" stroke-width="0.7"/>'
+    )
+    parts.append(
+        f'<text x="16" y="{top_y + 14.0:.2f}" class="validation-title">'
+        "DDBJ official validation (final MSS files)</text>"
+    )
+    gap = 12.0
+    card_x = 16.0
+    card_y = top_y + 22.0
+    card_width = (width - 32.0 - gap) / 2.0
+    card_height = 42.0
+    for index, check in enumerate(summary.checks):
+        current_x = card_x + index * (card_width + gap)
+        status_label, status_fill, status_text = SANKEY_VALIDATION_STATUS_STYLES[
+            check.status
+        ]
+        version = f" v{check.version}" if check.version else ""
+        badge_width = 48.0 if check.status == "not_run" else 36.0
+        badge_x = current_x + card_width - badge_width - 9.0
+        parts.append(
+            f'<rect x="{current_x:.2f}" y="{card_y:.2f}" width="{card_width:.2f}" '
+            f'height="{card_height:.2f}" rx="4" fill="#f8fafc" stroke="#cbd5e1" '
+            'stroke-width="0.7"/>'
+        )
+        parts.append(
+            f'<text x="{current_x + 10.0:.2f}" y="{card_y + 15.0:.2f}" '
+            f'class="validation-tool">{escape(check.label + version)}</text>'
+        )
+        parts.append(
+            f'<rect x="{badge_x:.2f}" y="{card_y + 6.0:.2f}" width="{badge_width:.2f}" '
+            f'height="14" rx="7" fill="{status_fill}"/>'
+        )
+        parts.append(
+            f'<text x="{badge_x + badge_width / 2.0:.2f}" y="{card_y + 16.5:.2f}" '
+            f'text-anchor="middle" class="validation-status" style="fill:{status_text}">'
+            f"{status_label}</text>"
+        )
+        parts.append(
+            f'<text x="{current_x + 10.0:.2f}" y="{card_y + 32.0:.2f}" '
+            f'class="validation-detail">{escape(_validation_check_detail(check))}</text>'
+        )
+
+
 def write_sankey_svg(
     stage_labels: list[str],
     nodes: list[SankeyNode],
@@ -1491,19 +1572,22 @@ def write_sankey_svg(
     *,
     busco_summaries: tuple[SankeyBuscoSummary, ...] = (),
     annotation_consistency: AnnotationConsistencySummary | None = None,
+    validation_summary: ValidationSummary | None = None,
 ) -> Path:
     laid_out_nodes, laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
     consistency_nodes = _consistency_pie_nodes(annotation_consistency)
     width = float(meta["width"])
-    height, consistency_top, busco_top = _sankey_band_geometry(
+    visible_validation = validation_summary is not None and validation_summary.attempted
+    height, consistency_top, busco_top, validation_top = _sankey_band_geometry(
         has_consistency=bool(consistency_nodes),
         busco_count=len(busco_summaries),
+        has_validation=visible_validation,
     )
     svg_width = f"{width / PDF_POINTS_PER_INCH:g}in"
     svg_height = f"{height / PDF_POINTS_PER_INCH:g}in"
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_width}" height="{svg_height}" viewBox="0 0 {width:.2f} {height:.2f}">',
-        f"<style>text{{font-family:Helvetica,Arial,sans-serif;font-size:{SVG_FONT_SIZE};fill:#111827}} .title{{font-weight:700}} .subtitle{{fill:#4b5563}} .stage{{font-weight:700;fill:#334155}} .count{{fill:#475569}} .busco-title,.busco-label,.consistency-title,.summary-pie-title{{font-weight:700;fill:#334155}} .busco-legend,.busco-value,.consistency-note,.summary-pie-note,.summary-pie-legend{{fill:#475569}}</style>",
+        f"<style>text{{font-family:Helvetica,Arial,sans-serif;font-size:{SVG_FONT_SIZE};fill:#111827}} .title{{font-weight:700}} .subtitle{{fill:#4b5563}} .stage{{font-weight:700;fill:#334155}} .count{{fill:#475569}} .busco-title,.busco-label,.consistency-title,.summary-pie-title,.validation-title,.validation-tool{{font-weight:700;fill:#334155}} .busco-legend,.busco-value,.consistency-note,.summary-pie-note,.summary-pie-legend,.validation-detail{{fill:#475569}} .validation-status{{font-size:7pt;font-weight:700}}</style>",
         '<rect width="100%" height="100%" fill="white"/>',
         '<text x="16" y="16" class="title">Stage-wise pipeline gene flow</text>',
         '<text x="16" y="31" class="subtitle">Ribbon widths are proportional to gene counts; node values are genes.</text>',
@@ -1589,6 +1673,14 @@ def write_sankey_svg(
             busco_summaries,
             meta,
             top_y=busco_top,
+        )
+    if visible_validation and validation_top is not None:
+        assert validation_summary is not None
+        _append_validation_svg(
+            parts,
+            validation_summary,
+            width=width,
+            top_y=validation_top,
         )
     parts.append("</svg>")
     return write_text(output_path, "\n".join(parts) + "\n")
@@ -2119,6 +2211,94 @@ def _append_busco_pdf(
             )
 
 
+def _append_validation_pdf(
+    commands: list[str],
+    summary: ValidationSummary,
+    *,
+    page_height: float,
+    width: float,
+    top_y: float,
+) -> None:
+    line_y = _pdf_top_to_bottom(page_height, top_y)
+    commands.append(
+        f"0.80 0.84 0.88 RG 0.7 w 16 {line_y:.2f} m {width - 16.0:.2f} {line_y:.2f} l S"
+    )
+    commands.append(
+        _pdf_text_command(
+            page_height=page_height,
+            x=16.0,
+            y_top=top_y + 14.0,
+            text="DDBJ official validation (final MSS files)",
+            font="F2",
+            size=CHART_FONT_SIZE_PT,
+            color=MUTED_RGB,
+        )
+    )
+    gap = 12.0
+    card_x = 16.0
+    card_y = top_y + 22.0
+    card_width = (width - 32.0 - gap) / 2.0
+    card_height = 42.0
+    for index, check in enumerate(summary.checks):
+        current_x = card_x + index * (card_width + gap)
+        card_bottom = _pdf_top_to_bottom(page_height, card_y, card_height)
+        commands.append(
+            f"0.973 0.980 0.988 rg {current_x:.2f} {card_bottom:.2f} "
+            f"{card_width:.2f} {card_height:.2f} re f"
+        )
+        commands.append(
+            f"0.80 0.84 0.88 RG 0.7 w {current_x:.2f} {card_bottom:.2f} "
+            f"{card_width:.2f} {card_height:.2f} re S"
+        )
+        version = f" v{check.version}" if check.version else ""
+        commands.append(
+            _pdf_text_command(
+                page_height=page_height,
+                x=current_x + 10.0,
+                y_top=card_y + 15.0,
+                text=check.label + version,
+                font="F2",
+                size=CHART_FONT_SIZE_PT,
+                color=MUTED_RGB,
+            )
+        )
+        status_label, status_fill, status_text = SANKEY_VALIDATION_STATUS_STYLES[
+            check.status
+        ]
+        badge_width = 48.0 if check.status == "not_run" else 36.0
+        badge_x = current_x + card_width - badge_width - 9.0
+        badge_y = _pdf_top_to_bottom(page_height, card_y + 6.0, 14.0)
+        fill_rgb = _hex_to_rgb(status_fill)
+        text_rgb = _hex_to_rgb(status_text)
+        commands.append(
+            f"{fill_rgb[0]:.3f} {fill_rgb[1]:.3f} {fill_rgb[2]:.3f} rg "
+            f"{badge_x:.2f} {badge_y:.2f} {badge_width:.2f} 14 re f"
+        )
+        commands.append(
+            _centered_pdf_text_command(
+                page_height=page_height,
+                center_x=badge_x + badge_width / 2.0,
+                y_top=card_y + 16.5,
+                text=status_label,
+                font="F2",
+                size=7,
+                color=text_rgb,
+                bold=True,
+            )
+        )
+        commands.append(
+            _pdf_text_command(
+                page_height=page_height,
+                x=current_x + 10.0,
+                y_top=card_y + 32.0,
+                text=_validation_check_detail(check),
+                font="F1",
+                size=CHART_FONT_SIZE_PT,
+                color=MUTED_RGB,
+            )
+        )
+
+
 def write_sankey_pdf(
     stage_labels: list[str],
     nodes: list[SankeyNode],
@@ -2127,13 +2307,16 @@ def write_sankey_pdf(
     *,
     busco_summaries: tuple[SankeyBuscoSummary, ...] = (),
     annotation_consistency: AnnotationConsistencySummary | None = None,
+    validation_summary: ValidationSummary | None = None,
 ) -> Path:
     laid_out_nodes, laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
     consistency_nodes = _consistency_pie_nodes(annotation_consistency)
     width = float(meta["width"])
-    height, consistency_top, busco_top = _sankey_band_geometry(
+    visible_validation = validation_summary is not None and validation_summary.attempted
+    height, consistency_top, busco_top, validation_top = _sankey_band_geometry(
         has_consistency=bool(consistency_nodes),
         busco_count=len(busco_summaries),
+        has_validation=visible_validation,
     )
     commands = [
         f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f",
@@ -2281,6 +2464,15 @@ def write_sankey_pdf(
             meta,
             height,
             top_y=busco_top,
+        )
+    if visible_validation and validation_top is not None:
+        assert validation_summary is not None
+        _append_validation_pdf(
+            commands,
+            validation_summary,
+            page_height=height,
+            width=width,
+            top_y=validation_top,
         )
     return write_single_page_pdf(
         width=width, height=height, commands=commands, output_path=output_path
@@ -2478,6 +2670,7 @@ def update_plot_manifest(
     gene_sets: tuple[PipelineGeneSet, ...],
     coordinate_duplicate_summary: dict[str, object],
     annotation_consistency: AnnotationConsistencySummary | None = None,
+    validation_summary: ValidationSummary | None = None,
 ) -> None:
     if manifest_path.exists():
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2517,6 +2710,15 @@ def update_plot_manifest(
             "audit_tsv": str(annotation_consistency.path),
             "summary_tsv": str(annotation_consistency.summary_path),
             "source_pair_tsv": str(annotation_consistency.source_pair_path),
+        }
+    if validation_summary is not None:
+        pipeline_payload["ddbj_validation"] = {
+            "summary_json": str(validation_summary.path),
+            "status": validation_summary.status,
+            "attempted": validation_summary.attempted,
+            "checks": {
+                check.component: check.to_dict() for check in validation_summary.checks
+            },
         }
     plots["pipeline"] = pipeline_payload
     payload["plots"] = plots

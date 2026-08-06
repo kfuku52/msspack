@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Record structured DDBJ Parser and transChecker results, including tool versions,
+  diagnostics, translated FASTA record counts, and failure state, and show the
+  results in the pipeline Sankey and HTML report.
+- Require transChecker AA and nucleotide record counts to match the final annotation's
+  CDS count, preserve skipped-tool state after sequential failures, and reject
+  contradictory validation summary JSON.
+- Embed subsetted Bitstream Vera fonts in generated PDFs so chart text renders
+  consistently across Poppler, Ghostscript, and platform PDF viewers.
+- Materialize whitespace-free CDD database aliases with file links or copies so
+  RPS-BLAST can memory-map databases stored in cloud-synchronized paths.
+- Apply Python's safe tar extraction filter when installing DDBJ tools on Python
+  3.12+, preserving Python 3.11 support and avoiding the Python 3.14 behavior change.
+
 ## 0.7.3 - 2026-07-31
 
 - Map functional-annotation evidence back to source GFF gene IDs when custom

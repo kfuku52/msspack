@@ -47,6 +47,18 @@ Original project:
 - [AHRD](https://github.com/groupschoof/AHRD)
 - Distributed by its authors under the Common Development and Distribution License 1.0
 
+## ReportLab and Bitstream Vera fonts
+
+`msspack` uses the ReportLab PDF library to embed subsetted Bitstream Vera Sans fonts
+in generated chart PDFs. ReportLab is distributed under its BSD-style open-source
+license. The Vera font files bundled with ReportLab retain the Bitstream Vera Fonts
+license and copyright notices, including in the embedded font data written to PDFs.
+
+Original projects and notices:
+
+- [ReportLab open-source licensing](https://docs.reportlab.com/developerfaqs/)
+- [Bitstream Vera font license](https://hg.reportlab.com/hg-public/reportlab/file/95785ed31090/reportlab/fonts/bitstream-vera-license.txt)
+
 ## Downloaded annotation data
 
 When functional annotation is enabled, `msspack` can download but does not redistribute

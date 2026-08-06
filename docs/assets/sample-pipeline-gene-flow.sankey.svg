@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="7.2in" height="6in" viewBox="0 0 518.40 432.00">
-<style>text{font-family:Helvetica,Arial,sans-serif;font-size:8pt;fill:#111827} .title{font-weight:700} .subtitle{fill:#4b5563} .stage{font-weight:700;fill:#334155} .count{fill:#475569} .busco-title,.busco-label,.consistency-title,.summary-pie-title{font-weight:700;fill:#334155} .busco-legend,.busco-value,.consistency-note,.summary-pie-note,.summary-pie-legend{fill:#475569}</style>
+<svg xmlns="http://www.w3.org/2000/svg" width="7.2in" height="7.11111in" viewBox="0 0 518.40 512.00">
+<style>text{font-family:Helvetica,Arial,sans-serif;font-size:8pt;fill:#111827} .title{font-weight:700} .subtitle{fill:#4b5563} .stage{font-weight:700;fill:#334155} .count{fill:#475569} .busco-title,.busco-label,.consistency-title,.summary-pie-title,.validation-title,.validation-tool{font-weight:700;fill:#334155} .busco-legend,.busco-value,.consistency-note,.summary-pie-note,.summary-pie-legend,.validation-detail{fill:#475569} .validation-status{font-size:7pt;font-weight:700}</style>
 <rect width="100%" height="100%" fill="white"/>
 <text x="16" y="16" class="title">Stage-wise pipeline gene flow</text>
 <text x="16" y="31" class="subtitle">Ribbon widths are proportional to gene counts; node values are genes.</text>
@@ -124,4 +124,16 @@
 <text x="397.60" y="382.70" text-anchor="start" class="summary-pie-legend"><tspan x="397.60" dy="0">No annotated</tspan><tspan x="397.60" dy="10.7">close-family peer 64.5%</tspan></text>
 <rect x="388.60" y="399.40" width="6" height="6" rx="1" fill="#cbd5e1"/>
 <text x="397.60" y="405.40" text-anchor="start" class="summary-pie-legend"><tspan x="397.60" dy="0">Unannotated 10.8%</tspan></text>
+<line x1="16" y1="440.00" x2="502.40" y2="440.00" stroke="#cbd5e1" stroke-width="0.7"/>
+<text x="16" y="454.00" class="validation-title">DDBJ official validation (final MSS files)</text>
+<rect x="16.00" y="462.00" width="237.20" height="42.00" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.7"/>
+<text x="26.00" y="477.00" class="validation-tool">Parser v6.80</text>
+<rect x="208.20" y="468.00" width="36.00" height="14" rx="7" fill="#dcfce7"/>
+<text x="226.20" y="478.50" text-anchor="middle" class="validation-status" style="fill:#166534">PASS</text>
+<text x="26.00" y="494.00" class="validation-detail">Diagnostics: 0 errors / 0 warnings</text>
+<rect x="265.20" y="462.00" width="237.20" height="42.00" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.7"/>
+<text x="275.20" y="477.00" class="validation-tool">transChecker v2.26</text>
+<rect x="457.40" y="468.00" width="36.00" height="14" rx="7" fill="#dcfce7"/>
+<text x="475.40" y="478.50" text-anchor="middle" class="validation-status" style="fill:#166534">PASS</text>
+<text x="275.20" y="494.00" class="validation-detail">Translated CDS: AA 22,001 / nucleotide 22,001</text>
 </svg>

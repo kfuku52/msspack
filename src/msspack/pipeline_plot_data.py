@@ -19,6 +19,7 @@ from .pipeline_plot_models import (
     PipelinePlotMetrics,
 )
 from .utils import MSSPackError
+from .validation import ValidationSummary, load_validation_summary
 
 COUNT_LINE_RE = re.compile(r"^(?P<label>[^|][^:]+):\s*(?P<value>.+?)\s*$")
 STANDARD_LOG_FIELDS = {
@@ -330,6 +331,7 @@ def _build_summary_payload(
     gene_sets: tuple[PipelineGeneSet, ...],
     functional_annotation: FunctionalAnnotationSummary | None,
     annotation_consistency: AnnotationConsistencySummary | None,
+    validation_summary: ValidationSummary | None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "metrics": metrics.to_dict(),
@@ -340,6 +342,8 @@ def _build_summary_payload(
         payload["functional_annotation"] = functional_annotation.to_dict()
     if annotation_consistency is not None:
         payload["annotation_consistency"] = annotation_consistency.to_dict()
+    if validation_summary is not None:
+        payload["ddbj_validation"] = validation_summary.to_dict()
     return payload
 
 
@@ -607,17 +611,22 @@ def collect_pipeline_plot_data(output_root: Path, log_dir: Path) -> PipelinePlot
             "Functional annotation consistency evidence contains "
             f"{annotation_consistency.total:,} genes; expected {metrics.genes_after_padding:,}"
         )
+    validation_summary = load_validation_summary(
+        output_root / "final" / "ddbj-validation-summary.json"
+    )
     return PipelinePlotDataBundle(
         records=records,
         metrics=metrics,
         gene_sets=gene_sets,
         functional_annotation=functional_annotation,
         annotation_consistency=annotation_consistency,
+        validation_summary=validation_summary,
         summary_payload=_build_summary_payload(
             metrics,
             gene_sets,
             functional_annotation,
             annotation_consistency,
+            validation_summary,
         ),
     )
 

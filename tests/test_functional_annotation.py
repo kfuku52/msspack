@@ -253,10 +253,23 @@ class FunctionalAnnotationTests(unittest.TestCase):
             tempfile.TemporaryDirectory(prefix="msspack-cdd-alias-") as alias_dir,
         ):
             source_prefix = Path(source_dir) / "Cdd"
+            source_files = {
+                "Cdd.pal": "TITLE CDD\n",
+                "Cdd.00.aux": "aux\n",
+                "Cdd.00.rps": "rps\n",
+            }
+            for name, content in source_files.items():
+                (Path(source_dir) / name).write_text(content, encoding="utf-8")
             resolved = _rpsblast_database_prefix(source_prefix, Path(alias_dir))
 
             self.assertNotIn(" ", str(resolved))
-            self.assertEqual(resolved.resolve(), source_prefix.resolve())
+            self.assertFalse(resolved.parent.is_symlink())
+            self.assertNotEqual(resolved.resolve(), source_prefix.resolve())
+            for name, content in source_files.items():
+                self.assertEqual(
+                    (resolved.parent / name).read_text(encoding="utf-8"),
+                    content,
+                )
 
     def test_parses_uniprot_and_uniref_taxonomy_headers(self) -> None:
         self.assertEqual(

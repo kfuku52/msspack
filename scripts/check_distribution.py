@@ -52,6 +52,7 @@ def verify_distribution(path: Path) -> None:
             "RELEASE.md",
             "docs/assets/msspack-header.png",
             "docs/assets/sample-busco-cds-comparison.svg",
+            "docs/assets/sample-pipeline-gene-flow.sankey.pdf",
             "docs/assets/sample-pipeline-gene-flow.sankey.svg",
             "examples/msspack.example.toml",
             "scripts/check_distribution.py",

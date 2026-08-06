@@ -79,6 +79,7 @@ def run_pipeline_plots(
         module_origin("msspack.annotation_consistency_plots"),
         module_origin("msspack.coordinate_duplicates"),
         module_origin("msspack.coordinate_duplicate_plots"),
+        module_origin("msspack.validation"),
     ]
     required_logs = [
         log_dir / "06.drop-duplicate-coordinate-gene.log",
@@ -149,6 +150,11 @@ def run_pipeline_plots(
     ]
     busco_comparison_path = output_root / "busco" / "cds" / "comparison.json"
     busco_dependencies = [busco_comparison_path] if busco_comparison_path.exists() else []
+    validation_dependencies = (
+        [bundle.validation_summary.path]
+        if bundle.validation_summary is not None
+        else []
+    )
     dependency_paths = [
         *required_logs,
         *(record.path for record in bundle.records.values()),
@@ -163,6 +169,7 @@ def run_pipeline_plots(
             if bundle.annotation_consistency is not None
             else []
         ),
+        *validation_dependencies,
         *module_paths,
     ]
 
@@ -192,6 +199,7 @@ def run_pipeline_plots(
             artifacts.summary_json,
             artifacts.gene_flow_tsv,
             *busco_dependencies,
+            *validation_dependencies,
             *module_paths,
         ],
         action=lambda: write_sankey_svg(
@@ -201,6 +209,7 @@ def run_pipeline_plots(
             artifacts.gene_flow_svg,
             busco_summaries=busco_summaries,
             annotation_consistency=bundle.annotation_consistency,
+            validation_summary=bundle.validation_summary,
         ),
     )
     run_if_needed(
@@ -209,6 +218,7 @@ def run_pipeline_plots(
             artifacts.summary_json,
             artifacts.gene_flow_tsv,
             *busco_dependencies,
+            *validation_dependencies,
             *module_paths,
         ],
         action=lambda: write_sankey_pdf(
@@ -218,6 +228,7 @@ def run_pipeline_plots(
             artifacts.gene_flow_pdf,
             busco_summaries=busco_summaries,
             annotation_consistency=bundle.annotation_consistency,
+            validation_summary=bundle.validation_summary,
         ),
     )
     run_if_needed(
@@ -317,6 +328,7 @@ def run_pipeline_plots(
         gene_sets=bundle.gene_sets,
         coordinate_duplicate_summary=duplicate_summary,
         annotation_consistency=bundle.annotation_consistency,
+        validation_summary=bundle.validation_summary,
     )
     return artifacts
 

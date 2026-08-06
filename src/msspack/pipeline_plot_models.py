@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .validation import ValidationSummary
+
 SANKEY_COLORS = {
     "start": "#334155",
     "removed": "#e11d48",
@@ -316,4 +318,5 @@ class PipelinePlotDataBundle:
     gene_sets: tuple[PipelineGeneSet, ...]
     functional_annotation: FunctionalAnnotationSummary | None
     annotation_consistency: AnnotationConsistencySummary | None
+    validation_summary: ValidationSummary | None
     summary_payload: dict[str, object]

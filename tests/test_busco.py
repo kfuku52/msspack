@@ -388,7 +388,10 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
         self.assertIn("Genome input n=1", svg)
         self.assertIn("font-size:8pt", svg)
         self.assertNotRegex(svg, r"font-size:\d+px")
-        self.assertIn("/MediaBox [0 0 259.20 197.20]", pdf)
+        self.assertRegex(
+            pdf,
+            r"/MediaBox \[\s*0\s+0\s+259\.2(?:0)?\s+197\.2(?:0)?\s*\]",
+        )
 
     def test_summarize_busco_artifacts_reports_metric_changes(self) -> None:
         summary_text_input = """\

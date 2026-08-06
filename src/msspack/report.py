@@ -12,6 +12,7 @@ from typing import Any
 from .config import load_config
 from .pipeline_plots import run_pipeline_plots
 from .utils import MSSPackError, ensure_dir, write_text
+from .validation import load_validation_summary
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,13 @@ def _relative_href(report_root: Path, target: str | Path) -> str:
     return os.path.relpath(target_path, report_root).replace(os.sep, "/")
 
 
+def _target_exists(report_root: Path, target: str | Path) -> bool:
+    target_path = Path(target)
+    if not target_path.is_absolute():
+        target_path = (report_root.parent / target_path).resolve()
+    return target_path.is_file()
+
+
 def _format_int(value: object) -> str:
     if isinstance(value, bool):
         return str(value)
@@ -54,10 +62,17 @@ def _format_seconds(value: object) -> str:
     return "n/a"
 
 
-def _render_link_list(report_root: Path, entries: Mapping[str, object]) -> str:
+def _render_link_list(
+    report_root: Path,
+    entries: Mapping[str, object],
+    *,
+    existing_only: bool = False,
+) -> str:
     items: list[str] = []
     for label, raw_path in entries.items():
         if not raw_path:
+            continue
+        if existing_only and not _target_exists(report_root, str(raw_path)):
             continue
         items.append(
             f'<li><a href="{escape(_relative_href(report_root, str(raw_path)))}">{escape(label)}</a></li>'
@@ -251,8 +266,51 @@ def _render_validation_section(report_root: Path, payload: dict[str, Any]) -> st
             f"heap={escape(str(options.get('heap', 'n/a')))}"
             "</p>"
         )
+    summary_path_value: object | None = None
     if isinstance(outputs, dict):
-        parts.append(_render_link_list(report_root, outputs))
+        summary_path_value = outputs.get("validation_summary")
+    if not isinstance(summary_path_value, str):
+        plots = payload.get("plots")
+        pipeline_plots = plots.get("pipeline") if isinstance(plots, dict) else None
+        plotted_validation = (
+            pipeline_plots.get("ddbj_validation")
+            if isinstance(pipeline_plots, dict)
+            else None
+        )
+        if isinstance(plotted_validation, dict):
+            summary_path_value = plotted_validation.get("summary_json")
+    if isinstance(summary_path_value, str):
+        summary = load_validation_summary(Path(summary_path_value))
+        if summary is not None:
+            rows: list[str] = []
+            for check in summary.checks:
+                records = check.record_counts or {}
+                if check.component == "transchecker" and records:
+                    detail = (
+                        f"annotation CDS {_format_int(records.get('annotation_cds'))} / "
+                        f"AA {_format_int(records.get('aa_fasta'))} / "
+                        f"nucleotide {_format_int(records.get('nuc_fasta'))} records"
+                    )
+                else:
+                    detail = (
+                        f"{check.error_count:,} errors / "
+                        f"{check.warning_count:,} warnings"
+                    )
+                rows.append(
+                    "<tr>"
+                    f"<td>{escape(check.label)}</td>"
+                    f"<td>{escape(check.version or 'n/a')}</td>"
+                    f"<td><strong>{escape(check.status.upper().replace('_', ' '))}</strong></td>"
+                    f"<td>{escape(detail)}</td>"
+                    "</tr>"
+                )
+            parts.append(
+                "<table><thead><tr><th>Tool</th><th>Version</th>"
+                "<th>Result</th><th>Details</th></tr></thead>"
+                f"<tbody>{''.join(rows)}</tbody></table>"
+            )
+    if isinstance(outputs, dict):
+        parts.append(_render_link_list(report_root, outputs, existing_only=True))
     parts.append("</section>")
     return "".join(parts)
 

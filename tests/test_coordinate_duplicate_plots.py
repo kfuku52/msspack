@@ -122,7 +122,7 @@ class CoordinateDuplicatePlotTests(unittest.TestCase):
             )
             self.assertIn("Showing first 50 of 55 removed genes", svg_text)
             self.assertIn('text-anchor="end">100</text>', svg_text)
-            self.assertGreater(pdf_text.count("/Type /Page "), 1)
+            self.assertGreater(pdf_text.count("/Type /Page"), 1)
             self.assertEqual(
                 coordinate_duplicate_plot_summary(data, 50),
                 {

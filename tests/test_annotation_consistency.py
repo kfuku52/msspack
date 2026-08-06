@@ -243,8 +243,14 @@ class AnnotationConsistencyTests(unittest.TestCase):
                 self.assertNotIn("font-size:14pt", svg_text)
             name_pdf = (base / "name.pdf").read_bytes().decode("latin-1")
             source_pdf = (base / "source.pdf").read_bytes().decode("latin-1")
-            self.assertIn("/MediaBox [0 0 259.20 260.00]", name_pdf)
-            self.assertIn("/MediaBox [0 0 259.20 186.00]", source_pdf)
+            self.assertRegex(
+                name_pdf,
+                r"/MediaBox \[\s*0\s+0\s+259\.2(?:0)?\s+260(?:\.0+)?\s*\]",
+            )
+            self.assertRegex(
+                source_pdf,
+                r"/MediaBox \[\s*0\s+0\s+259\.2(?:0)?\s+186(?:\.0+)?\s*\]",
+            )
             for pdf_text in (name_pdf, source_pdf):
                 self.assertNotIn(" 7 Tf", pdf_text)
                 self.assertNotIn(" 14 Tf", pdf_text)

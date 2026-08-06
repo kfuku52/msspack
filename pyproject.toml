@@ -24,6 +24,7 @@ authors = [
 ]
 dependencies = [
   "biopython>=1.87",
+  "reportlab>=4.4",
 ]
 
 [project.optional-dependencies]

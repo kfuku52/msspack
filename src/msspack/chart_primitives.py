@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import re
+from functools import cache
+from io import BytesIO
 from pathlib import Path
+from typing import Any
+
+import reportlab  # type: ignore[import-untyped]
+from reportlab.pdfbase import pdfmetrics  # type: ignore[import-untyped]
+from reportlab.pdfbase.ttfonts import TTFont  # type: ignore[import-untyped]
+from reportlab.pdfgen.canvas import Canvas  # type: ignore[import-untyped]
 
 from .utils import atomic_binary_writer
 
@@ -10,138 +19,10 @@ GRID_RGB = (229 / 255.0, 231 / 255.0, 235 / 255.0)
 CHART_FONT_SIZE_PT = 8
 SVG_FONT_SIZE = f"{CHART_FONT_SIZE_PT}pt"
 
-_HELVETICA_UPPERCASE_WIDTHS = (
-    667,
-    667,
-    722,
-    722,
-    667,
-    611,
-    778,
-    722,
-    278,
-    500,
-    667,
-    556,
-    833,
-    722,
-    778,
-    667,
-    778,
-    722,
-    667,
-    611,
-    722,
-    667,
-    944,
-    667,
-    667,
-    611,
-)
-_HELVETICA_LOWERCASE_WIDTHS = (
-    556,
-    556,
-    500,
-    556,
-    556,
-    278,
-    556,
-    556,
-    222,
-    222,
-    500,
-    222,
-    833,
-    556,
-    556,
-    556,
-    556,
-    333,
-    500,
-    278,
-    556,
-    500,
-    722,
-    500,
-    500,
-    500,
-)
-_HELVETICA_BOLD_UPPERCASE_WIDTHS = (
-    722,
-    722,
-    722,
-    722,
-    667,
-    611,
-    778,
-    722,
-    278,
-    556,
-    722,
-    611,
-    833,
-    722,
-    778,
-    667,
-    778,
-    722,
-    667,
-    611,
-    722,
-    722,
-    944,
-    722,
-    722,
-    611,
-)
-_HELVETICA_BOLD_LOWERCASE_WIDTHS = (
-    556,
-    611,
-    556,
-    611,
-    556,
-    333,
-    611,
-    611,
-    278,
-    278,
-    556,
-    278,
-    889,
-    611,
-    611,
-    611,
-    611,
-    389,
-    556,
-    333,
-    611,
-    556,
-    778,
-    556,
-    556,
-    500,
-)
-_HELVETICA_WIDTHS = {
-    **dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ", _HELVETICA_UPPERCASE_WIDTHS, strict=True)),
-    **dict(zip("abcdefghijklmnopqrstuvwxyz", _HELVETICA_LOWERCASE_WIDTHS, strict=True)),
-    **{digit: 556 for digit in "0123456789"},
-    " ": 278,
-    ",": 278,
-    "-": 333,
-    ".": 278,
-    "/": 278,
-}
-_HELVETICA_BOLD_WIDTHS = {
-    **dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ", _HELVETICA_BOLD_UPPERCASE_WIDTHS, strict=True)),
-    **dict(zip("abcdefghijklmnopqrstuvwxyz", _HELVETICA_BOLD_LOWERCASE_WIDTHS, strict=True)),
-    **{digit: 556 for digit in "0123456789"},
-    " ": 278,
-    ",": 278,
-    "-": 333,
-    ".": 278,
-    "/": 278,
-}
+_PDF_REGULAR_FONT = "MSSPackVera"
+_PDF_BOLD_FONT = "MSSPackVeraBold"
+_PDF_FONT_COMMAND_RE = re.compile(r"/(?P<font>F[12]) (?P<size>[0-9.]+) Tf")
+_PDF_TEXT_COMMAND_RE = re.compile(r"\((?P<text>(?:\\.|[^\\)])*)\) Tj")
 
 
 def hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
@@ -156,9 +37,25 @@ def pdf_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
+@cache
+def _register_pdf_fonts() -> tuple[str, str]:
+    font_dir = Path(str(reportlab.__file__)).resolve().parent / "fonts"
+    registered = set(pdfmetrics.getRegisteredFontNames())
+    if _PDF_REGULAR_FONT not in registered:
+        pdfmetrics.registerFont(TTFont(_PDF_REGULAR_FONT, font_dir / "Vera.ttf"))
+    if _PDF_BOLD_FONT not in registered:
+        pdfmetrics.registerFont(TTFont(_PDF_BOLD_FONT, font_dir / "VeraBd.ttf"))
+    return _PDF_REGULAR_FONT, _PDF_BOLD_FONT
+
+
+def pdf_embedded_text_width(text: str, *, size: float, bold: bool = False) -> float:
+    regular_font, bold_font = _register_pdf_fonts()
+    return float(pdfmetrics.stringWidth(text, bold_font if bold else regular_font, size))
+
+
 def pdf_helvetica_text_width(text: str, *, size: float, bold: bool = False) -> float:
-    widths = _HELVETICA_BOLD_WIDTHS if bold else _HELVETICA_WIDTHS
-    return sum(widths.get(character, 556) for character in text) * size / 1000.0
+    """Backward-compatible alias for the embedded PDF font width."""
+    return pdf_embedded_text_width(text, size=size, bold=bold)
 
 
 def pdf_top_to_bottom(page_height: float, y_top: float, box_height: float = 0.0) -> float:
@@ -202,53 +99,74 @@ def write_multi_page_pdf(
 ) -> Path:
     if not pages:
         raise ValueError("PDF output requires at least one page")
-    page_count = len(pages)
-    pages_object_id = 3 + page_count * 2
-    catalog_object_id = pages_object_id + 1
-    objects: list[bytes] = [
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
-    ]
-    page_object_ids: list[int] = []
-    for page_index, (width, height, commands) in enumerate(pages):
-        stream = "\n".join(commands).encode("latin-1")
-        content_object_id = 3 + page_index * 2
-        page_object_id = content_object_id + 1
-        page_object_ids.append(page_object_id)
-        objects.append(
-            b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream"
-        )
-        objects.append(
-            (
-                f"<< /Type /Page /Parent {pages_object_id} 0 R "
-                f"/MediaBox [0 0 {width:.2f} {height:.2f}] "
-                f"/Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> "
-                f"/Contents {content_object_id} 0 R >>"
-            ).encode("latin-1")
-        )
-    kids = " ".join(f"{object_id} 0 R" for object_id in page_object_ids)
-    objects.append(
-        f"<< /Type /Pages /Kids [{kids}] /Count {page_count} >>".encode("latin-1")
+    regular_font_name, bold_font_name = _register_pdf_fonts()
+    buffer = BytesIO()
+    first_width, first_height, _ = pages[0]
+    canvas = Canvas(
+        buffer,
+        pagesize=(first_width, first_height),
+        pageCompression=0,
+        invariant=1,
+        pdfVersion=(1, 4),
+        initialFontName=regular_font_name,
     )
-    objects.append(f"<< /Type /Catalog /Pages {pages_object_id} 0 R >>".encode("latin-1"))
-    pdf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
-    offsets = [0]
-    for index, obj in enumerate(objects, start=1):
-        offsets.append(len(pdf))
-        pdf.extend(f"{index} 0 obj\n".encode("latin-1"))
-        pdf.extend(obj)
-        pdf.extend(b"\nendobj\n")
-    xref_start = len(pdf)
-    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("latin-1"))
-    pdf.extend(b"0000000000 65535 f \n")
-    for offset in offsets[1:]:
-        pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
-    pdf.extend(
-        (
-            f"trailer\n<< /Size {len(objects) + 1} /Root {catalog_object_id} 0 R >>\n"
-            f"startxref\n{xref_start}\n%%EOF\n"
-        ).encode("latin-1")
-    )
+    fonts: dict[str, Any] = {
+        "F1": pdfmetrics.getFont(regular_font_name),
+        "F2": pdfmetrics.getFont(bold_font_name),
+    }
+    for width, height, commands in pages:
+        canvas.setPageSize((width, height))
+        for command in commands:
+            canvas.addLiteral(_command_with_embedded_font(command, canvas, fonts))
+        canvas.showPage()
+    canvas.save()
     with atomic_binary_writer(output_path) as handle:
-        handle.write(pdf)
+        handle.write(buffer.getvalue())
     return output_path
+
+
+def _pdf_unescape(text: str) -> str:
+    characters: list[str] = []
+    escaped = False
+    for character in text:
+        if escaped:
+            characters.append(character)
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        else:
+            characters.append(character)
+    if escaped:
+        characters.append("\\")
+    return "".join(characters)
+
+
+def _command_with_embedded_font(
+    command: str,
+    canvas: Canvas,
+    fonts: dict[str, Any],
+) -> str:
+    font_match = _PDF_FONT_COMMAND_RE.search(command)
+    text_match = _PDF_TEXT_COMMAND_RE.search(command)
+    if font_match is None or text_match is None:
+        return command
+    font_alias = font_match.group("font")
+    font_size = font_match.group("size")
+    font = fonts[font_alias]
+    text = _pdf_unescape(text_match.group("text"))
+    chunks = font.splitString(text or " ", canvas._doc)
+    rendered_chunks: list[str] = []
+    first_internal_name = font.getSubsetInternalName(chunks[0][0], canvas._doc)
+    if not text:
+        return command.replace(f"/{font_alias}", first_internal_name, 1)
+    for index, (subset, encoded) in enumerate(chunks):
+        if index > 0:
+            internal_name = font.getSubsetInternalName(subset, canvas._doc)
+            rendered_chunks.append(f"{internal_name} {font_size} Tf")
+        rendered_chunks.append(f"({canvas._escape(encoded)}) Tj")
+    command = (
+        command[: text_match.start()]
+        + " ".join(rendered_chunks)
+        + command[text_match.end() :]
+    )
+    return command.replace(f"/{font_alias}", first_internal_name, 1)
