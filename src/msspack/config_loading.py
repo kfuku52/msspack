@@ -328,7 +328,7 @@ def load_sample_config(data: dict[str, Any]) -> SampleConfig:
 def load_submission_config(data: dict[str, Any]) -> SubmissionConfig:
     return SubmissionConfig(
         datatype=str(data.get("datatype", "WGS")),
-        hold_date=str(require(data, "hold_date", "submission")),
+        hold_date=str(data.get("hold_date", "")),
         bioproject=str(require(data, "bioproject", "submission")),
         biosample=str(require(data, "biosample", "submission")),
         sra=listify(data.get("sra", [])),

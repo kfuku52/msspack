@@ -266,56 +266,75 @@ def _render_validation_section(report_root: Path, payload: dict[str, Any]) -> st
             f"heap={escape(str(options.get('heap', 'n/a')))}"
             "</p>"
         )
-    summary_path_value: object | None = None
+    summary_path_values: list[str] = []
     if isinstance(outputs, dict):
-        summary_path_value = outputs.get("validation_summary")
-    if not isinstance(summary_path_value, str):
-        plots = payload.get("plots")
-        pipeline_plots = plots.get("pipeline") if isinstance(plots, dict) else None
-        plotted_validation = (
-            pipeline_plots.get("ddbj_validation")
-            if isinstance(pipeline_plots, dict)
-            else None
-        )
-        if isinstance(plotted_validation, dict):
-            summary_path_value = plotted_validation.get("summary_json")
-    current_outputs: dict[str, object] = dict(outputs) if isinstance(outputs, dict) else {}
-    if isinstance(summary_path_value, str):
-        summary = load_validation_summary(Path(summary_path_value))
+        manifest_summary = outputs.get("validation_summary")
+        if isinstance(manifest_summary, str):
+            summary_path_values.append(manifest_summary)
+    plots = payload.get("plots")
+    pipeline_plots = plots.get("pipeline") if isinstance(plots, dict) else None
+    plotted_validation = (
+        pipeline_plots.get("ddbj_validation")
+        if isinstance(pipeline_plots, dict)
+        else None
+    )
+    if isinstance(plotted_validation, dict):
+        plotted_summary = plotted_validation.get("summary_json")
+        if isinstance(plotted_summary, str):
+            summary_path_values.append(plotted_summary)
+
+    summary = None
+    summary_candidates: list[Path] = []
+    for value in dict.fromkeys(summary_path_values):
+        path = Path(value)
+        if not path.is_absolute():
+            path = (report_root.parent / path).resolve()
+        if path.is_file():
+            summary_candidates.append(path)
+    for path in sorted(
+        summary_candidates,
+        key=lambda candidate: candidate.stat().st_mtime_ns,
+        reverse=True,
+    ):
+        summary = load_validation_summary(path)
         if summary is not None:
-            current_outputs["validation_summary"] = str(summary.path)
-            rows: list[str] = []
-            for check in summary.checks:
-                if check.log_path is not None:
-                    current_outputs[f"{check.component}_log"] = str(check.log_path)
-                current_outputs.update(
-                    {key: str(path) for key, path in check.output_paths.items()}
-                )
-                records = check.record_counts or {}
-                if check.component == "transchecker" and records:
-                    detail = (
-                        f"annotation CDS {_format_int(records.get('annotation_cds'))} / "
-                        f"AA {_format_int(records.get('aa_fasta'))} / "
-                        f"nucleotide {_format_int(records.get('nuc_fasta'))} records"
-                    )
-                else:
-                    detail = (
-                        f"{check.error_count:,} errors / "
-                        f"{check.warning_count:,} warnings"
-                    )
-                rows.append(
-                    "<tr>"
-                    f"<td>{escape(check.label)}</td>"
-                    f"<td>{escape(check.version or 'n/a')}</td>"
-                    f"<td><strong>{escape(check.status.upper().replace('_', ' '))}</strong></td>"
-                    f"<td>{escape(detail)}</td>"
-                    "</tr>"
-                )
-            parts.append(
-                "<table><thead><tr><th>Tool</th><th>Version</th>"
-                "<th>Result</th><th>Details</th></tr></thead>"
-                f"<tbody>{''.join(rows)}</tbody></table>"
+            break
+
+    current_outputs: dict[str, object] = dict(outputs) if isinstance(outputs, dict) else {}
+    if summary is not None:
+        current_outputs["validation_summary"] = str(summary.path)
+        rows: list[str] = []
+        for check in summary.checks:
+            if check.log_path is not None:
+                current_outputs[f"{check.component}_log"] = str(check.log_path)
+            current_outputs.update(
+                {key: str(path) for key, path in check.output_paths.items()}
             )
+            records = check.record_counts or {}
+            if check.component == "transchecker" and records:
+                detail = (
+                    f"annotation CDS {_format_int(records.get('annotation_cds'))} / "
+                    f"AA {_format_int(records.get('aa_fasta'))} / "
+                    f"nucleotide {_format_int(records.get('nuc_fasta'))} records"
+                )
+            else:
+                detail = (
+                    f"{check.error_count:,} errors / "
+                    f"{check.warning_count:,} warnings"
+                )
+            rows.append(
+                "<tr>"
+                f"<td>{escape(check.label)}</td>"
+                f"<td>{escape(check.version or 'n/a')}</td>"
+                f"<td><strong>{escape(check.status.upper().replace('_', ' '))}</strong></td>"
+                f"<td>{escape(detail)}</td>"
+                "</tr>"
+            )
+        parts.append(
+            "<table><thead><tr><th>Tool</th><th>Version</th>"
+            "<th>Result</th><th>Details</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>"
+        )
     if current_outputs:
         parts.append(_render_link_list(report_root, current_outputs, existing_only=True))
     parts.append("</section>")

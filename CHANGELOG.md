@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Allow immediate-release MSS submissions by omitting `submission.hold_date`, which
+  removes the `DATE/hold_date` row while keeping a valid `COMMON` header.
+- Make HTML reports use the newest available validation summary after a standalone
+  `msspack validate` run, matching the Sankey and validation artifacts.
+
 ## 0.7.5 - 2026-08-06
 
 - Install the minimum supported ReportLab version in the minimum-runtime CI job.

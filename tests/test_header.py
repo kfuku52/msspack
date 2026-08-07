@@ -78,6 +78,16 @@ class HeaderRenderTests(unittest.TestCase):
         self.assertIn("\tREFERENCE\t\ttitle\tDemo sequencing", text)
         self.assertIn("\tST_COMMENT\t\ttagset_id\tGenome-Assembly-Data", text)
 
+    def test_render_header_omits_date_for_immediate_release(self) -> None:
+        config = _config()
+        config.submission.hold_date = ""
+
+        text = render_header(config)
+
+        self.assertTrue(text.startswith("COMMON\tDATATYPE\t\ttype\tWGS\n"))
+        self.assertNotIn("\tDATE\t", text)
+        self.assertNotIn("hold_date", text)
+
     def test_render_final_annotation_normalizes_country_to_geo_loc_name(self) -> None:
         final = render_final_annotation(
             "COMMON\tDATE\t\thold_date\t20261231\n",

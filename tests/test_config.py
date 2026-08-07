@@ -153,6 +153,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.project.name, "Demo")
             self.assertEqual(config.sample.locus_tag_digits, 6)
             self.assertEqual(config.submission.datatype, "WGS")
+            self.assertEqual(config.submission.hold_date, "20261231")
             self.assertTrue(config.pipeline.run_gapjust)
             self.assertEqual(
                 config.pipeline.coordinate_duplicate_policy,
@@ -184,6 +185,19 @@ class ConfigTests(unittest.TestCase):
                     config.busco_database_dir,
                     shared_root / "busco",
                 )
+
+    def test_load_config_allows_omitting_hold_date_for_immediate_release(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "minimal_pack" / "config.toml"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "msspack.toml"
+            config_path.write_text(
+                fixture.read_text(encoding="utf-8").replace('hold_date = "20271231"\n', ""),
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path)
+
+        self.assertEqual(config.submission.hold_date, "")
 
     def test_coordinate_duplicate_plot_limit_is_configurable(self) -> None:
         raw = {"plots": {"coordinate_duplicate_limit": 125}}

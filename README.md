@@ -286,6 +286,10 @@ auto_lineage = true
 threads = 8
 ```
 
+In `[submission]`, omit `hold_date` when the records should be released immediately.
+Set it to a `YYYYMMDD` date only when requesting Hold-Until-Published; the generated
+annotation then includes the DDBJ `DATE/hold_date` row.
+
 - Functional annotation can combine Swiss-Prot, an optional close-reference proteome,
   UniRef90, Pfam, and CDD. Similarity searches precede the domain fallbacks. Set
   `uniref90_enabled = true` with an appropriate `uniref90_taxon_id`; downloading full

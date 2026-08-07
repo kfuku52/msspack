@@ -20,6 +20,7 @@ genetic_code = "1"
 
 [submission]
 datatype = "WGS"
+# Omit hold_date to request immediate release.
 hold_date = "20261231"
 bioproject = "PRJDB00000"
 biosample = "SAMD00000000"

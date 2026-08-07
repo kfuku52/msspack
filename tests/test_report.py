@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,6 +76,79 @@ def _write_minimal_config(base: Path) -> Path:
 
 
 class ReportTests(unittest.TestCase):
+    def test_validation_section_uses_newest_available_summary(self) -> None:
+        from msspack.report import _render_validation_section
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            report_root = root / "report"
+            report_root.mkdir()
+            old_summary = root / "old-summary.json"
+            new_summary = root / "new-summary.json"
+
+            def write_summary(path: Path, status: str, warnings: int) -> None:
+                path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "status": status,
+                            "attempted": True,
+                            "checks": {
+                                "parser": {
+                                    "component": "parser",
+                                    "label": "Parser",
+                                    "status": status,
+                                    "version": "6.80",
+                                    "log_path": None,
+                                    "outputs": {},
+                                    "warning_count": warnings,
+                                    "error_count": 0,
+                                    "record_counts": {},
+                                    "message": None,
+                                },
+                                "transchecker": {
+                                    "component": "transchecker",
+                                    "label": "transChecker",
+                                    "status": status,
+                                    "version": "2.26",
+                                    "log_path": None,
+                                    "outputs": {},
+                                    "warning_count": 0,
+                                    "error_count": 0,
+                                    "record_counts": {},
+                                    "message": None,
+                                },
+                            },
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+            write_summary(old_summary, "failed", 1)
+            write_summary(new_summary, "passed", 0)
+            os.utime(old_summary, ns=(1_000_000_000, 1_000_000_000))
+            os.utime(new_summary, ns=(2_000_000_000, 2_000_000_000))
+
+            html = _render_validation_section(
+                report_root,
+                {
+                    "validation": {
+                        "enabled": True,
+                        "outputs": {"validation_summary": str(old_summary)},
+                    },
+                    "plots": {
+                        "pipeline": {
+                            "ddbj_validation": {"summary_json": str(new_summary)}
+                        }
+                    },
+                },
+            )
+
+        self.assertIn("PASSED", html)
+        self.assertIn("0 errors / 0 warnings", html)
+        self.assertNotIn("FAILED", html)
+
     def test_summary_cards_escape_project_html(self) -> None:
         from msspack.report import _render_summary_cards
 

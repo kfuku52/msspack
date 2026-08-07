@@ -47,8 +47,11 @@ def _append_block(
 def render_header(config: MSSPackConfig) -> str:
     lines: list[str] = []
 
-    lines.append(_row("COMMON", "DATE", "", "hold_date", config.submission.hold_date))
-    lines.append(_row("", "DATATYPE", "", "type", config.submission.datatype))
+    common_entry = "COMMON"
+    if config.submission.hold_date:
+        lines.append(_row(common_entry, "DATE", "", "hold_date", config.submission.hold_date))
+        common_entry = ""
+    lines.append(_row(common_entry, "DATATYPE", "", "type", config.submission.datatype))
     lines.append(_row("", "DBLINK", "", "project", config.submission.bioproject))
     lines.append(_row("", "", "", "biosample", config.submission.biosample))
     for sra_id in config.submission.sra:

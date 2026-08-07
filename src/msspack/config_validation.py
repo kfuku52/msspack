@@ -116,9 +116,10 @@ def validate_sample_config(sample: SampleConfig) -> None:
 
 
 def validate_submission_config(submission: SubmissionConfig) -> None:
-    if not HOLD_DATE_RE.match(submission.hold_date):
-        raise ConfigError("Config value 'submission.hold_date' must match YYYYMMDD")
-    ensure_date(submission.hold_date, "submission.hold_date", "%Y%m%d")
+    if submission.hold_date:
+        if not HOLD_DATE_RE.match(submission.hold_date):
+            raise ConfigError("Config value 'submission.hold_date' must match YYYYMMDD")
+        ensure_date(submission.hold_date, "submission.hold_date", "%Y%m%d")
     ensure_nonempty(submission.bioproject, "submission.bioproject")
     ensure_nonempty(submission.biosample, "submission.biosample")
     ensure_nonempty(submission.datatype, "submission.datatype")
