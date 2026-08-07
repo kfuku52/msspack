@@ -282,7 +282,7 @@ class PipelinePlotTests(unittest.TestCase):
         stage_labels = ["Input", "Final feature fate"]
         nodes = [
             SankeyNode("start", "Input genes", 0, 2, "#334155"),
-            SankeyNode("final_cds", "Final CDS genes", 1, 2, "#059669"),
+            SankeyNode("final_cds", "Final gene models", 1, 2, "#059669"),
         ]
         links = [SankeyLink("start", "final_cds", 2, "#059669")]
         summary = ValidationSummary(

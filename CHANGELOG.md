@@ -6,6 +6,8 @@
   removes the `DATE/hold_date` row while keeping a valid `COMMON` header.
 - Make HTML reports use the newest available validation summary after a standalone
   `msspack validate` run, matching the Sankey and validation artifacts.
+- Label the Sankey output as final genes rather than final CDS, because the gene-flow
+  total also includes non-coding gene models in mixed GFF3 annotations.
 
 ## 0.7.5 - 2026-08-06
 

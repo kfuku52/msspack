@@ -87,7 +87,7 @@ SANKEY_NODE_LABELS = {
     "padding_updated": "Adjusted",
     "genes_with_stops": "Stops",
     "padding_unchanged": "No adjustment",
-    "final_cds": "Final CDS",
+    "final_cds": "Final genes",
     "final_misc": "Final misc",
 }
 _SANKEY_NODE_PRIORITY = {
@@ -475,7 +475,7 @@ def build_sankey(
         ),
         SankeyNode(
             "final_cds",
-            "Final CDS genes",
+            "Final gene models",
             final_stage,
             metrics.final_cds_genes,
             SANKEY_COLORS["final_cds"],
