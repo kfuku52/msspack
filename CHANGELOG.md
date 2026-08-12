@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep the CLI version regression test synchronized with the package version.
 - Render optional BioSample-aligned `tissue_type` and `isolation_source` qualifiers on
   every MSS source feature, and validate Genome Coverage while normalizing its suffix
   to the DDBJ-preferred lowercase `x`.

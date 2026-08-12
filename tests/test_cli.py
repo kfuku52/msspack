@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from msspack import cli
+from msspack import __version__, cli
 from msspack.busco import BuscoArtifacts, BuscoComparisonArtifacts
 from msspack.cli import main
 from msspack.databases import DatabaseStatus
@@ -25,7 +25,7 @@ class CliTests(unittest.TestCase):
                 main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "msspack 0.7.8")
+        self.assertEqual(stdout.getvalue().strip(), f"msspack {__version__}")
 
     def test_main_init_writes_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
