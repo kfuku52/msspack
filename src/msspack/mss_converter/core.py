@@ -44,6 +44,8 @@ class ConversionOptions:
     gap_estimated_length: str = "known"
     feature_with_gap: str = "asis"
     minimum_intron_size_cutoff: int = 0
+    tissue_type: str = ""
+    isolation_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,8 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
                     mol_type=options.mol_type,
                     country=options.country,
                     isolate=options.isolate,
+                    tissue_type=options.tissue_type,
+                    isolation_source=options.isolation_source,
                     collection_date=options.collection_date,
                     sex=options.sex,
                 )

@@ -14,6 +14,8 @@ def render_source_feature(
     isolate: str,
     collection_date: str,
     sex: str,
+    tissue_type: str = "",
+    isolation_source: str = "",
 ) -> str:
     out = f"{contig_name}\tsource\t1..{length}"
     if isolate:
@@ -26,6 +28,10 @@ def render_source_feature(
         out += f"\t\t\tstrain\t{strain}\n"
     if isolate:
         out += f"\t\t\tisolate\t{isolate}\n"
+    if tissue_type:
+        out += f"\t\t\ttissue_type\t{tissue_type}\n"
+    if isolation_source:
+        out += f"\t\t\tisolation_source\t{isolation_source}\n"
     if sex:
         out += f"\t\t\tsex\t{sex}\n"
     if country:

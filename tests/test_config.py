@@ -559,6 +559,15 @@ class ConfigTests(unittest.TestCase):
             "submission.hold_date",
         )
 
+    def test_rejects_invalid_genome_coverage(self) -> None:
+        self._assert_fixture_rejected(
+            lambda text: text.replace(
+                'genome_coverage = "10x"',
+                'genome_coverage = "tenfold"',
+            ),
+            "st_comment.genome_coverage",
+        )
+
     def test_rejects_quoted_boolean(self) -> None:
         self._assert_fixture_rejected(
             lambda text: text.replace("run_gapjust = false", 'run_gapjust = "false"'),

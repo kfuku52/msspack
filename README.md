@@ -290,6 +290,12 @@ In `[submission]`, omit `hold_date` when the records should be released immediat
 Set it to a `YYYYMMDD` date only when requesting Hold-Until-Published; the generated
 annotation then includes the DDBJ `DATE/hold_date` row.
 
+In `[sample]`, set the optional `tissue_type` and `isolation_source` values when they
+apply, using values consistent with the linked BioSample. They are emitted as source
+feature qualifiers on every submitted sequence. In `[st_comment]`, specify
+`genome_coverage` as a positive number followed by `x`, such as `297x`. A legacy
+uppercase suffix such as `297X` is accepted but rendered as the DDBJ-preferred `297x`.
+
 - Functional annotation can combine Swiss-Prot, an optional close-reference proteome,
   UniRef90, Pfam, and CDD. Similarity searches precede the domain fallbacks. Set
   `uniref90_enabled = true` with an appropriate `uniref90_taxon_id`; downloading full

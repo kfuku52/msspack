@@ -77,6 +77,8 @@ class HeaderRenderTests(unittest.TestCase):
         self.assertIn("\tSUBMITTER\t\tab_name\tFukushima,K.", text)
         self.assertIn("\tREFERENCE\t\ttitle\tDemo sequencing", text)
         self.assertIn("\tST_COMMENT\t\ttagset_id\tGenome-Assembly-Data", text)
+        self.assertIn("\t\t\tGenome Coverage\t100x", text)
+        self.assertNotIn("\t\t\tGenome Coverage\t100X", text)
 
     def test_render_header_omits_date_for_immediate_release(self) -> None:
         config = _config()

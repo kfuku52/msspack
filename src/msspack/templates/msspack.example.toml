@@ -12,6 +12,8 @@ locus_tag_digits = 6
 scientific_name = "Genus species"
 strain = ""
 isolate = ""
+tissue_type = ""
+isolation_source = ""
 geo_loc_name = "Japan"
 collection_date = "2026-01-01"
 sex = ""
@@ -50,7 +52,7 @@ status = "Unpublished"
 tagset_id = "Genome-Assembly-Data"
 assembly_method = "Assembler 1.0"
 assembly_name = "MyAssembly_1.0"
-genome_coverage = "100X"
+genome_coverage = "100x"
 sequencing_technology = "Sequencer"
 
 [pipeline]

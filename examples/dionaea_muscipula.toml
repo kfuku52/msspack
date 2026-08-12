@@ -58,7 +58,7 @@ status = "Unpublished"
 tagset_id = "Genome-Assembly-Data"
 assembly_method = "Flye v. 2.8.3; medaka v. 1.4.3; NextPolish v. 1.3.1"
 assembly_name = "Diomu_v2.1"
-genome_coverage = "272X"
+genome_coverage = "272x"
 sequencing_technology = "Nanopore PromethION"
 
 [pipeline]

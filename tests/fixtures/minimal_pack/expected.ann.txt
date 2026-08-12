@@ -22,12 +22,14 @@ COMMON	DATE		hold_date	20271231
 	ST_COMMENT		tagset_id	Genome-Assembly-Data
 			Assembly Method	assembler v1
 			Assembly Name	Fixture_1.0
-			Genome Coverage	10X
+			Genome Coverage	10x
 			Sequencing Technology	Illumina
 ctg1	source	1..9	ff_definition	@@[organism]@@ @@[isolate]@@ DNA, @@[submitter_seqid]@@
 			mol_type	genomic DNA
 			organism	Fixture organism
 			isolate	Iso1
+			tissue_type	leaf
+			isolation_source	cultivated individual
 			geo_loc_name	Japan
 			collection_date	2026-01-02
 			submitter_seqid	@@[entry]@@

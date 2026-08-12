@@ -23,6 +23,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ifc", default=False, action="store_true")
     parser.add_argument("--stc")
     parser.add_argument("--iso", default="")
+    parser.add_argument("--tissue-type", default="")
+    parser.add_argument("--isolation-source", default="")
     parser.add_argument("--sex", default="")
     parser.add_argument("--cou", default="")
     parser.add_argument("--cod", default="")
@@ -50,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         infer_boundary=bool(args.ifc),
         start_codons=tuple(args.stc.split(",")) if args.stc else None,
         isolate=args.iso,
+        tissue_type=args.tissue_type,
+        isolation_source=args.isolation_source,
         sex=args.sex,
         country=args.cou,
         collection_date=args.cod,

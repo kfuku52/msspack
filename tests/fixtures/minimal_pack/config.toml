@@ -12,6 +12,8 @@ locus_tag_digits = 6
 scientific_name = "Fixture organism"
 strain = ""
 isolate = "Iso1"
+tissue_type = "leaf"
+isolation_source = "cultivated individual"
 geo_loc_name = "Japan"
 collection_date = "2026-01-02"
 sex = ""
@@ -49,7 +51,7 @@ status = "Unpublished"
 tagset_id = "Genome-Assembly-Data"
 assembly_method = "assembler v1"
 assembly_name = "Fixture_1.0"
-genome_coverage = "10X"
+genome_coverage = "10x"
 sequencing_technology = "Illumina"
 
 [pipeline]

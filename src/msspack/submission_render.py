@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from .config import MSSPackConfig
+from .config_validation import normalize_genome_coverage
 from .utils import write_text
 
 
@@ -93,7 +94,15 @@ def render_header(config: MSSPackConfig) -> str:
     if config.st_comment.assembly_name:
         lines.append(_row("", "", "", "Assembly Name", config.st_comment.assembly_name))
     if config.st_comment.genome_coverage:
-        lines.append(_row("", "", "", "Genome Coverage", config.st_comment.genome_coverage))
+        lines.append(
+            _row(
+                "",
+                "",
+                "",
+                "Genome Coverage",
+                normalize_genome_coverage(config.st_comment.genome_coverage),
+            )
+        )
     if config.st_comment.sequencing_technology:
         lines.append(
             _row("", "", "", "Sequencing Technology", config.st_comment.sequencing_technology)

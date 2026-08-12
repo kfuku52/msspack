@@ -10,9 +10,31 @@ from msspack.mss_converter.core import (
     convert_gff_to_mss,
     detect_gap_regions,
 )
+from msspack.mss_converter.render import render_source_feature
 
 
 class MssConverterTests(unittest.TestCase):
+    def test_source_feature_renders_optional_sample_qualifiers(self) -> None:
+        text = render_source_feature(
+            contig_name="chr1",
+            length=100,
+            organism_name="Test species",
+            strain="",
+            mol_type="genomic DNA",
+            country="Japan",
+            isolate="sample-1",
+            tissue_type="leaf",
+            isolation_source="cultivated outdoor individual",
+            collection_date="2026-08-12",
+            sex="",
+        )
+
+        self.assertIn("\t\t\ttissue_type\tleaf\n", text)
+        self.assertIn(
+            "\t\t\tisolation_source\tcultivated outdoor individual\n",
+            text,
+        )
+
     def test_start_codons_follow_selected_genetic_code(self) -> None:
         self.assertIn("ATA", _get_start_codons("2"))
 

@@ -634,6 +634,8 @@ def run_gff2mss(
             genetic_code=config.sample.genetic_code,
             infer_boundary=config.pipeline.infer_complete,
             isolate=config.sample.isolate,
+            tissue_type=config.sample.tissue_type,
+            isolation_source=config.sample.isolation_source,
             sex=config.sample.sex,
             country=config.sample.geo_loc_name,
             collection_date=config.sample.collection_date,

@@ -49,7 +49,7 @@ status = "Unpublished"
 tagset_id = "Genome-Assembly-Data"
 assembly_method = "hifiasm v. 0.14-r312; HiRise"
 assembly_name = "Tripe_1.2"
-genome_coverage = "100X"
+genome_coverage = "100x"
 sequencing_technology = "PacBio Sequel II"
 
 [pipeline]

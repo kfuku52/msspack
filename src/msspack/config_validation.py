@@ -17,6 +17,7 @@ from .config_models import (
     ProjectConfig,
     ReferenceConfig,
     SampleConfig,
+    StCommentConfig,
     SubmissionConfig,
     SubmitterConfig,
     ToolsConfig,
@@ -24,6 +25,7 @@ from .config_models import (
 from .coordinate_duplicates import COORDINATE_DUPLICATE_POLICIES
 
 HOLD_DATE_RE = re.compile(r"^\d{8}$")
+GENOME_COVERAGE_RE = re.compile(r"^(?P<coverage>\d+(?:\.\d+)?)[xX]$")
 JAVA_HEAP_RE = re.compile(r"^\d+[KMGkmg]$")
 VALID_GAP_ASSEMBLY = {"known", "unknown"}
 VALID_FEATURE_WITH_GAP = {"asis", "misc_feature"}
@@ -98,6 +100,19 @@ def ensure_string_list(values: list[str], key: str) -> None:
         ensure_nonempty(value, key)
 
 
+def normalize_genome_coverage(value: str) -> str:
+    """Validate and return DDBJ genome coverage with a lowercase ``x`` suffix."""
+    if not value:
+        return ""
+    match = GENOME_COVERAGE_RE.fullmatch(value.strip())
+    if match is None or float(match.group("coverage")) <= 0:
+        raise ConfigError(
+            "Config value 'st_comment.genome_coverage' must be a positive number "
+            "followed by 'x', for example 30x"
+        )
+    return f"{match.group('coverage')}x"
+
+
 def validate_project_config(project: ProjectConfig) -> None:
     ensure_nonempty(project.name, "project.name")
 
@@ -135,6 +150,10 @@ def validate_reference_config(reference: ReferenceConfig) -> None:
     ensure_string_list(reference.ab_name, "reference.ab_name")
     ensure_nonempty(reference.title, "reference.title")
     ensure_positive(reference.year, "reference.year")
+
+
+def validate_st_comment_config(st_comment: StCommentConfig) -> None:
+    normalize_genome_coverage(st_comment.genome_coverage)
 
 
 def validate_pipeline_config(pipeline: PipelineConfig) -> None:
@@ -390,6 +409,7 @@ def validate_config(config: MSSPackConfig) -> None:
     validate_submission_config(config.submission)
     validate_submitter_config(config.submitter)
     validate_reference_config(config.reference)
+    validate_st_comment_config(config.st_comment)
     validate_pipeline_config(config.pipeline)
     validate_plots_config(config.plots)
     validate_tools_config(config.tools)

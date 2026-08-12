@@ -32,6 +32,8 @@ class SampleConfig:
     sex: str = ""
     linkage_evidence: str = "paired-ends"
     genetic_code: str = "1"
+    tissue_type: str = ""
+    isolation_source: str = ""
 
 
 @dataclass

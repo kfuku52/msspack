@@ -52,7 +52,7 @@ status = "Unpublished"
 tagset_id = "Genome-Assembly-Data"
 assembly_method = "msspack demo"
 assembly_name = "MSSPACK_NOT_FOR_SUBMISSION"
-genome_coverage = "1X"
+genome_coverage = "1x"
 sequencing_technology = "test data"
 
 [pipeline]

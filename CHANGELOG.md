@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Render optional BioSample-aligned `tissue_type` and `isolation_source` qualifiers on
+  every MSS source feature, and validate Genome Coverage while normalizing its suffix
+  to the DDBJ-preferred lowercase `x`.
 - Allow immediate-release MSS submissions by omitting `submission.hold_date`, which
   removes the `DATE/hold_date` row while keeping a valid `COMMON` header.
 - Make HTML reports use the newest available validation summary after a standalone
