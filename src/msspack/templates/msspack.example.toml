@@ -56,6 +56,8 @@ genome_coverage = "100x"
 sequencing_technology = "Sequencer"
 
 [pipeline]
+# mRNA locations retain UTR sequence; independent UTR features are optional.
+retain_utr_features = false
 run_gapjust = true
 gap_assembly = "unknown"
 infer_complete = true

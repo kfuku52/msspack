@@ -41,6 +41,7 @@ def verify_distribution(path: Path) -> None:
             "msspack/demo_data/reference.faa",
             "msspack/templates/msspack.example.toml",
             "msspack/workflow.py",
+            "msspack/submission_update.py",
         )
     elif path.name.endswith(".tar.gz"):
         members = _sdist_members(path)
@@ -50,6 +51,7 @@ def verify_distribution(path: Path) -> None:
             "CHANGELOG.md",
             "CONTRIBUTING.md",
             "RELEASE.md",
+            "docs/annotation-updates.md",
             "docs/assets/msspack-header.png",
             "docs/assets/sample-busco-cds-comparison.svg",
             "docs/assets/sample-pipeline-gene-flow.sankey.pdf",
@@ -78,6 +80,7 @@ def verify_distribution(path: Path) -> None:
             "tests/test_functional_annotation.py",
             "tests/test_product_names.py",
             "tests/test_workflow.py",
+            "tests/test_submission_update.py",
             "tests/fixtures/minimal_pack/config.toml",
             "tests/fixtures/minimal_pack/expected.ann.txt",
             "tests/fixtures/minimal_pack/expected.fasta",

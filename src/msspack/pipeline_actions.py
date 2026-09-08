@@ -633,6 +633,7 @@ def run_gff2mss(
             linkage_evidence=config.sample.linkage_evidence,
             genetic_code=config.sample.genetic_code,
             infer_boundary=config.pipeline.infer_complete,
+            retain_utr_features=config.pipeline.retain_utr_features,
             isolate=config.sample.isolate,
             tissue_type=config.sample.tissue_type,
             isolation_source=config.sample.isolation_source,
@@ -682,6 +683,7 @@ def run_gff2mss(
             output_total=len(summary.contigs),
             details={
                 "used_custom_locus_tags": summary.used_custom_locus_tags,
+                "event_counts": summary.overall_counts,
                 "contigs_with_events": sum(1 for contig in summary.contigs if contig.event_counts),
                 "summary_lines": lines,
             },

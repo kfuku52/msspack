@@ -130,7 +130,7 @@ class MssConverterTests(unittest.TestCase):
                     [
                         "##gff-version 3",
                         "chr1\tsrc\tgene\t1\t90\t.\t+\t.\tID=g1",
-                        "chr1\tsrc\tmRNA\t1\t90\t.\t+\t.\tID=tx1;Parent=g1",
+                        "chr1\tsrc\tmRNA\t1\t90\t.\t+\t.\tID=tx1;Parent=g1;Dbxref=GeneID:123,RefSeq:NM_001;Note=original%20note",
                         "chr1\tsrc\texon\t1\t90\t.\t+\t.\tID=ex1;Parent=tx1",
                         "chr1\tsrc\tfive_prime_UTR\t1\t9\t.\t+\t.\tID=utr1;Parent=tx1",
                         "chr1\tsrc\tCDS\t10\t90\t.\t+\t0\tID=cds1;Parent=tx1",
@@ -170,8 +170,12 @@ class MssConverterTests(unittest.TestCase):
 
             text = output.read_text(encoding="utf-8")
             self.assertIn("\tmRNA\t1..90\tlocus_tag\tMix000000100", text)
-            self.assertIn("\texon\t1..90\tlocus_tag\tMix000000100", text)
-            self.assertIn("\t5'UTR\t1..9\tlocus_tag\tMix000000100", text)
+            self.assertIn("\t\t\tnote\tdb_xref:GeneID:123\n", text)
+            self.assertIn("\t\t\tnote\tdb_xref:RefSeq:NM_001\n", text)
+            self.assertIn("\t\t\tnote\toriginal note\n", text)
+            self.assertNotIn("\t\t\tdb_xref\t", text)
+            self.assertNotIn("\texon\t1..90\tlocus_tag\tMix000000100", text)
+            self.assertNotIn("\t5'UTR\t1..9\tlocus_tag\tMix000000100", text)
             self.assertIn("\tCDS\t10..90\tlocus_tag\tMix000000100", text)
             self.assertIn("\tncRNA\t100..130\tlocus_tag\tMix000000200", text)
             self.assertIn("\t\t\tncRNA_class\tmiRNA", text)
@@ -190,6 +194,16 @@ class MssConverterTests(unittest.TestCase):
                 text,
             )
             self.assertEqual(summary.overall_counts["unknown_features"], 1)
+            self.assertEqual(summary.overall_counts["omitted_exon_features"], 1)
+            self.assertEqual(summary.overall_counts["omitted_utr_features"], 1)
+            convert_gff_to_mss(ConversionOptions(
+                fasta_path=fasta, gff_path=gff, annotation_path=annotation,
+                output_path=output, locus_tag_prefix="Mix", organism_name="Test organism",
+                retain_utr_features=True,
+            ))
+            retained = output.read_text(encoding="utf-8")
+            self.assertIn("\t5'UTR\t1..9", retained)
+            self.assertNotIn("\texon\t1..90", retained)
 
     def test_suppresses_transcript_structure_when_exons_equal_cds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -326,7 +340,7 @@ class MssConverterTests(unittest.TestCase):
                 "\tmRNA\tjoin(1..30,61..90)\tlocus_tag\tRna000000100",
                 text,
             )
-            self.assertIn("\texon\t1..30\tlocus_tag\tRna000000100", text)
+            self.assertNotIn("\texon\t1..30\tlocus_tag\tRna000000100", text)
             self.assertIn("\tintron\t31..60\tlocus_tag\tRna000000100", text)
             self.assertNotIn("\tCDS\t", text)
 

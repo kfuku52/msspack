@@ -132,6 +132,13 @@ legacy input-order behavior or `"keep_all"` to disable automatic removal.
 The species-specific configs in [`examples/`](examples/) are sanitized schema
 examples. Replace every placeholder path and submitter field before use.
 
+### Annotation-only updates of existing entries
+
+Use `msspack prepare-update` to rename existing MSS entries to verified accessions
+while preserving bases, CDS locations and protein IDs. It also omits exon/UTR
+features represented by mRNA locations. See the [update guide](docs/annotation-updates.md)
+for the mapping format, commands and validation requirements.
+
 ### GFF3 feature handling
 
 CDS boundary adjustment is restricted to the targeted coding transcript. Its exon,
@@ -139,11 +146,16 @@ start/stop codon, UTR, and intron rows are synchronized afterward; other transcr
 and non-coding genes are not adjusted. Every adjusted model is checked for parent-child
 containment, three-base terminal codons, and UTR/CDS overlap before the next stage.
 
-The MSS converter emits CDS by default. For a coding transcript, it emits mRNA and
-its exon/intron/UTR structure only when the mature transcript adds information beyond
-the CDS—for example UTR sequence, non-coding exons, or alternative isoforms. A model
-whose exon coverage is identical to its CDS is rendered as CDS alone. Transcripts
-without a CDS remain explicit mRNA features.
+The MSS converter emits CDS by default. For a coding transcript, it emits mRNA
+only when the mature transcript adds information beyond the CDS—for example UTR
+sequence, non-coding exons, or alternative isoforms. A model whose exon coverage
+is identical to its CDS is rendered as CDS alone. Transcripts without a CDS remain
+explicit mRNA features. Exons represented by mRNA locations are not emitted as
+independent features. UTR sequence remains in the mRNA location; independent UTR
+features are omitted by default. Set `pipeline.retain_utr_features = true` (or
+`--retain-utr-features` in the internal converter) to retain them. Standalone
+annotations without a representing mRNA are retained. Conversion metrics count
+emitted/omitted mRNAs and redundant exon/UTR omissions.
 
 rRNA, tRNA, tmRNA, ncRNA, repeat, regulatory, mobile-element, peptide, and other
 recognized GFF3 annotations are retained and mapped to DDBJ-supported INSDC feature
@@ -201,6 +213,7 @@ stage and `pack` reuse the same normalized, boundary-adjusted intermediates, and
 | `msspack run --config my_submission.toml` | Orchestrate configured BUSCO, MSS generation, validation, plots, and report |
 | `msspack busco --config my_submission.toml` | Compare BUSCO results for input and processed sequences |
 | `msspack pack --config my_submission.toml` | Clean models, run configured annotation, then build and validate the MSS files |
+| `msspack prepare-update --ann FILE --fasta FILE --mapping TSV --output-dir DIR` | Prepare existing files for an annotation-only update |
 | `msspack validate --ann FILE --fasta FILE` | Validate existing MSS files |
 | `msspack plot --config my_submission.toml` | Render the pipeline Sankey and supporting figures |
 | `msspack report --config my_submission.toml` | Render/reuse plots and write the HTML report |

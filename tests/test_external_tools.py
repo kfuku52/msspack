@@ -78,7 +78,7 @@ class ExternalDdbjTests(unittest.TestCase):
                     [
                         "##gff-version 3",
                         "ctg1\tsrc\tgene\t1\t90\t.\t+\t.\tID=g1",
-                        "ctg1\tsrc\tmRNA\t1\t90\t.\t+\t.\tID=tx1;Parent=g1",
+                        "ctg1\tsrc\tmRNA\t1\t90\t.\t+\t.\tID=tx1;Parent=g1;Dbxref=GeneID:123,RefSeq:NM_001",
                         "ctg1\tsrc\texon\t1\t90\t.\t+\t.\tID=ex1;Parent=tx1",
                         "ctg1\tsrc\tfive_prime_UTR\t1\t9\t.\t+\t.\tID=utr1;Parent=tx1",
                         "ctg1\tsrc\tCDS\t10\t90\t.\t+\t0\tID=cds1;Parent=tx1",

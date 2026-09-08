@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-09-08
+
+- Omit exon features represented by mRNA locations and make independent UTR
+  output opt-in with `pipeline.retain_utr_features`; retain transcript locations.
+- Add `prepare-update` for verified entry/accession/submitter_seqid mappings on
+  existing MSS file pairs, preserving sequence bases and existing protein IDs,
+  with explicit validation requirements and a local update manifest.
+- Preserve GFF3 mRNA database cross-references as notes because DDBJ Parser
+  rejects the `db_xref` qualifier on mRNA features.
 - Keep the CLI version regression test synchronized with the package version.
 - Render optional BioSample-aligned `tissue_type` and `isolation_source` qualifiers on
   every MSS source feature, and validate Genome Coverage while normalizing its suffix

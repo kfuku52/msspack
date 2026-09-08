@@ -80,6 +80,7 @@ class StCommentConfig:
 
 @dataclass
 class PipelineConfig:
+    retain_utr_features: bool = False
     run_gapjust: bool = True
     gapjust_gap_len: int = 100
     gapjust_min: int = 80

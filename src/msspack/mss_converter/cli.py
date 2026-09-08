@@ -31,6 +31,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mag", default=0, type=int)
     parser.add_argument("--gel", default="known", choices=["known", "unknown"])
     parser.add_argument("--fwg", default="asis", choices=["asis", "misc_feature"])
+    parser.add_argument("--retain-utr-features", action="store_true")
     parser.add_argument("--mis", default=0, type=int)
     return parser
 
@@ -61,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         gap_estimated_length=args.gel,
         feature_with_gap=args.fwg,
         minimum_intron_size_cutoff=args.mis,
+        retain_utr_features=args.retain_utr_features,
     )
     summary = convert_gff_to_mss(options)
     if summary.used_custom_locus_tags:

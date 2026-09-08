@@ -235,7 +235,12 @@ def _generic_qualifiers(
         qualifiers.append(("pseudogene", pseudogene_type(feature.attributes)))
 
     for db_xref in _comma_values(_attribute(feature, "Dbxref", "db_xref")):
-        qualifiers.append(("db_xref", db_xref))
+        # DDBJ Parser rejects db_xref on mRNA; keep the transcript reference
+        # as a note instead of losing it or assigning it to a different feature.
+        if feature_key == "mRNA":
+            qualifiers.append(("note", f"db_xref:{db_xref}"))
+        else:
+            qualifiers.append(("db_xref", db_xref))
 
     note = _attribute(feature, "Note", "note", "description", "Description")
     if feature_key == "misc_feature":
@@ -593,6 +598,7 @@ def convert_contig_features(
     minimum_intron_size_cutoff: int,
     transl_table: str,
     event_counts: Counter[str],
+    retain_utr_features: bool = False,
 ) -> tuple[int, str]:
     genes = gene_lookup.get(contig_name, [])
     chunks: list[str] = []
@@ -629,6 +635,7 @@ def convert_contig_features(
         *,
         locus_tag: str | None,
         emit_transcript_structure: bool = True,
+        represented_by_mrna: FeatureRecord | None = None,
     ) -> None:
         for descendant in parent_lookup.get(parent_id, []):
             if id(descendant) in processed:
@@ -639,6 +646,7 @@ def convert_contig_features(
                     descendant.id,
                     locus_tag=locus_tag,
                     emit_transcript_structure=emit_transcript_structure,
+                    represented_by_mrna=represented_by_mrna,
                 )
                 continue
             if (
@@ -652,12 +660,31 @@ def convert_contig_features(
                         emit_transcript_structure=False,
                     )
                 continue
-            render_generic(descendant, locus_tag=locus_tag)
+            redundant = (
+                represented_by_mrna is not None
+                and descendant.strand == represented_by_mrna.strand
+                and (
+                    descendant.type in EXON_TYPES
+                    or (descendant.type in UTR_TYPES and not retain_utr_features)
+                )
+                and any(
+                    start <= descendant.start <= descendant.end <= end
+                    for start, end in _covered_intervals(
+                        _location_features(represented_by_mrna, parent_lookup)
+                    )
+                )
+            )
+            if redundant:
+                key = "omitted_exon_features" if descendant.type in EXON_TYPES else "omitted_utr_features"
+                event_counts[key] += 1
+            else:
+                render_generic(descendant, locus_tag=locus_tag)
             if descendant.id:
                 render_descendants(
                     descendant.id,
                     locus_tag=locus_tag,
                     emit_transcript_structure=emit_transcript_structure,
+                    represented_by_mrna=represented_by_mrna,
                 )
 
     for gene_feature in genes:
@@ -711,6 +738,7 @@ def convert_contig_features(
                     parent_lookup,
                     alternative_isoforms=alternative_isoforms,
                 )
+                event_counts["mrna_emitted" if emit_mrna else "mrna_omitted"] += 1
                 if emit_mrna:
                     render_generic(
                         child,
@@ -721,6 +749,7 @@ def convert_contig_features(
                     child.id,
                     locus_tag=transcript_locus_tag,
                     emit_transcript_structure=emit_mrna,
+                    represented_by_mrna=child if emit_mrna else None,
                 )
                 if any(
                     descendant.type == "CDS"
@@ -818,6 +847,7 @@ def convert_contig_features(
                 parent_lookup,
                 alternative_isoforms=False,
             )
+            event_counts["mrna_emitted" if emit_mrna else "mrna_omitted"] += 1
             if emit_mrna:
                 render_generic(
                     feature,
@@ -828,6 +858,7 @@ def convert_contig_features(
                 feature.id,
                 locus_tag=transcript_locus_tag,
                 emit_transcript_structure=emit_mrna,
+                represented_by_mrna=feature if emit_mrna else None,
             )
             if any(
                 descendant.type == "CDS"

@@ -141,6 +141,10 @@ def render_generic_feature(
 
 def format_event_summary(event_counts: dict[str, int], prefix: str) -> str:
     labels = [
+        ("mrna_emitted", "mRNAs emitted"),
+        ("mrna_omitted", "mRNAs omitted"),
+        ("omitted_exon_features", "exons represented by mRNA"),
+        ("omitted_utr_features", "UTRs represented by mRNA"),
         ("start_codon_missing", "start codon missing"),
         ("stop_codon_missing", "stop codon missing"),
         ("small_introns", "small introns"),

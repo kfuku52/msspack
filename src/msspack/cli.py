@@ -16,6 +16,7 @@ from .internal_cli import add_internal_parser, handle_internal
 from .pipeline import run_pipeline
 from .pipeline_plots import run_pipeline_plots, summarize_pipeline_plots
 from .report import run_html_report
+from .submission_update import prepare_update
 from .utils import MSSPackError, write_text
 from .validation import validate_existing
 from .workflow import database_directory_override, run_all
@@ -199,6 +200,15 @@ def _build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("--ann", required=True, help="annotation file")
     validate_parser.add_argument("--fasta", required=True, help="sequence file")
 
+    update_parser = subparsers.add_parser(
+        "prepare-update", help="prepare existing MSS files for an annotation-only update"
+    )
+    update_parser.add_argument("--ann", required=True)
+    update_parser.add_argument("--fasta", required=True)
+    update_parser.add_argument("--mapping", required=True)
+    update_parser.add_argument("--output-dir", required=True)
+    update_parser.add_argument("--retain-utr-features", action="store_true")
+
     add_internal_parser(subparsers)
 
     return parser
@@ -356,6 +366,17 @@ def _handle_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_prepare_update(args: argparse.Namespace) -> int:
+    output = prepare_update(
+        ann_path=Path(args.ann), fasta_path=Path(args.fasta),
+        mapping_path=Path(args.mapping), output_dir=Path(args.output_dir),
+        retain_utr_features=args.retain_utr_features,
+    )
+    print(output)
+    print("Prepared locally; verify the accession mapping and run msspack validate before submission.")
+    return 0
+
+
 def _dispatch(args: argparse.Namespace) -> int:
     handlers = {
         "init": _handle_init,
@@ -369,6 +390,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "report": _handle_report,
         "busco": _handle_busco,
         "validate": _handle_validate,
+        "prepare-update": _handle_prepare_update,
         "internal": handle_internal,
     }
     handler = handlers.get(args.command)

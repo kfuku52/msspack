@@ -44,6 +44,7 @@ class ConversionOptions:
     gap_estimated_length: str = "known"
     feature_with_gap: str = "asis"
     minimum_intron_size_cutoff: int = 0
+    retain_utr_features: bool = False
     tissue_type: str = ""
     isolation_source: str = ""
 
@@ -144,6 +145,7 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
                 minimum_intron_size_cutoff=options.minimum_intron_size_cutoff,
                 transl_table=options.genetic_code,
                 event_counts=contig_counts,
+                retain_utr_features=options.retain_utr_features,
             )
             if cds_text:
                 chunks.append(cds_text)

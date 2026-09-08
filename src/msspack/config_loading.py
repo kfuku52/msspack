@@ -78,6 +78,7 @@ SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
         "sequencing_technology": str,
     },
     "pipeline": {
+        "retain_utr_features": bool,
         "run_gapjust": bool,
         "gapjust_gap_len": int,
         "gapjust_min": int,
@@ -377,6 +378,7 @@ def load_st_comment_config(data: dict[str, Any]) -> StCommentConfig:
 
 def load_pipeline_config(data: dict[str, Any]) -> PipelineConfig:
     return PipelineConfig(
+        retain_utr_features=bool(data.get("retain_utr_features", False)),
         run_gapjust=bool(data.get("run_gapjust", True)),
         gapjust_gap_len=int(data.get("gapjust_gap_len", 100)),
         gapjust_min=int(data.get("gapjust_min", 80)),
