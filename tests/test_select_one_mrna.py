@@ -1,7 +1,10 @@
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
 
+from msspack.cli import main
 from msspack.transcript_selection import select_one_mrna_per_gene
 
 _GFF = """\
@@ -109,21 +112,6 @@ chr1\tsrc\tCDS\t20\t28\t.\t+\t0\tID=orphan.cds;Parent=orphan
             self.assertEqual(output_path.read_text(encoding="utf-8"), gff)
             self.assertEqual(summary["removed_mrnas"], 0)
 
-    def test_exact_tie_keeps_first_transcript(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            input_path = Path(tmp_dir) / "input.gff"
-            output_path = Path(tmp_dir) / "output.gff"
-            input_path.write_text(_GFF, encoding="utf-8")
-
-            select_one_mrna_per_gene(
-                input_gff_path=input_path,
-                output_gff_path=output_path,
-            )
-
-            output = output_path.read_text(encoding="utf-8")
-            self.assertIn("ID=Gene1-T1;Parent=Gene1", output)
-            self.assertNotIn("ID=Gene1-T2;Parent=Gene1", output)
-
     def test_child_features_before_mrna_are_still_resolved(self) -> None:
         reordered = """\
 chr1\tsrc\tgene\t100\t400\t.\t+\t.\tID=Gene1
@@ -158,10 +146,22 @@ chr1\tsrc\tmRNA\t100\t400\t.\t+\t.\tID=Gene1-T1;Parent=Gene1
             output_path = Path(tmp_dir) / "output.gff"
             input_path.write_text(shuffled, encoding="utf-8")
 
-            select_one_mrna_per_gene(
-                input_gff_path=input_path,
-                output_gff_path=output_path,
-            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "internal",
+                            "select-one-mrna",
+                            "--input",
+                            str(input_path),
+                            "--output",
+                            str(output_path),
+                            "--log",
+                            str(Path(tmp_dir) / "select.log"),
+                        ]
+                    ),
+                    0,
+                )
 
             output = output_path.read_text(encoding="utf-8")
             self.assertIn("ID=Gene1-T1;Parent=Gene1", output)

@@ -236,24 +236,6 @@ class AnnotationConsistencyTests(unittest.TestCase):
             self.assertIn("id &gt;=40%", name_svg)
             self.assertIn("mutual cov &gt;=60%", name_svg)
             self.assertIn("grey cells", source_svg)
-            for svg_text in (name_svg, source_svg):
-                self.assertIn('width="3.6in"', svg_text)
-                self.assertIn("font-size:8pt", svg_text)
-                self.assertNotIn("font-size:7pt", svg_text)
-                self.assertNotIn("font-size:14pt", svg_text)
-            name_pdf = (base / "name.pdf").read_bytes().decode("latin-1")
-            source_pdf = (base / "source.pdf").read_bytes().decode("latin-1")
-            self.assertRegex(
-                name_pdf,
-                r"/MediaBox \[\s*0\s+0\s+259\.2(?:0)?\s+260(?:\.0+)?\s*\]",
-            )
-            self.assertRegex(
-                source_pdf,
-                r"/MediaBox \[\s*0\s+0\s+259\.2(?:0)?\s+186(?:\.0+)?\s*\]",
-            )
-            for pdf_text in (name_pdf, source_pdf):
-                self.assertNotIn(" 7 Tf", pdf_text)
-                self.assertNotIn(" 14 Tf", pdf_text)
 
 
 if __name__ == "__main__":

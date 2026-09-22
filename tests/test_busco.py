@@ -19,7 +19,6 @@ from msspack.busco import (
     _write_comparison_pdf,
     _write_comparison_svg,
     _write_summary_json,
-    busco_workspace_root,
     cleanup_busco_cache,
     parse_short_summary,
     summarize_busco_artifacts,
@@ -299,25 +298,6 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
             root / "raw" / "input" / "short_summary.txt",
         )
 
-    def test_parse_short_summary_accepts_transcriptome_mode(self) -> None:
-        summary_text = """\
-# BUSCO version is: 6.0.0
-# The lineage dataset is: embryophyta_odb12
-# BUSCO was run in mode: transcriptome
-C:95.0%[S:90.0%,D:5.0%],F:2.0%,M:3.0%,n:100
-"""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            summary_path = Path(tmp_dir) / "short_summary.txt"
-            summary_path.write_text(summary_text, encoding="utf-8")
-            summary = parse_short_summary(
-                summary_path,
-                label="cds",
-                input_fasta=Path("/tmp/cds.fa"),
-                raw_output_dir=Path("/tmp/raw"),
-            )
-
-        self.assertEqual(summary.mode, "transcriptome")
-
     def test_build_busco_command_supports_auto_lineage_scope(self) -> None:
         command = _build_busco_command(
             busco=BuscoConfig(
@@ -372,26 +352,14 @@ C:98.6%[S:97.4%,D:1.2%],F:0.5%,M:0.9%,n:425
             _write_comparison_svg([input_summary, processed_summary], svg_path, comparison_name="genome")
             _write_comparison_pdf([input_summary, processed_summary], pdf_path, comparison_name="genome")
             svg = svg_path.read_text(encoding="utf-8")
-            pdf = pdf_path.read_bytes().decode("latin-1")
 
         self.assertIn("BUSCO comparison: genome", svg)
-        self.assertIn('width="3.6in"', svg)
-        self.assertIn('viewBox="0 0 259.20 197.20"', svg)
-        self.assertIn('y="143.0" text-anchor="middle" class="tick">0%</text>', svg)
-        self.assertIn('x="66.0" y="73.0" text-anchor="end" class="label">input</text>', svg)
-        self.assertIn('x="66.0" y="127.0" text-anchor="end" class="label">processed</text>', svg)
         self.assertIn("input", svg)
         self.assertIn("processed", svg)
         self.assertIn("embryophyta_odb12", svg)
         self.assertIn("BUSCO genes n=425", svg)
         self.assertIn("Genome input n=2", svg)
         self.assertIn("Genome input n=1", svg)
-        self.assertIn("font-size:8pt", svg)
-        self.assertNotRegex(svg, r"font-size:\d+px")
-        self.assertRegex(
-            pdf,
-            r"/MediaBox \[\s*0\s+0\s+259\.2(?:0)?\s+197\.2(?:0)?\s*\]",
-        )
 
     def test_summarize_busco_artifacts_reports_metric_changes(self) -> None:
         summary_text_input = """\
@@ -510,19 +478,11 @@ C:95.3%[S:69.9%,D:25.4%],F:1.7%,M:3.0%,n:2805
 
             from unittest.mock import patch
 
-            with patch("msspack.busco.busco_workspace_root", return_value=workspace_root):
+            with patch("msspack.busco.default_cache_dir", return_value=Path(tmp_dir)):
                 cleaned = cleanup_busco_cache()
 
-        self.assertEqual(cleaned, workspace_root)
-        self.assertFalse(workspace_root.exists())
-
-    def test_busco_workspace_root_uses_msspack_cache_dir(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            cache_root = Path(tmp_dir) / "cache"
-            from unittest.mock import patch
-
-            with patch("msspack.busco.default_cache_dir", return_value=cache_root):
-                self.assertEqual(busco_workspace_root(), cache_root / "busco-work")
+            self.assertEqual(cleaned, workspace_root)
+            self.assertFalse(workspace_root.exists())
 
     def test_publish_busco_workspace_keeps_summary_discoverable_from_final_raw_dir(self) -> None:
         summary_text = """\

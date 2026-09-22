@@ -122,46 +122,10 @@ class ToolResolutionTests(unittest.TestCase):
 
             self.assertNotIn("parser", list_installed(tmp_dir))
 
-    def test_install_component_reinstalls_incomplete_root(self) -> None:
+    def test_install_component_repairs_incomplete_root_and_writes_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             cache_dir = Path(tmp_dir)
-            incomplete_root = cache_dir / "ddbj-tools" / "parser" / "9.99"
-            incomplete_root.mkdir(parents=True)
-
-            def fake_unpack(_archive_path: Path, destination: Path) -> Path:
-                extracted = destination / "Parser"
-                extracted.mkdir()
-                (extracted / "jParser.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-                return extracted
-
-            def fake_download(_url: str, destination: Path, **_kwargs) -> Path:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(b"archive")
-                return destination
-
-            with patch(
-                "msspack.ddbj_tools.fetch_index_html",
-                return_value="<html></html>",
-            ), patch(
-                "msspack.ddbj_tools.resolve_latest_archives",
-                return_value={"parser": ("9.99", "Parser_V9.99.tar.gz")},
-            ), patch(
-                "msspack.ddbj_tools._download",
-                side_effect=fake_download,
-            ), patch(
-                "msspack.ddbj_tools._unpack",
-                side_effect=fake_unpack,
-            ), patch.dict(
-                "msspack.ddbj_tools.TRUSTED_ARCHIVE_SHA256",
-                {"Parser_V9.99.tar.gz": FAKE_ARCHIVE_SHA256},
-            ):
-                installation = install_component("parser", cache_dir=cache_dir)
-
-            self.assertTrue(installation.executable.exists())
-
-    def test_install_component_writes_installation_metadata(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            cache_dir = Path(tmp_dir)
+            (cache_dir / "ddbj-tools" / "parser" / "9.99").mkdir(parents=True)
 
             def fake_unpack(_archive_path: Path, destination: Path) -> Path:
                 extracted = destination / "Parser"
@@ -192,6 +156,7 @@ class ToolResolutionTests(unittest.TestCase):
             ):
                 installation = install_component("parser", cache_dir=cache_dir)
 
+            self.assertTrue(installation.executable.is_file())
             metadata = read_installation_metadata(installation)
             self.assertIsNotNone(metadata)
             assert metadata is not None

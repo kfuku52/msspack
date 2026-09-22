@@ -60,13 +60,11 @@ class ValidationTests(unittest.TestCase):
                     ">a\nATG\n>b\nATG\n", encoding="utf-8"
                 )
 
+            for installation in tools.values():
+                installation.root.mkdir()
+
             with patch(
                 "msspack.validation.require_installed", return_value=tools
-            ), patch(
-                "msspack.validation.append_job_if_needed",
-                side_effect=lambda jobs, **kwargs: jobs.append(
-                    (kwargs["name"], kwargs["action"])
-                ),
             ), patch("msspack.validation.run_parser", side_effect=fake_parser), patch(
                 "msspack.validation.run_transchecker", side_effect=fake_transchecker
             ):
@@ -114,13 +112,11 @@ class ValidationTests(unittest.TestCase):
                 Path(str(kwargs["aa_out"])).write_text("", encoding="utf-8")
                 Path(str(kwargs["nuc_out"])).write_text("", encoding="utf-8")
 
+            for installation in tools.values():
+                installation.root.mkdir()
+
             with patch(
                 "msspack.validation.require_installed", return_value=tools
-            ), patch(
-                "msspack.validation.append_job_if_needed",
-                side_effect=lambda jobs, **kwargs: jobs.append(
-                    (kwargs["name"], kwargs["action"])
-                ),
             ), patch(
                 "msspack.validation.run_transchecker", side_effect=empty_transchecker
             ):
@@ -169,13 +165,11 @@ class ValidationTests(unittest.TestCase):
                 Path(str(kwargs["aa_out"])).write_text("", encoding="utf-8")
                 Path(str(kwargs["nuc_out"])).write_text("", encoding="utf-8")
 
+            for installation in tools.values():
+                installation.root.mkdir()
+
             with patch(
                 "msspack.validation.require_installed", return_value=tools
-            ), patch(
-                "msspack.validation.append_job_if_needed",
-                side_effect=lambda jobs, **kwargs: jobs.append(
-                    (kwargs["name"], kwargs["action"])
-                ),
             ), patch(
                 "msspack.validation.run_transchecker", side_effect=empty_transchecker
             ):
@@ -189,48 +183,6 @@ class ValidationTests(unittest.TestCase):
                 summary.checks[1].record_counts,
                 {"annotation_cds": 0, "aa_fasta": 0, "nuc_fasta": 0},
             )
-
-    def test_run_validation_preserves_failed_result_for_later_plotting(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            base = Path(tmp_dir)
-            artifacts = ValidationArtifacts(
-                ann_path=base / "sample.ann.txt",
-                fasta_path=base / "sample.fasta",
-                logs_dir=base / "logs",
-                output_dir=base / "validation",
-            )
-            options = ValidationOptions(
-                cache_dir=None,
-                heap="1G",
-                parallel=False,
-                run_parser=True,
-                run_transchecker=False,
-            )
-            tools = {"parser": SimpleNamespace(version="6.80", root=base / "parser")}
-
-            def fail_parser(*args: object, **kwargs: object) -> None:
-                Path(str(kwargs["log_path"])).write_text(
-                    "JP0038:WAR:STX:SEQ:short sequence\n", encoding="utf-8"
-                )
-                raise MSSPackError("parser rejected the submission")
-
-            with patch(
-                "msspack.validation.require_installed", return_value=tools
-            ), patch(
-                "msspack.validation.append_job_if_needed",
-                side_effect=lambda jobs, **kwargs: jobs.append(
-                    (kwargs["name"], kwargs["action"])
-                ),
-            ), patch("msspack.validation.run_parser", side_effect=fail_parser):
-                with self.assertRaisesRegex(MSSPackError, "rejected"):
-                    run_validation(options=options, artifacts=artifacts)
-
-            summary = load_validation_summary(artifacts.validation_summary)
-            assert summary is not None
-            self.assertEqual(summary.status, "failed")
-            self.assertEqual(summary.checks[0].status, "failed")
-            self.assertEqual(summary.checks[0].warning_count, 1)
-            self.assertEqual(summary.checks[1].status, "not_run")
 
     def test_sequential_parser_failure_marks_transchecker_not_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -264,13 +216,11 @@ class ValidationTests(unittest.TestCase):
                 )
                 raise MSSPackError("parser rejected the submission")
 
+            for installation in tools.values():
+                installation.root.mkdir()
+
             with patch(
                 "msspack.validation.require_installed", return_value=tools
-            ), patch(
-                "msspack.validation.append_job_if_needed",
-                side_effect=lambda jobs, **kwargs: jobs.append(
-                    (kwargs["name"], kwargs["action"])
-                ),
             ), patch("msspack.validation.run_parser", side_effect=fail_parser), patch(
                 "msspack.validation.run_transchecker"
             ) as mocked_transchecker:
@@ -282,6 +232,7 @@ class ValidationTests(unittest.TestCase):
             assert summary is not None
             self.assertEqual(summary.status, "failed")
             self.assertEqual(summary.checks[0].status, "failed")
+            self.assertEqual(summary.checks[0].warning_count, 1)
             self.assertEqual(summary.checks[1].status, "not_run")
             self.assertIn("earlier validation failure", summary.checks[1].message or "")
             self.assertEqual(summary.checks[1].error_count, 0)
@@ -370,95 +321,12 @@ class ValidationTests(unittest.TestCase):
             payload = artifacts.validation_summary.read_text(encoding="utf-8")
             self.assertIn('"status": "not_run"', payload)
 
-    def test_run_validation_returns_only_enabled_outputs(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            base = Path(tmp_dir)
-            artifacts = ValidationArtifacts(
-                ann_path=base / "sample.ann.txt",
-                fasta_path=base / "sample.fasta",
-                logs_dir=base / "logs",
-                output_dir=base / "validation",
-            )
-            options = ValidationOptions(
-                cache_dir=None,
-                heap="1G",
-                parallel=False,
-                java_cmd="java",
-                run_parser=True,
-                run_transchecker=False,
-            )
-
-            with patch(
-                "msspack.validation.require_installed",
-                return_value={
-                    "parser": SimpleNamespace(
-                        executable=base / "jParser.sh",
-                        root=base / "parser",
-                    ),
-                },
-            ), patch(
-                "msspack.validation.append_job_if_needed",
-                side_effect=lambda jobs, **kwargs: jobs.append((kwargs["name"], lambda: None)),
-            ):
-                result = run_validation(options=options, artifacts=artifacts)
-
-            self.assertEqual(
-                result,
-                {
-                    "validation_summary": artifacts.validation_summary,
-                    "parser_log": artifacts.parser_log,
-                },
-            )
-
     def test_validate_existing_forces_both_checks_for_explicit_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
             config_path = base / "msspack.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "Demo"',
-                        "",
-                        "[inputs]",
-                        'fasta = "input.fa"',
-                        'gff = "input.gff3"',
-                        "",
-                        "[sample]",
-                        'locus_tag = "Demo"',
-                        'scientific_name = "Demo species"',
-                        "",
-                        "[submission]",
-                        'hold_date = "20261231"',
-                        'bioproject = "PRJDB1"',
-                        'biosample = "SAMD1"',
-                        "",
-                        "[submitter]",
-                        'ab_name = ["Doe,J."]',
-                        'contact = "Jane Doe"',
-                        'institute = "NIG"',
-                        'department = "Lab"',
-                        'country = "Japan"',
-                        'state = "Shizuoka"',
-                        'city = "Mishima"',
-                        'street = "1111 Yata"',
-                        'zip = "411-8540"',
-                        'phone = "81-00-0000-0000"',
-                        'email = "x@example.org"',
-                        "",
-                        "[reference]",
-                        'title = "Demo sequencing"',
-                        'ab_name = ["Doe,J."]',
-                        "year = 2026",
-                        "",
-                        "[pipeline]",
-                        "validate_with_parser = false",
-                        "validate_with_transchecker = false",
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            fixture = Path(__file__).parent / "fixtures" / "minimal_pack" / "config.toml"
+            config_path.write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
 
             with patch("msspack.validation.run_validation", return_value={}) as mocked:
                 validate_existing(

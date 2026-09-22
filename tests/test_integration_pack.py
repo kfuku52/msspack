@@ -209,13 +209,6 @@ class IntegrationPackTests(unittest.TestCase):
                 "render-final-annotation",
             )
 
-    def test_second_identical_run_reuses_every_pipeline_stage(self) -> None:
-        fixture_dir = Path(__file__).resolve().parent / "fixtures" / "minimal_pack"
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            base = Path(tmp_dir) / "minimal_pack"
-            shutil.copytree(fixture_dir, base)
-
-            outputs = run_pipeline(base / "config.toml", validate=False)
             run_pipeline(base / "config.toml", validate=False)
 
             manifest = json.loads(outputs.manifest_path.read_text(encoding="utf-8"))

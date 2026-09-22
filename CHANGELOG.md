@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.1 - 2026-09-22
+
+- Remove redundant test scenarios and styling snapshots; consolidate configuration,
+  CLI, installation, validation, and cache checks around observable outcomes.
+- Exercise plot/report CLI commands on the bundled demo and use real validation
+  job scheduling in tests; replace sleep-based parallel dispatch checks with a barrier.
+
 ## 0.8.0 - 2026-09-08
 
 - Omit exon features represented by mRNA locations and make independent UTR

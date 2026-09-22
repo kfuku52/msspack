@@ -10,66 +10,9 @@ from msspack.report import run_html_report
 
 def _write_minimal_config(base: Path) -> Path:
     config_path = base / "demo.toml"
-    (base / "input.fa").write_text(">chr1\nACGT\n", encoding="utf-8")
-    (base / "input.gff").write_text("##gff-version 3\n", encoding="utf-8")
+    fixture = Path(__file__).parent / "fixtures" / "minimal_pack" / "config.toml"
     config_path.write_text(
-        "\n".join(
-            [
-                "[project]",
-                'name = "Demo"',
-                'output_dir = "build/Demo"',
-                "",
-                "[inputs]",
-                'fasta = "input.fa"',
-                'gff = "input.gff"',
-                "",
-                "[sample]",
-                'locus_tag = "Demo"',
-                "locus_tag_digits = 6",
-                'scientific_name = "Demo demo"',
-                "",
-                "[submission]",
-                'datatype = "CON"',
-                'hold_date = "20270401"',
-                'bioproject = "PRJDB000001"',
-                'biosample = "SAMD000001"',
-                "",
-                "[submitter]",
-                'ab_name = ["A. Author"]',
-                'contact = "A. Author"',
-                'institute = "Demo Institute"',
-                'department = "Demo Department"',
-                'country = "Japan"',
-                'state = "Tokyo"',
-                'city = "Tokyo"',
-                'street = "1 Demo Street"',
-                'zip = "100-0001"',
-                'phone = "+81-3-0000-0000"',
-                'email = "demo@example.org"',
-                "",
-                "[reference]",
-                'title = "Demo title"',
-                'ab_name = ["A. Author"]',
-                "year = 2026",
-                "",
-                "[st_comment]",
-                'assembly_method = "demo"',
-                'assembly_name = "demo-v1"',
-                'genome_coverage = "10x"',
-                'sequencing_technology = "ONT"',
-                "",
-                "[pipeline]",
-                "validate_with_parser = false",
-                "validate_with_transchecker = false",
-                "",
-                "[busco]",
-                "run_cds = true",
-                "run_genome = false",
-                'lineage_dataset = "embryophyta_odb12"',
-                "auto_lineage = false",
-            ]
-        )
-        + "\n",
+        fixture.read_text(encoding="utf-8").replace("Fixture", "Demo"),
         encoding="utf-8",
     )
     return config_path

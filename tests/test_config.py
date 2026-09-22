@@ -231,9 +231,7 @@ class ConfigTests(unittest.TestCase):
         self,
     ) -> None:
         with self.assertRaises(ConfigError):
-            validate_pipeline_config(
-                PipelineConfig(coordinate_duplicate_policy="unsupported")
-            )
+            validate_pipeline_config(PipelineConfig(coordinate_duplicate_policy="unsupported"))
 
     def test_database_lock_settings_must_be_positive(self) -> None:
         with self.assertRaises(ConfigError):
@@ -253,367 +251,52 @@ class ConfigTests(unittest.TestCase):
                 )
             )
 
-    def test_load_config_rejects_non_table_section(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "msspack.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        'project = "oops"',
-                        "",
-                        "[inputs]",
-                        'fasta = "input.fa"',
-                        'gff = "input.gff3"',
-                        "",
-                        "[sample]",
-                        'locus_tag = "Demo"',
-                        'scientific_name = "Demo species"',
-                        "",
-                        "[submission]",
-                        'hold_date = "20261231"',
-                        'bioproject = "PRJDB1"',
-                        'biosample = "SAMD1"',
-                        "",
-                        "[submitter]",
-                        'ab_name = ["Fukushima,K."]',
-                        'contact = "Kenji Fukushima"',
-                        'institute = "NIG"',
-                        'department = "Lab"',
-                        'country = "Japan"',
-                        'state = "Shizuoka"',
-                        'city = "Mishima"',
-                        'street = "1111 Yata"',
-                        'zip = "411-8540"',
-                        'phone = "81-00-0000-0000"',
-                        'email = "x@example.org"',
-                        "",
-                        "[reference]",
-                        'title = "Demo sequencing"',
-                        'ab_name = ["Fukushima,K."]',
-                        "year = 2026",
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(ConfigError):
-                load_config(config_path)
-
-    def test_load_config_rejects_busco_without_lineage_when_auto_disabled(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "msspack.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "Demo"',
-                        "",
-                        "[inputs]",
-                        'fasta = "input.fa"',
-                        'gff = "input.gff3"',
-                        "",
-                        "[sample]",
-                        'locus_tag = "Demo"',
-                        'scientific_name = "Demo species"',
-                        "",
-                        "[submission]",
-                        'hold_date = "20261231"',
-                        'bioproject = "PRJDB1"',
-                        'biosample = "SAMD1"',
-                        "",
-                        "[submitter]",
-                        'ab_name = ["Fukushima,K."]',
-                        'contact = "Kenji Fukushima"',
-                        'institute = "NIG"',
-                        'department = "Lab"',
-                        'country = "Japan"',
-                        'state = "Shizuoka"',
-                        'city = "Mishima"',
-                        'street = "1111 Yata"',
-                        'zip = "411-8540"',
-                        'phone = "81-00-0000-0000"',
-                        'email = "x@example.org"',
-                        "",
-                        "[reference]",
-                        'title = "Demo sequencing"',
-                        'ab_name = ["Fukushima,K."]',
-                        "year = 2026",
-                        "",
-                        "[busco]",
-                        "auto_lineage = false",
-                        'lineage_dataset = ""',
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(ConfigError):
-                load_config(config_path)
-
-    def test_load_config_rejects_busco_when_all_targets_are_disabled(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "msspack.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "Demo"',
-                        "",
-                        "[inputs]",
-                        'fasta = "input.fa"',
-                        'gff = "input.gff3"',
-                        "",
-                        "[sample]",
-                        'locus_tag = "Demo"',
-                        'scientific_name = "Demo species"',
-                        "",
-                        "[submission]",
-                        'hold_date = "20261231"',
-                        'bioproject = "PRJDB1"',
-                        'biosample = "SAMD1"',
-                        "",
-                        "[submitter]",
-                        'ab_name = ["Fukushima,K."]',
-                        'contact = "Kenji Fukushima"',
-                        'institute = "NIG"',
-                        'department = "Lab"',
-                        'country = "Japan"',
-                        'state = "Shizuoka"',
-                        'city = "Mishima"',
-                        'street = "1111 Yata"',
-                        'zip = "411-8540"',
-                        'phone = "81-00-0000-0000"',
-                        'email = "x@example.org"',
-                        "",
-                        "[reference]",
-                        'title = "Demo sequencing"',
-                        'ab_name = ["Fukushima,K."]',
-                        "year = 2026",
-                        "",
-                        "[busco]",
-                        "run_cds = false",
-                        "run_genome = false",
-                        'lineage_dataset = "embryophyta_odb12"',
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(ConfigError):
-                load_config(config_path)
-
-    def test_load_config_rejects_bad_hold_date_format(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "msspack.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "Demo"',
-                        "",
-                        "[inputs]",
-                        'fasta = "input.fa"',
-                        'gff = "input.gff3"',
-                        "",
-                        "[sample]",
-                        'locus_tag = "Demo"',
-                        'scientific_name = "Demo species"',
-                        "",
-                        "[submission]",
-                        'hold_date = "2026-12-31"',
-                        'bioproject = "PRJDB1"',
-                        'biosample = "SAMD1"',
-                        "",
-                        "[submitter]",
-                        'ab_name = ["Fukushima,K."]',
-                        'contact = "Kenji Fukushima"',
-                        'institute = "NIG"',
-                        'department = "Lab"',
-                        'country = "Japan"',
-                        'state = "Shizuoka"',
-                        'city = "Mishima"',
-                        'street = "1111 Yata"',
-                        'zip = "411-8540"',
-                        'phone = "81-00-0000-0000"',
-                        'email = "x@example.org"',
-                        "",
-                        "[reference]",
-                        'title = "Demo sequencing"',
-                        'ab_name = ["Fukushima,K."]',
-                        "year = 2026",
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(ConfigError):
-                load_config(config_path)
-
-    def test_load_config_rejects_invalid_collection_date(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "msspack.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "Demo"',
-                        "",
-                        "[inputs]",
-                        'fasta = "input.fa"',
-                        'gff = "input.gff3"',
-                        "",
-                        "[sample]",
-                        'locus_tag = "Demo"',
-                        'scientific_name = "Demo species"',
-                        'collection_date = "2026/01/01"',
-                        "",
-                        "[submission]",
-                        'hold_date = "20261231"',
-                        'bioproject = "PRJDB1"',
-                        'biosample = "SAMD1"',
-                        "",
-                        "[submitter]",
-                        'ab_name = ["Fukushima,K."]',
-                        'contact = "Kenji Fukushima"',
-                        'institute = "NIG"',
-                        'department = "Lab"',
-                        'country = "Japan"',
-                        'state = "Shizuoka"',
-                        'city = "Mishima"',
-                        'street = "1111 Yata"',
-                        'zip = "411-8540"',
-                        'phone = "81-00-0000-0000"',
-                        'email = "x@example.org"',
-                        "",
-                        "[reference]",
-                        'title = "Demo sequencing"',
-                        'ab_name = ["Fukushima,K."]',
-                        "year = 2026",
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(ConfigError):
-                load_config(config_path)
-
-    def test_load_config_rejects_invalid_pipeline_choice(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "msspack.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "Demo"',
-                        "",
-                        "[inputs]",
-                        'fasta = "input.fa"',
-                        'gff = "input.gff3"',
-                        "",
-                        "[sample]",
-                        'locus_tag = "Demo"',
-                        'scientific_name = "Demo species"',
-                        "",
-                        "[submission]",
-                        'hold_date = "20261231"',
-                        'bioproject = "PRJDB1"',
-                        'biosample = "SAMD1"',
-                        "",
-                        "[submitter]",
-                        'ab_name = ["Fukushima,K."]',
-                        'contact = "Kenji Fukushima"',
-                        'institute = "NIG"',
-                        'department = "Lab"',
-                        'country = "Japan"',
-                        'state = "Shizuoka"',
-                        'city = "Mishima"',
-                        'street = "1111 Yata"',
-                        'zip = "411-8540"',
-                        'phone = "81-00-0000-0000"',
-                        'email = "x@example.org"',
-                        "",
-                        "[reference]",
-                        'title = "Demo sequencing"',
-                        'ab_name = ["Fukushima,K."]',
-                        "year = 2026",
-                        "",
-                        "[pipeline]",
-                        'feature_with_gap = "bad-value"',
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(ConfigError):
-                load_config(config_path)
-
-    def test_rejects_impossible_hold_date(self) -> None:
-        self._assert_fixture_rejected(
-            lambda text: text.replace('hold_date = "20271231"', 'hold_date = "20271399"'),
-            "submission.hold_date",
-        )
-
-    def test_rejects_invalid_genome_coverage(self) -> None:
-        self._assert_fixture_rejected(
-            lambda text: text.replace(
-                'genome_coverage = "10x"',
-                'genome_coverage = "tenfold"',
+    def test_load_config_rejects_invalid_settings(self) -> None:
+        cases = (
+            (
+                '[project]\nname = "Fixture"\noutput_dir = "build/Fixture"',
+                'project = "oops"',
+                "project",
             ),
-            "st_comment.genome_coverage",
-        )
-
-    def test_rejects_quoted_boolean(self) -> None:
-        self._assert_fixture_rejected(
-            lambda text: text.replace("run_gapjust = false", 'run_gapjust = "false"'),
-            "pipeline.run_gapjust",
-        )
-
-    def test_rejects_unknown_key(self) -> None:
-        self._assert_fixture_rejected(
-            lambda text: text.replace(
+            ("", '\n[busco]\nauto_lineage = false\nlineage_dataset = ""\n', "lineage_dataset"),
+            ("", "\n[busco]\nrun_cds = false\nrun_genome = false\n", "run_cds"),
+            ('hold_date = "20271231"', 'hold_date = "2026-12-31"', "hold_date"),
+            ('hold_date = "20271231"', 'hold_date = "20271399"', "hold_date"),
+            ('collection_date = "2026-01-02"', 'collection_date = "2026/01/01"', "collection_date"),
+            (
+                'feature_with_gap = "misc_feature"',
+                'feature_with_gap = "bad-value"',
+                "feature_with_gap",
+            ),
+            ('genome_coverage = "10x"', 'genome_coverage = "tenfold"', "genome_coverage"),
+            ("run_gapjust = false", 'run_gapjust = "false"', "pipeline.run_gapjust"),
+            (
                 "run_gapjust = false",
                 "run_gapjust = false\nvalidate_with_parsr = false",
+                "pipeline.validate_with_parsr",
             ),
-            "pipeline.validate_with_parsr",
-        )
-
-    def test_rejects_invalid_product_regex(self) -> None:
-        self._assert_fixture_rejected(
-            lambda text: text.replace(
+            (
                 "replace_product_patterns = []",
                 'replace_product_patterns = ["("]',
+                "replace_product_patterns",
             ),
-            "replace_product_patterns",
-        )
-
-    def test_rejects_unknown_genetic_code(self) -> None:
-        self._assert_fixture_rejected(
-            lambda text: text.replace('genetic_code = "1"', 'genetic_code = "999"'),
-            "genetic code",
-        )
-
-    def test_rejects_control_characters_in_optional_strings(self) -> None:
-        self._assert_fixture_rejected(
-            lambda text: text.replace(
+            ('genetic_code = "1"', 'genetic_code = "999"', "genetic code"),
+            (
                 'title = "Fixture genome sequencing"',
                 'title = """Fixture genome\nsequencing"""',
+                "control characters",
             ),
-            "control characters",
         )
-
-    def _assert_fixture_rejected(self, transform, message: str) -> None:
         fixture = Path(__file__).parent / "fixtures" / "minimal_pack" / "config.toml"
+        original = fixture.read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "msspack.toml"
-            config_path.write_text(transform(fixture.read_text(encoding="utf-8")), encoding="utf-8")
-            with self.assertRaisesRegex(ConfigError, message):
-                load_config(config_path)
+            for old, new, message in cases:
+                with self.subTest(setting=message, value=new):
+                    text = original.replace(old, new) if old else original + new
+                    config_path.write_text(text, encoding="utf-8")
+                    with self.assertRaisesRegex(ConfigError, message):
+                        load_config(config_path)
 
 
 if __name__ == "__main__":

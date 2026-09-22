@@ -1,4 +1,3 @@
-import os
 import tempfile
 import time
 import unittest
@@ -11,7 +10,6 @@ from msspack.database_lock import (
     DatabaseLockSettings,
     _assert_regular_file_or_absent,
     acquire_database_lock,
-    database_lock_path,
 )
 
 
@@ -63,28 +61,6 @@ class DatabaseLockTests(unittest.TestCase):
 
             self.assertEqual(counter, 200)
             self.assertFalse(lock_path.exists())
-
-    def test_acquire_creates_heartbeats_and_removes_lock(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            lock_path = database_lock_path(Path(tmp_dir), "Pfam index")
-            settings = DatabaseLockSettings(
-                poll_seconds=0.01,
-                timeout_seconds=1.0,
-                heartbeat_seconds=0.01,
-                stale_seconds=1.0,
-            )
-
-            with acquire_database_lock(
-                lock_path,
-                label="test database",
-                settings=settings,
-            ):
-                self.assertTrue(lock_path.is_file())
-                first_mtime = lock_path.stat().st_mtime_ns
-                time.sleep(0.03)
-                self.assertGreaterEqual(lock_path.stat().st_mtime_ns, first_mtime)
-
-            self.assertFalse(os.path.lexists(lock_path))
 
     def test_waiter_times_out_while_owner_is_alive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

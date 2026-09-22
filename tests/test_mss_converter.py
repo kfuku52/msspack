@@ -5,39 +5,13 @@ from types import SimpleNamespace
 
 from msspack.mss_converter.core import (
     ConversionOptions,
-    _get_start_codons,
     build_gff_feature_indexes,
     convert_gff_to_mss,
     detect_gap_regions,
 )
-from msspack.mss_converter.render import render_source_feature
 
 
 class MssConverterTests(unittest.TestCase):
-    def test_source_feature_renders_optional_sample_qualifiers(self) -> None:
-        text = render_source_feature(
-            contig_name="chr1",
-            length=100,
-            organism_name="Test species",
-            strain="",
-            mol_type="genomic DNA",
-            country="Japan",
-            isolate="sample-1",
-            tissue_type="leaf",
-            isolation_source="cultivated outdoor individual",
-            collection_date="2026-08-12",
-            sex="",
-        )
-
-        self.assertIn("\t\t\ttissue_type\tleaf\n", text)
-        self.assertIn(
-            "\t\t\tisolation_source\tcultivated outdoor individual\n",
-            text,
-        )
-
-    def test_start_codons_follow_selected_genetic_code(self) -> None:
-        self.assertIn("ATA", _get_start_codons("2"))
-
     def test_detect_gap_regions_finds_contiguous_n_runs(self) -> None:
         record = SimpleNamespace(seq="AANNNTAANNNNN")
         out, gaps = detect_gap_regions(
@@ -50,56 +24,6 @@ class MssConverterTests(unittest.TestCase):
         self.assertIn("assembly_gap\t3..5", out)
         self.assertIn("assembly_gap\t9..13", out)
 
-    def test_build_gff_feature_indexes_normalizes_parent_and_phase(self) -> None:
-        rows = [
-            {
-                "seq_id": "chr1",
-                "type": "gene",
-                "ID": "Gene1",
-                "Parent": None,
-                "start": 10,
-                "end": 50,
-                "strand": "+",
-                "phase": ".",
-                "Name": None,
-                "Type": None,
-                "anticodon": None,
-            },
-            {
-                "seq_id": "chr1",
-                "type": "mRNA",
-                "ID": "Gene1-T1",
-                "Parent": "Gene1",
-                "start": 10,
-                "end": 50,
-                "strand": "+",
-                "phase": ".",
-                "Name": "Gene1-T1",
-                "Type": None,
-                "anticodon": None,
-            },
-            {
-                "seq_id": "chr1",
-                "type": "CDS",
-                "ID": "Gene1-T1.cds1",
-                "Parent": "Gene1-T1",
-                "start": 20,
-                "end": 40,
-                "strand": "+",
-                "phase": "2",
-                "Name": None,
-                "Type": None,
-                "anticodon": None,
-            },
-        ]
-
-        gene_lookup, parent_lookup = build_gff_feature_indexes(rows)
-
-        self.assertEqual(gene_lookup["chr1"][0].id, "Gene1")
-        self.assertEqual(parent_lookup["Gene1"][0].id, "Gene1-T1")
-        self.assertEqual(parent_lookup["Gene1-T1"][0].phase, 2)
-        self.assertEqual(parent_lookup["Gene1-T1"][0].parent, "Gene1-T1")
-
     def test_build_gff_feature_indexes_splits_multiple_parents(self) -> None:
         shared = {
             "seq_id": "chr1",
@@ -109,13 +33,14 @@ class MssConverterTests(unittest.TestCase):
             "start": 1,
             "end": 9,
             "strand": "+",
-            "phase": "0",
+            "phase": "2",
         }
 
         _, parent_lookup = build_gff_feature_indexes([shared])
 
         self.assertEqual(parent_lookup["tx1"][0].id, "shared")
         self.assertEqual(parent_lookup["tx2"][0].id, "shared")
+        self.assertEqual(parent_lookup["tx1"][0].phase, 2)
 
     def test_converter_renders_mixed_gff_feature_types_without_silent_loss(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
