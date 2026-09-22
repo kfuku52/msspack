@@ -351,42 +351,9 @@ in the configured output directory.
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contributor workflow and
 [`RELEASE.md`](RELEASE.md) for release steps.
 
-For local development:
-
-```bash
-git clone https://github.com/kfuku52/msspack.git
-cd msspack
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
-If the repository already has an environment created for an older Python or `msspack`
-release, remove and recreate that environment before installing the current development
-dependencies.
-
-Run checks locally with:
-
-```bash
-PYTHONPATH=src python -m unittest discover -s tests -v
-ruff check .
-mypy src
-pip-audit .
-```
-
-To clean repo-local build, cache, and BUSCO artifact files before a fresh run:
-
-```bash
-python scripts/clean_artifacts.py
-```
-
-Use [`scripts/benchmark_pack.py`](scripts/benchmark_pack.py) to compare fresh and
-cached runs:
-
-```bash
-python scripts/benchmark_pack.py --config /path/to/config.toml --repeats 3 --no-validate
-python scripts/benchmark_pack.py --config /path/to/config.toml --repeats 3 --clean-first --clean-between-runs
-```
+The contributor guide is the command reference for environment setup, offline
+smoke tests, checks by change, and optional external-tool regressions. Start there
+before using real datasets or clearing build/database caches.
 
 ## Attribution
 

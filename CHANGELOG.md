@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.3 - 2026-09-22
+
+- Centralize contributor checks, distinguish offline smoke tests from external and
+  real-data regressions, and document environment/version prerequisites.
+- Add repository-specific agent entry points and a focused change-verification
+  skill using existing fixtures; clarify push versus tagged-release checks.
+
 ## 0.8.2 - 2026-09-22
 
 - Preserve shared GFF3 descendants and escaped parent identifiers; emit root coding

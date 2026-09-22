@@ -44,3 +44,41 @@ Repository-specific instructions override these defaults.
 - When the user asks to commit or push changes, commit and push them directly to `main`.
 - After an explicitly requested branch is merged, delete it from both the local repository
   and the remote.
+
+## Start here
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks by change, and delivery
+  checks. Read the relevant README workflow/configuration section for user behavior.
+- Enter through `src/msspack/cli.py` (commands), `workflow.py` (`run`), and
+  `pipeline.py` / `pipeline_actions.py` (stage graph/actions). Config definitions,
+  loading, and validation live in `config_models.py`, `config_loading.py`, and
+  `config_validation.py`; MSS rendering lives in `mss_converter/`.
+- Use [verify-msspack-change](.agents/skills/verify-msspack-change/SKILL.md) to
+  select and interpret existing regressions. Do not require real genomes for the
+  initial feedback loop.
+
+## Contracts and data
+
+- Preserve configured genetic codes, CDS phase/strand handling, transcript and
+  duplicate-selection policies, annotation thresholds, and database/lineage choices
+  unless the task explicitly changes them. Defaults are documented in
+  `examples/msspack.example.toml`; its packaged template must stay synchronized.
+- Preserve CLI/config compatibility and MSS annotation/FASTA semantics. Do not
+  regenerate expected fixture outputs just to make tests pass. For publication,
+  cache identity, and shared database changes, read
+  [execution integrity](docs/execution-integrity.md). For annotation-only updates,
+  read [the update contract](docs/annotation-updates.md): bases, CDS locations, and
+  existing protein IDs must survive accession renaming.
+- Do not edit user configs, real input datasets, shared databases, or generated
+  `build/`, `dist/`, caches, submission generations, and run outputs as source.
+  Species examples are sanitized; keep placeholders and fictional demo metadata.
+  Copy fixtures/demo data to temporary directories for manual runs. The broad
+  cleanup script also removes BUSCO downloads; it is not a prerequisite for tests.
+
+## Finish
+
+Run the applicable checks in CONTRIBUTING; before push run its delivery checks
+and follow RELEASE for version/changelog policy. Report changes, commands and
+Python version, passed/failed/skipped checks, and unmet external-data/tool needs.
+Distinguish local checks from CI and real DDBJ validation. Do not claim skipped
+external tests passed.

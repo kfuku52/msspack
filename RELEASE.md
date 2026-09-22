@@ -1,22 +1,23 @@
-# Release process
+# Push and release process
 
-1. Run local release checks:
+## Every GitHub push
 
-```bash
-python -m compileall -q src tests
-ruff check .
-mypy src
-pip-audit .
-PYTHONPATH=src python -m unittest discover -s tests -v
-rm -rf build dist src/msspack.egg-info
-python -m build
-python scripts/check_distribution.py
-check-wheel-contents dist/*.whl
-twine check dist/*
-```
+1. Update [CHANGELOG.md](CHANGELOG.md) and bump `__version__` in
+   [src/msspack/__init__.py](src/msspack/__init__.py), including documentation-only
+   pushes. Use a patch increment for compatible maintenance; local-only commits
+   need no bump.
+2. Run [delivery checks](CONTRIBUTING.md#delivery-checks-before-push) after the bump.
+3. Review the diff and outgoing commits, then follow the repository Git workflow
+   in [AGENTS.md](AGENTS.md). A push alone does not request a tag or release.
 
-2. Update [`CHANGELOG.md`](CHANGELOG.md).
-3. Bump [`src/msspack/__init__.py`](src/msspack/__init__.py).
-4. Build a fresh wheel and verify both the wheel install and the unpacked sdist test suite in clean environments.
-5. Review the DDBJ validation-tool agreement, then run at least one real MSS regression with validation.
-6. Tag and publish the release.
+## Tagged release (only when requested)
+
+In addition to the push checks:
+
+1. Verify a fresh wheel install and the unpacked sdist test suite in clean
+   Python 3.11+ environments. Run outside the checkout without `PYTHONPATH=src`
+   when testing the installed wheel so imports cannot silently use checkout code.
+2. Review the DDBJ validation-tool agreement, then run at least one real MSS
+   regression with validation as described in CONTRIBUTING. Record unavailable
+   tools/data as a release validation gap.
+3. Tag and publish the requested release.
