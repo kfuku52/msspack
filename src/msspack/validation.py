@@ -11,6 +11,7 @@ from .ddbj_tools import ToolInstallation, require_installed, run_parser, run_tra
 from .execution import (
     NamedJob,
     append_job_if_needed,
+    command_fingerprint,
     module_origin,
     path_list,
     run_named_jobs,
@@ -606,7 +607,7 @@ def _build_validation_jobs(
             cache_key={
                 "component": "parser",
                 "heap": options.heap,
-                "java": options.java_cmd,
+                "java": command_fingerprint(options.java_cmd),
             },
             action=lambda: _run_parser_with_result(
                 installation=tools["parser"],
@@ -638,7 +639,7 @@ def _build_validation_jobs(
             cache_key={
                 "component": "transchecker",
                 "heap": options.heap,
-                "java": options.java_cmd,
+                "java": command_fingerprint(options.java_cmd),
             },
             action=lambda: _run_transchecker_with_result(
                 installation=tools["transchecker"],

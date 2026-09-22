@@ -18,7 +18,7 @@ from .annotation_taxonomy import (
 from .build_manifest import ManifestRecorder
 from .config import MSSPackConfig, load_config
 from .ddbj_tools import describe_installation, list_installed
-from .execution import module_origin, path_list, run_if_needed
+from .execution import command_fingerprint, module_origin, path_list, run_if_needed
 from .functional_annotation import (
     apply_functional_annotations,
     run_cdd_domain_search,
@@ -34,6 +34,7 @@ from .gff_cleanup import (
     fix_gff_semicolons_file,
     trim_gff_to_fasta_bounds,
 )
+from .output_state import locked_output, publish_submission
 from .padding_tools import write_padding_log_for_gff
 from .pipeline_actions import (
     copy_input_fasta,
@@ -128,7 +129,18 @@ class PipelineContext:
             outputs=output_paths,
             dependencies=dependency_paths,
             action=action,
-            cache_key={"msspack_version": __version__, "step": name},
+            cache_key={
+                "msspack_version": __version__, "step": name,
+                "commands": [command_fingerprint(command) for command in (
+                    self.config.tools.java,
+                    self.config.tools.gff3sort or "",
+                    self.config.functional_annotation.diamond_command,
+                    self.config.functional_annotation.hmmscan_command,
+                    self.config.functional_annotation.hmmpress_command,
+                    self.config.functional_annotation.rpsblast_command,
+                    self.config.functional_annotation.rpsbproc_command,
+                ) if command],
+            },
         )
         self.manifest.record_stage(
             name=name,
@@ -189,11 +201,11 @@ def _resolve_modules() -> ModulePaths:
     )
 
 
-def _build_outputs(config: MSSPackConfig) -> PipelineOutputs:
+def _build_outputs(config: MSSPackConfig, *, staged: bool = False) -> PipelineOutputs:
     output_root = ensure_dir(config.output_dir)
     intermediate = ensure_dir(output_root / "intermediate")
     logs = ensure_dir(output_root / "logs")
-    final = ensure_dir(output_root / "final")
+    final = ensure_dir(output_root / ".msspack-work" / "final" if staged else output_root / "final")
     return PipelineOutputs(
         root=output_root,
         intermediate=intermediate,
@@ -206,11 +218,11 @@ def _build_outputs(config: MSSPackConfig) -> PipelineOutputs:
 
 
 def _initialize_pipeline(
-    config_file: str | Path,
+    config_file: str | Path, *, staged: bool = False,
 ) -> tuple[MSSPackConfig, Path, PipelineOutputs, ModulePaths, PipelineContext]:
     config_path = Path(config_file).expanduser().resolve()
     config = load_config(config_file)
-    outputs = _build_outputs(config)
+    outputs = _build_outputs(config, staged=staged)
     modules = _resolve_modules()
     manifest = ManifestRecorder(
         config=config,
@@ -234,9 +246,10 @@ def _initialize_pipeline(
     )
 
 
+@locked_output
 def prepare_pipeline_for_busco(config_file: str | Path) -> PipelineOutputs:
     """Prepare normalized FASTA/GFF artifacts required by BUSCO without annotation."""
-    _config, _config_path, outputs, _modules, ctx = _initialize_pipeline(config_file)
+    _config, _config_path, outputs, _modules, ctx = _initialize_pipeline(config_file, staged=True)
     prepared_inputs = _prepare_inputs(ctx)
     _prepare_gff(ctx, prepared_inputs)
     return outputs
@@ -281,6 +294,22 @@ def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
         ),
     )
 
+    semicolon_fixed_gff = intermediate / "04.gff.semicolons-fixed.gff"
+    semicolon_metrics = logs / "04.fix-gff-semicolons.metrics.json"
+    ctx.run_step(
+        name="04.fix-gff-semicolons",
+        outputs=[semicolon_fixed_gff, logs / "04.fix-gff-semicolons.log", semicolon_metrics],
+        dependencies=[prepared_gff, ctx.modules.gff_cleanup],
+        action=lambda: fix_gff_semicolons_file(
+            input_path=prepared_gff,
+            output_path=semicolon_fixed_gff,
+            log_path=logs / "04.fix-gff-semicolons.log",
+            metrics_path=semicolon_metrics,
+        ),
+    )
+
+    normalized_input_gff = semicolon_fixed_gff
+
     trailing_fasta = intermediate / "01.fasta.trailing-ns-removed.fasta"
     trailing_metrics = logs / "01.remove-trailing-ns.metrics.json"
     ctx.run_step(
@@ -305,7 +334,7 @@ def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
             outputs=[gapjust_fasta, gapjust_gff, gapjust_log, gapjust_metrics],
             dependencies=[
                 trailing_fasta,
-                prepared_gff,
+                normalized_input_gff,
                 ctx.config_path,
                 ctx.modules.pipeline_actions,
                 ctx.modules.gap_normalization,
@@ -313,7 +342,7 @@ def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
             action=lambda: run_gapjust(
                 input_fasta=trailing_fasta,
                 output_fasta=gapjust_fasta,
-                input_gff=prepared_gff,
+                input_gff=normalized_input_gff,
                 output_gff=gapjust_gff,
                 gap_len=config.pipeline.gapjust_gap_len,
                 gap_just_min=config.pipeline.gapjust_min,
@@ -326,10 +355,10 @@ def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
         ctx.run_step(
             name="02.gapjust-skip",
             outputs=[gapjust_fasta, gapjust_gff, gapjust_log, gapjust_metrics],
-            dependencies=[trailing_fasta, prepared_gff, ctx.config_path, ctx.modules.pipeline_actions],
+            dependencies=[trailing_fasta, normalized_input_gff, ctx.config_path, ctx.modules.pipeline_actions],
             action=lambda: write_gapjust_passthrough(
                 input_fasta=trailing_fasta,
-                input_gff=prepared_gff,
+                input_gff=normalized_input_gff,
                 output_fasta=gapjust_fasta,
                 output_gff=gapjust_gff,
                 log_path=gapjust_log,
@@ -367,19 +396,7 @@ def _prepare_gff(ctx: PipelineContext, inputs: PreparedInputs) -> PreparedGff:
     intermediate = ctx.outputs.intermediate
     logs = ctx.outputs.logs
 
-    semicolon_fixed_gff = intermediate / "04.gff.semicolons-fixed.gff"
-    semicolon_metrics = logs / "04.fix-gff-semicolons.metrics.json"
-    ctx.run_step(
-        name="04.fix-gff-semicolons",
-        outputs=[semicolon_fixed_gff, logs / "04.fix-gff-semicolons.log", semicolon_metrics],
-        dependencies=[inputs.downstream_gff, ctx.modules.gff_cleanup],
-        action=lambda: fix_gff_semicolons_file(
-            input_path=inputs.downstream_gff,
-            output_path=semicolon_fixed_gff,
-            log_path=logs / "04.fix-gff-semicolons.log",
-            metrics_path=semicolon_metrics,
-        ),
-    )
+    semicolon_fixed_gff = inputs.downstream_gff
 
     trimmed_gff = intermediate / "05.gff.coordinates-trimmed.gff"
     trim_metrics = logs / "05.trim-gff-coordinates.metrics.json"
@@ -1135,8 +1152,9 @@ def _build_annotation_artifacts(
     )
 
 
+@locked_output
 def run_pipeline(config_file: str | Path, *, validate: bool = True) -> PipelineOutputs:
-    config, config_path, outputs, modules, ctx = _initialize_pipeline(config_file)
+    config, config_path, outputs, modules, ctx = _initialize_pipeline(config_file, staged=True)
     manifest = ctx.manifest
     try:
         prepared_inputs = _prepare_inputs(ctx)
@@ -1210,6 +1228,7 @@ def run_pipeline(config_file: str | Path, *, validate: bool = True) -> PipelineO
                 options=validation_manifest_options,
             )
         else:
+            validation_outputs = {"validation_summary": validation_artifacts.validation_summary}
             write_validation_not_run_summary(artifacts=validation_artifacts)
             manifest.set_validation(
                 enabled=False,
@@ -1217,9 +1236,31 @@ def run_pipeline(config_file: str | Path, *, validate: bool = True) -> PipelineO
                 options=validation_manifest_options,
             )
 
+        final_files = {
+            Path(path) for stage in manifest.stages for path in stage.outputs
+            if Path(path).parent == outputs.final
+        }
+        final_files.add(validation_artifacts.validation_summary)
+        if validate and validation_options.run_parser:
+            final_files.add(validation_artifacts.parser_result)
+        if validate and validation_options.run_transchecker:
+            final_files.update((validation_artifacts.transchecker_result,
+                                validation_artifacts.aa_fasta, validation_artifacts.nuc_fasta))
+        published = publish_submission(outputs.root, sorted(final_files))
+        work_final = outputs.final
+        outputs.final = published
+        outputs.ann_path = published / outputs.ann_path.name
+        outputs.fasta_path = published / outputs.fasta_path.name
+        manifest.ann_path = outputs.ann_path
+        manifest.fasta_path = outputs.fasta_path
+        if "outputs" in manifest.validation:
+            manifest.validation["outputs"] = {
+                key: str(value).replace(str(work_final), str(published))
+                for key, value in validation_outputs.items()
+            }
         manifest.mark_completed()
         return outputs
-    except Exception as exc:
+    except BaseException as exc:
         manifest.mark_failed(exc)
         raise
     finally:

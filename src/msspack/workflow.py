@@ -15,6 +15,7 @@ from .busco import BuscoArtifacts, run_busco_comparison
 from .config import load_config
 from .databases import DatabaseStatus, collect_database_status, write_database_manifest
 from .doctor import doctor_succeeded, render_doctor_report, run_doctor
+from .output_state import output_directory_lock
 from .pipeline import PipelineOutputs, run_pipeline
 from .pipeline_plots import PipelinePlotArtifacts, run_pipeline_plots
 from .report import ReportArtifacts, run_html_report
@@ -164,90 +165,91 @@ def run_all(
     started = time.perf_counter()
     with database_directory_override(database_dir):
         config = load_config(config_file)
-        database_status = collect_database_status(config)
-        manifest_path = config.output_dir / "build-manifest.json"
-        effective_busco = run_busco and (config.busco.run_cds or config.busco.run_genome)
-        effective_validation = validate and (
-            config.pipeline.validate_with_parser
-            or config.pipeline.validate_with_transchecker
-        )
-        if force_compute:
-            _invalidate_compute_cache(
-                config.output_dir,
-                protected_paths=(
-                    config.base_dir,
-                    config.database_dir,
-                    config.busco_database_dir,
-                    config.cache_dir,
-                ),
-            )
-        _update_run_manifest(
-            manifest_path,
-            status="running",
-            started_at=started_at,
-            duration_seconds=0.0,
-            database_status=database_status,
-            busco_enabled=effective_busco,
-            validation_enabled=effective_validation,
-            report_enabled=write_report,
-            force_compute=force_compute,
-        )
-        try:
-            _preflight(
-                config_file,
-                validate=effective_validation,
-                run_busco=effective_busco,
-            )
-
-            busco_artifacts: BuscoArtifacts | None = None
-            if effective_busco:
-                busco_artifacts = run_busco_comparison(
-                    config_file,
-                    force=force_compute,
-                    prepare_only=True,
-                )
-
-            pipeline_outputs = run_pipeline(config_file, validate=validate)
-            plot_artifacts = run_pipeline_plots(config_file, force=force_compute)
+        with output_directory_lock(config.output_dir):
             database_status = collect_database_status(config)
-            write_database_manifest(config)
-            report_artifacts = (
-                run_html_report(config_file, force=False) if write_report else None
+            manifest_path = config.output_dir / "build-manifest.json"
+            effective_busco = run_busco and (config.busco.run_cds or config.busco.run_genome)
+            effective_validation = validate and (
+                config.pipeline.validate_with_parser
+                or config.pipeline.validate_with_transchecker
             )
-            duration_seconds = time.perf_counter() - started
+            if force_compute:
+                _invalidate_compute_cache(
+                    config.output_dir,
+                    protected_paths=(
+                        config.base_dir,
+                        config.database_dir,
+                        config.busco_database_dir,
+                        config.cache_dir,
+                    ),
+                )
             _update_run_manifest(
-                pipeline_outputs.manifest_path,
-                status="completed",
+                manifest_path,
+                status="running",
                 started_at=started_at,
-                duration_seconds=duration_seconds,
+                duration_seconds=0.0,
                 database_status=database_status,
                 busco_enabled=effective_busco,
                 validation_enabled=effective_validation,
                 report_enabled=write_report,
                 force_compute=force_compute,
             )
-            return RunArtifacts(
-                pipeline=pipeline_outputs,
-                busco=busco_artifacts,
-                plots=plot_artifacts,
-                report=report_artifacts,
-                database_status=database_status,
-                duration_seconds=duration_seconds,
-            )
-        except BaseException as exc:
             try:
+                _preflight(
+                    config_file,
+                    validate=effective_validation,
+                    run_busco=effective_busco,
+                )
+
+                busco_artifacts: BuscoArtifacts | None = None
+                if effective_busco:
+                    busco_artifacts = run_busco_comparison(
+                        config_file,
+                        force=force_compute,
+                        prepare_only=True,
+                    )
+
+                pipeline_outputs = run_pipeline(config_file, validate=validate)
+                plot_artifacts = run_pipeline_plots(config_file, force=force_compute)
+                database_status = collect_database_status(config)
+                write_database_manifest(config)
+                report_artifacts = (
+                    run_html_report(config_file, force=False) if write_report else None
+                )
+                duration_seconds = time.perf_counter() - started
                 _update_run_manifest(
-                    manifest_path,
-                    status="failed",
+                    pipeline_outputs.manifest_path,
+                    status="completed",
                     started_at=started_at,
-                    duration_seconds=time.perf_counter() - started,
+                    duration_seconds=duration_seconds,
                     database_status=database_status,
                     busco_enabled=effective_busco,
                     validation_enabled=effective_validation,
                     report_enabled=write_report,
                     force_compute=force_compute,
-                    error=str(exc) or type(exc).__name__,
                 )
-            except Exception:
-                pass
-            raise
+                return RunArtifacts(
+                    pipeline=pipeline_outputs,
+                    busco=busco_artifacts,
+                    plots=plot_artifacts,
+                    report=report_artifacts,
+                    database_status=database_status,
+                    duration_seconds=duration_seconds,
+                )
+            except BaseException as exc:
+                try:
+                    _update_run_manifest(
+                        manifest_path,
+                        status="failed",
+                        started_at=started_at,
+                        duration_seconds=time.perf_counter() - started,
+                        database_status=database_status,
+                        busco_enabled=effective_busco,
+                        validation_enabled=effective_validation,
+                        report_enabled=write_report,
+                        force_compute=force_compute,
+                        error=str(exc) or type(exc).__name__,
+                    )
+                except Exception:
+                    pass
+                raise

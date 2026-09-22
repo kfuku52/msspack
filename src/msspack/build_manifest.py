@@ -109,9 +109,9 @@ class ManifestRecorder:
             payload["outputs"] = {key: str(path) for key, path in result_paths.items()}
         self.validation = payload
 
-    def mark_failed(self, exc: Exception) -> None:
+    def mark_failed(self, exc: BaseException) -> None:
         self.status = "failed"
-        self.error = str(exc)
+        self.error = str(exc) or type(exc).__name__
 
     def mark_completed(self) -> None:
         self.status = "completed"
@@ -127,6 +127,9 @@ class ManifestRecorder:
             "annotation": _file_info(self.ann_path),
             "fasta": _file_info(self.fasta_path),
         }
+        published = self.output_root / "final"
+        if published.is_dir():
+            output_payload["published_generation"] = {"path": str(published.resolve())}
         if self.config.functional_annotation.enabled:
             output_payload["functional_annotation_taxonomy"] = _file_info(
                 self.output_root / "final" / "functional-annotation-taxonomy.json"

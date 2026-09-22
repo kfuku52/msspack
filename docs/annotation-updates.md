@@ -27,6 +27,11 @@ records per-sequence lengths/SHA-256 values and feature counts. Mapping rows mus
 be unique and match both input files exactly; conflicting source identifiers and
 existing output directories are rejected. Input files are never overwritten.
 
+Before updating, expand any `@@[entry]@@` values in `COMMON` into individual
+entries using the original entry names. These macros are rejected because leaving
+them in `COMMON` would change their meaning after accession renaming. Move a
+COMMON `submitter_seqid` qualifier into each entry's source feature as well.
+
 Exon and, by default, UTR blocks are removed only when a same-locus mRNA represents
 their location on the same strand. Unrepresented blocks are retained and counted
 for review. Use `--retain-utr-features` to keep independent UTR annotations.

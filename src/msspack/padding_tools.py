@@ -8,21 +8,20 @@ from typing import Protocol, cast
 
 from Bio.Data import CodonTable
 
-from .fasta import iter_fasta, reverse_complement, write_fasta_record
-from .gff import GFFRecord, child_ids, read_gff_document
+from .fasta import iter_fasta, write_fasta_record
 from .step_logging import write_step_log, write_step_metrics
+from .transcript_models import (
+    TranscriptModel,
+    spliced_cds_sequence,
+)
+from .transcript_models import (
+    build_transcript_models as _build_transcript_models,
+)
 from .utils import atomic_text_writer, ensure_dir
 
 # Some of the padding logic below is carried forward from earlier internal
 # tooling used before msspack unified the MSS packaging workflow.
 
-
-@dataclass
-class TranscriptModel:
-    transcript_id: str
-    seqid: str
-    strand: str
-    cds_records: list[GFFRecord]
 
 
 @dataclass
@@ -125,41 +124,6 @@ def _process_padding(
     }
 
 
-def _build_transcript_models(gff_path: Path) -> list[TranscriptModel]:
-    transcript_records: dict[str, GFFRecord] = {}
-    transcript_order: list[str] = []
-    cds_by_parent: dict[str, list[GFFRecord]] = {}
-
-    for record in read_gff_document(gff_path).records:
-        record_id = record.attributes.get("ID", "")
-        if record.type in ("mRNA", "transcript") and record_id:
-            transcript_records[record_id] = record
-            transcript_order.append(record_id)
-        elif record.type == "CDS":
-            for parent_id in child_ids(record.attributes.get("Parent")):
-                cds_by_parent.setdefault(parent_id, []).append(record)
-                if parent_id not in transcript_records and parent_id not in transcript_order:
-                    transcript_order.append(parent_id)
-
-    models: list[TranscriptModel] = []
-    for transcript_id in transcript_order:
-        cds_records = cds_by_parent.get(transcript_id, [])
-        if not cds_records:
-            continue
-        transcript_record = transcript_records.get(transcript_id)
-        seqid = transcript_record.seqid if transcript_record else cds_records[0].seqid
-        strand = transcript_record.strand if transcript_record else cds_records[0].strand
-        models.append(
-            TranscriptModel(
-                transcript_id=transcript_id,
-                seqid=seqid,
-                strand=strand,
-                cds_records=sorted(cds_records, key=lambda record: (record.start, record.end)),
-            )
-        )
-    return models
-
-
 def write_spliced_cds_fasta(
     *,
     fasta_path: Path,
@@ -194,10 +158,7 @@ def write_spliced_cds_fasta(
                 continue
             contig_seq = record.sequence
             for model in seq_models:
-                pieces = [contig_seq[feature.start - 1 : feature.end] for feature in model.cds_records]
-                seq = "".join(pieces)
-                if model.strand == "-":
-                    seq = reverse_complement(seq)
+                seq = spliced_cds_sequence(contig_seq, model)
                 write_fasta_record(handle, identifier=model.transcript_id, sequence=seq)
                 written += 1
 
@@ -332,10 +293,7 @@ def write_padding_log_for_gff(
         if not seq_models:
             continue
         for model in seq_models:
-            pieces = [record.sequence[feature.start - 1 : feature.end] for feature in model.cds_records]
-            seq = "".join(pieces)
-            if model.strand == "-":
-                seq = reverse_complement(seq)
+            seq = spliced_cds_sequence(record.sequence, model)
             result = _process_padding(model.transcript_id, seq, genetic_code, padchar)
             transcript_count += 1
             if result["was_padded"]:

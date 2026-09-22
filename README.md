@@ -53,9 +53,9 @@ pip install git+https://github.com/kfuku52/msspack.git
 DIAMOND, and HMMER are optional. CDD annotation additionally requires `rpsblast` and
 `rpsbproc`; `msspack doctor` reports which tools are needed for the enabled features.
 
-The core pipeline is platform-independent, but automated installation and execution
-of the DDBJ `Parser` and `transChecker` currently support Linux and macOS. On Windows,
-use WSL or run the DDBJ Windows tools separately.
+CI exercises the core pipeline on Linux and macOS. Automated installation and
+execution of the DDBJ `Parser` and `transChecker` support those platforms. Native
+Windows is not currently tested; use WSL or run the DDBJ Windows tools separately.
 
 ## Quick Start
 
@@ -113,6 +113,9 @@ msspack run --config my_submission.toml --no-busco --no-validate --no-report
 ```
 
 `--force-compute` rebuilds analysis outputs but retains downloaded databases.
+Submission files are published together after successful generation and enabled
+validation. See [input, publication, and cache integrity](docs/execution-integrity.md)
+for failed-run recovery, concurrent jobs, and retained submission generations.
 `report` creates or reuses the pipeline plots. Run
 `msspack plot --config my_submission.toml` only when the standalone Sankey and
 supporting figures are needed without an HTML report.

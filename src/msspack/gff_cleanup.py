@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -11,7 +11,7 @@ from .coordinate_duplicates import (
     write_coordinate_duplicate_map,
 )
 from .fasta import iter_fasta
-from .gff import GFFRecord, parse_attributes
+from .gff import GFFRecord, child_ids, filter_parent_attribute, parse_attributes, repair_attributes
 from .step_logging import write_id_list, write_step_log, write_step_metrics
 from .utils import MSSPackError, atomic_text_writer, ensure_dir
 
@@ -139,7 +139,6 @@ def drop_duplicate_coordinate_genes(
 ) -> dict[str, object]:
     started_at = datetime.now()
     lines: list[tuple[bool, str, tuple[str, int, int, str] | None, str | None, str | None]] = []
-    parent_to_children: dict[str, list[str]] = defaultdict(list)
     coordinate_genes: list[CoordinateGene] = []
     records: list[GFFRecord] = []
     input_gene_total = 0
@@ -180,9 +179,6 @@ def drop_duplicate_coordinate_genes(
                         strand=fields[6],
                     )
                 )
-            if rec_id and parent:
-                for parent_id in parent.split(","):
-                    parent_to_children[parent_id].append(rec_id)
             lines.append((True, line, coord_key, rec_id, parent))
 
     coordinate_counts: dict[tuple[str, int, int, str], int] = defaultdict(int)
@@ -207,27 +203,32 @@ def drop_duplicate_coordinate_genes(
         policy=selection_policy,
     )
     removed_gene_ids = [pair.removed_gene_id for pair in duplicate_pairs]
-    to_remove = set()
-    queue = deque(removed_gene_ids)
-    while queue:
-        current = queue.popleft()
-        if current in to_remove:
-            continue
-        to_remove.add(current)
-        queue.extend(parent_to_children.get(current, []))
+    to_remove = set(removed_gene_ids)
+    parents_by_id: dict[str, set[str]] = defaultdict(set)
+    for _, _, _, rec_id, parent in lines:
+        if rec_id and parent:
+            parents_by_id[rec_id].update(child_ids(parent))
+    changed = True
+    while changed:
+        changed = False
+        for rec_id, parents in parents_by_id.items():
+            if rec_id not in to_remove and parents and parents <= to_remove:
+                to_remove.add(rec_id)
+                changed = True
 
     kept = 0
     ensure_dir(output_path.parent)
     with atomic_text_writer(output_path) as out_handle:
-        for is_data, line, _, rec_id, parent in lines:
+        for is_data, line, _, rec_id, _parent in lines:
             if not is_data:
                 out_handle.write(line + "\n")
                 continue
             if rec_id in to_remove:
                 continue
-            if parent and any(parent_id in to_remove for parent_id in parent.split(",")):
+            filtered = filter_parent_attribute(line, to_remove)
+            if filtered is None:
                 continue
-            out_handle.write(line + "\n")
+            out_handle.write(filtered + "\n")
             kept += 1
 
     write_step_log(
@@ -291,35 +292,6 @@ def drop_duplicate_coordinate_genes(
     }
 
 
-def _fix_attributes(attribute_string: str) -> tuple[str, bool, bool]:
-    if attribute_string.strip() in ("", "."):
-        return attribute_string, False, False
-    trimmed_attr = attribute_string.rstrip(";")
-    trailing_semicolons_removed = trimmed_attr != attribute_string
-    parts = trimmed_attr.split(";")
-    new_attributes: list[str] = []
-    current_key: str | None = None
-    current_value: list[str] = []
-    semicolon_value_fixed = False
-    for chunk in parts:
-        if "=" in chunk:
-            if current_key is not None:
-                new_attributes.append(f"{current_key}={'.'.join(current_value)}")
-            key, value = chunk.split("=", 1)
-            current_key = key
-            current_value = [value]
-        else:
-            if current_key is None or not current_value:
-                raise MSSPackError(
-                    f"Cannot repair GFF3 attribute fragment without a preceding key: {chunk!r}"
-                )
-            current_value[-1] = current_value[-1] + "." + chunk
-            semicolon_value_fixed = True
-    if current_key is not None:
-        new_attributes.append(f"{current_key}={'.'.join(current_value)}")
-    return ";".join(new_attributes), semicolon_value_fixed, trailing_semicolons_removed
-
-
 def fix_gff_semicolons_file(
     *,
     input_path: Path,
@@ -354,7 +326,7 @@ def fix_gff_semicolons_file(
             if len(fields) < 9:
                 out_handle.write(line + "\n")
                 continue
-            fixed_attr, semicolon_value_fixed, trailing_semicolons_removed = _fix_attributes(fields[8])
+            fixed_attr, semicolon_value_fixed, trailing_semicolons_removed = repair_attributes(fields[8])
             if fixed_attr != fields[8]:
                 total_modified += 1
                 if semicolon_value_fixed:

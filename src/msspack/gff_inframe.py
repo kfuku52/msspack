@@ -253,6 +253,19 @@ def fix_gff_to_inframe(
             if mrna_id:
                 mrna_map[mrna_id] = _MrnaModel(line=mline)
 
+    # Root transcripts and gene-direct CDS are valid models too. Virtual containers
+    # organize them for adjustment; they are never emitted as extra GFF records.
+    owned = {transcript_id for gene in genes.values() for transcript_id in gene.mrnas}
+    for row, feature_type, feature_id in typed_lines:
+        if feature_type in ("mRNA", "transcript") and feature_id and feature_id not in owned:
+            genes[feature_id] = _GeneModel(
+                line=row.copy(),
+                mrnas=OrderedDict([(feature_id, _MrnaModel(line=row))]),
+            )
+    for gene_id, gene in genes.items():
+        if any(child[2] == "CDS" for child in children_of.get(gene_id, [])):
+            gene.mrnas.setdefault(gene_id, _MrnaModel(line=gene.line.copy()))
+
     for gene_data in genes.values():
         mrna_map = gene_data.mrnas
         for mrna_id, mrna_data in mrna_map.items():

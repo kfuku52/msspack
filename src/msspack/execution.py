@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
+import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import cache
 from pathlib import Path
 
-from .utils import MSSPackError, write_text
+from .utils import MSSPackError, which, write_text
 
 NamedJob = tuple[str, Callable[[], object]]
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3
 _FILE_FINGERPRINT_CACHE: dict[tuple[str, int, int, int], dict[str, object]] = {}
 
 
@@ -92,11 +94,29 @@ def _fingerprints(paths: list[Path]) -> dict[str, dict[str, object]] | None:
     return fingerprints
 
 
+def implementation_fingerprint() -> str:
+    """Cover transitive local imports without relying on hand-maintained module lists."""
+    package = Path(__file__).parent
+    sources = {str(path.relative_to(package)): _fingerprint(path)
+               for path in sorted(package.rglob("*.py"))}
+    identity = {
+        "sources": sources, "python": list(sys.version_info[:3]),
+        "dependencies": {name: importlib.metadata.version(name) for name in ("biopython", "reportlab")},
+    }
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+def command_fingerprint(command: str) -> dict[str, object]:
+    resolved = which(command)
+    return {"command": command, "path": resolved,
+            "executable": _fingerprint(Path(resolved)) if resolved else None}
+
+
 def _normalized_cache_key(cache_key: object | None) -> object | None:
-    if cache_key is None:
-        return None
     try:
-        normalized: object = json.loads(json.dumps(cache_key, sort_keys=True))
+        normalized: object = json.loads(json.dumps(
+            {"implementation": implementation_fingerprint(), "options": cache_key}, sort_keys=True,
+        ))
         return normalized
     except (TypeError, ValueError) as exc:
         raise MSSPackError(f"Cache key is not JSON serializable: {cache_key!r}") from exc
@@ -184,7 +204,10 @@ def run_if_needed(
     if dependency_fingerprints_before is None:
         missing = [str(path) for path in dependencies if not path.exists()]
         raise MSSPackError("Action dependencies are missing: " + ", ".join(missing))
+    implementation_before = implementation_fingerprint()
     action()
+    if implementation_before != implementation_fingerprint():
+        raise MSSPackError("Implementation changed while the step was running; rerun the step")
     dependency_fingerprints_after = _fingerprints(dependencies)
     if dependency_fingerprints_before != dependency_fingerprints_after:
         raise MSSPackError("Action dependencies changed while the step was running; rerun the step")

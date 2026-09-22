@@ -7,7 +7,7 @@ from pathlib import Path
 from Bio.Data import CodonTable
 
 from ..fasta import iter_fasta
-from ..utils import atomic_text_writer
+from ..utils import MSSPackError, atomic_text_writer
 from .features import convert_contig_features
 from .gaps import detect_gap_regions
 from .models import (
@@ -102,6 +102,8 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
     with atomic_text_writer(options.output_path) as out_handle:
         for record in iter_fasta(options.fasta_path):
             sequence = record.sequence.upper()
+            if not sequence:
+                raise MSSPackError(f"Cannot convert an empty sequence: {record.id}")
             contig_counts: Counter[str] = Counter()
             chunks = [
                 render_source_feature(

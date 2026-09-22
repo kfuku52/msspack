@@ -21,6 +21,67 @@ def _decode_attribute_component(value: str) -> str:
         raise ValueError(f"Invalid UTF-8 escape in GFF3 attribute: {value!r}") from exc
 
 
+class AttributeList(str):
+    """String-compatible GFF value retaining the boundaries of escaped list items."""
+
+    members: tuple[str, ...]
+
+    def __new__(cls, members: Iterable[str]) -> AttributeList:
+        values = tuple(members.split(",")) if isinstance(members, str) else tuple(members)
+        instance = super().__new__(cls, ",".join(values))
+        instance.members = values
+        return instance
+
+
+def filter_parent_attribute(line: str, removed_ids: set[str]) -> str | None:
+    fields = line.split("\t")
+    if len(fields) != 9:
+        return line
+    chunks = fields[8].split(";")
+    for index, chunk in enumerate(chunks):
+        if "=" not in chunk:
+            continue
+        key, raw = chunk.split("=", 1)
+        if _decode_attribute_component(key.strip()) != "Parent":
+            continue
+        tokens = [token for token in raw.split(",") if token]
+        kept = [token for token in tokens if _decode_attribute_component(token) not in removed_ids]
+        if not kept:
+            return None
+        chunks[index] = key + "=" + ",".join(kept)
+    fields[8] = ";".join(chunks)
+    return "\t".join(fields)
+
+
+def repair_attributes(attribute_string: str) -> tuple[str, bool, bool]:
+    if attribute_string.strip() in ("", "."):
+        return attribute_string, False, False
+    trimmed_attr = attribute_string.rstrip(";")
+    trailing_semicolons_removed = trimmed_attr != attribute_string
+    parts = trimmed_attr.split(";")
+    new_attributes: list[str] = []
+    current_key: str | None = None
+    current_value: list[str] = []
+    semicolon_value_fixed = False
+    for chunk in parts:
+        if "=" in chunk:
+            if current_key is not None:
+                new_attributes.append(f"{current_key}={'.'.join(current_value)}")
+            key, value = chunk.split("=", 1)
+            current_key = key
+            current_value = [value]
+        else:
+            if current_key is None or not current_value:
+                raise MSSPackError(
+                    f"Cannot repair GFF3 attribute fragment without a preceding key: {chunk!r}"
+                )
+            current_value[-1] = current_value[-1] + "." + chunk
+            semicolon_value_fixed = True
+    if current_key is not None:
+        new_attributes.append(f"{current_key}={'.'.join(current_value)}")
+    return ";".join(new_attributes), semicolon_value_fixed, trailing_semicolons_removed
+
+
 def parse_attributes(text: str) -> dict[str, str]:
     if text.strip() in ("", "."):
         return {}
@@ -40,7 +101,11 @@ def parse_attributes(text: str) -> dict[str, str]:
         decoded_value = _decode_attribute_component(value.strip())
         if any(character in decoded_value for character in ("\x00", "\r", "\n", "\t")):
             raise ValueError(f"GFF3 attribute {key!r} contains unsupported control characters")
-        attrs[key] = decoded_value
+        attrs[key] = (
+            AttributeList(_decode_attribute_component(item) for item in value.strip().split(","))
+            if key in {"Parent", "Alias", "Dbxref", "Ontology_term"}
+            else decoded_value
+        )
     return attrs
 
 
@@ -160,7 +225,8 @@ def iter_gff_records(path: str | Path) -> Iterator[GFFRecord]:
 def child_ids(value: str | None) -> list[str]:
     if not value:
         return []
-    return [item for item in value.split(",") if item]
+    items = value.members if isinstance(value, AttributeList) else value.split(",")
+    return [item for item in items if item]
 
 
 def attribute(record: GFFRecord, key: str, default: str = "") -> str:

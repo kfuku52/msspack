@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.8.2 - 2026-09-22
+
+- Preserve shared GFF3 descendants and escaped parent identifiers; emit root coding
+  transcripts once and handle their CDS phase consistently on both strands.
+- Share order-independent transcript extraction between padding and functional
+  annotation, rejecting empty sequences after normalization.
+- Stage submission files and validation before publishing complete generations;
+  serialize writers to the same output directory and retain failed-run diagnostics.
+- Verify reused database objects and DIAMOND/Pfam indexes; include implementation
+  and executable fingerprints in cache validation.
+- Reject non-finite thresholds and unsafe COMMON entry macros during updates;
+  repair supported GFF attributes before strict preflight and gap normalization.
+- Add biological, failure-injection, and concurrency regressions plus macOS wheel
+  coverage, and avoid duplicate branch push/PR CI runs.
+
 ## 0.8.1 - 2026-09-22
 
 - Remove redundant test scenarios and styling snapshots; consolidate configuration,

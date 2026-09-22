@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .gff import iter_gff_records
+from .gff import child_ids, iter_gff_records
 from .step_logging import write_step_log, write_step_metrics
 from .utils import atomic_text_writer, ensure_dir
 
@@ -29,7 +29,7 @@ def build_annotation_table(
                 gene_to_mrnas.setdefault(gene_id, [])
         elif record.type in ("mRNA", "transcript"):
             mrna_id = record.attributes.get("ID")
-            parent_gene_ids = [item for item in record.attributes.get("Parent", "").split(",") if item]
+            parent_gene_ids = child_ids(record.attributes.get("Parent"))
             if not (parent_gene_ids and mrna_id):
                 continue
             for parent_gene_id in parent_gene_ids:
@@ -40,7 +40,7 @@ def build_annotation_table(
         elif record.type == "CDS":
             product = record.attributes.get("product")
             if product:
-                for transcript_id in record.attributes.get("Parent", "").split(","):
+                for transcript_id in child_ids(record.attributes.get("Parent")):
                     if transcript_id:
                         transcript_to_product.setdefault(transcript_id, product)
 

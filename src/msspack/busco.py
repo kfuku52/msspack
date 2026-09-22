@@ -33,6 +33,7 @@ from .config import BuscoConfig, MSSPackConfig, load_config
 from .config_validation import validate_busco_config
 from .database_lock import DatabaseLockSettings, acquire_database_lock, database_lock_path
 from .execution import module_origin, run_if_needed
+from .output_state import locked_output
 from .padding_tools import write_spliced_cds_fasta
 from .pipeline import PipelineOutputs, prepare_pipeline_for_busco, run_pipeline
 from .step_logging import count_fasta_records
@@ -1326,6 +1327,7 @@ def _update_busco_manifest(
     write_text(manifest_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+@locked_output
 def run_busco_comparison(
     config_file: str | Path,
     *,

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_config
+from .output_state import locked_output
 from .pipeline_plots import run_pipeline_plots
 from .utils import MSSPackError, ensure_dir, write_text
 from .validation import load_validation_summary
@@ -512,6 +513,7 @@ def _update_report_manifest(manifest_path: Path, artifacts: ReportArtifacts) -> 
     write_text(manifest_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+@locked_output
 def run_html_report(
     config_file: str | Path,
     *,

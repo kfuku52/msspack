@@ -21,6 +21,7 @@ from .coordinate_duplicate_plots import (
     write_coordinate_duplicate_svg,
 )
 from .execution import module_origin, run_if_needed
+from .output_state import locked_output
 from .pipeline_plot_data import (
     collect_pipeline_plot_data,
     parse_pipeline_plot_metrics,
@@ -52,6 +53,7 @@ LEGACY_OVERLAP_FILENAMES = (
 )
 
 
+@locked_output
 def run_pipeline_plots(
     config_file: str | Path,
     *,

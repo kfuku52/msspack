@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -217,6 +218,8 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
             dotted = ", ".join(f"{section_name}.{key}" for key in unknown_keys)
             raise ConfigError(f"Unknown config key(s): {dotted}")
         for key, value in values.items():
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ConfigError(f"Config value '{section_name}.{key}' must be finite")
             expected = schema[key]
             if isinstance(value, bool) and (
                 expected is int
@@ -252,6 +255,10 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
                     )
                     raise ConfigError(f"Unknown config key(s): {dotted}")
                 for nested_key, nested_value in value.items():
+                    if isinstance(nested_value, float) and not math.isfinite(nested_value):
+                        raise ConfigError(
+                            f"Config value 'functional_annotation.{key}.{nested_key}' must be finite"
+                        )
                     nested_expected = nested_schema[nested_key]
                     nested_numeric_bool = isinstance(nested_value, bool) and (
                         nested_expected is int

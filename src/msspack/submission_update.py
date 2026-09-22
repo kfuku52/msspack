@@ -73,6 +73,10 @@ def _write_entry(
         # An entry macro here would change meaning after renaming; require explicit sources.
         if any(r[3] == "submitter_seqid" for b in blocks for r in b):
             raise MSSPackError("Move COMMON submitter_seqid qualifiers to individual source features")
+        if any("@@[entry]@@" in r[4] for b in blocks for r in b):
+            raise MSSPackError(
+                "Expand COMMON entry macros into individual entries before preparing an update"
+            )
         return "".join("\t".join(r) + "\n" for b in blocks for r in b)
     if entry not in mapping:
         raise MSSPackError(f"Annotation entry missing from mapping: {entry}")

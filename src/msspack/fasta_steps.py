@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .fasta import iter_fasta
+from .fasta import iter_fasta, write_fasta_record
 from .step_logging import write_step_log, write_step_metrics
-from .utils import atomic_text_writer, ensure_dir
+from .utils import MSSPackError, atomic_text_writer, ensure_dir
 
 
 def remove_trailing_ns_fasta(
@@ -20,58 +20,17 @@ def remove_trailing_ns_fasta(
     input_total = 0
     changed_total = 0
     ensure_dir(output_path.parent)
-    with input_path.open("r", encoding="utf-8") as in_handle, atomic_text_writer(
-        output_path
-    ) as out_handle:
-        header: str | None = None
-        seq_lines: list[str] = []
-        for raw_line in in_handle:
-            line = raw_line.rstrip("\n")
-            if line.startswith(">"):
-                if header is not None:
-                    input_total += 1
-                    record_changed = False
-                    idx = len(seq_lines) - 1
-                    while idx >= 0:
-                        original = seq_lines[idx]
-                        trimmed = original.rstrip("Nn")
-                        removed_total += len(original) - len(trimmed)
-                        if original != trimmed:
-                            record_changed = True
-                        if trimmed:
-                            seq_lines[idx] = trimmed
-                            break
-                        seq_lines.pop()
-                        idx -= 1
-                    if record_changed:
-                        changed_total += 1
-                    out_handle.write(header + "\n")
-                    for seq_line in seq_lines:
-                        out_handle.write(seq_line + "\n")
-                header = line
-                seq_lines = []
-            else:
-                seq_lines.append(line)
-        if header is not None:
+    with atomic_text_writer(output_path) as out_handle:
+        for record in iter_fasta(input_path):
+            sequence = record.sequence.rstrip("Nn")
+            if not sequence:
+                raise MSSPackError(f"No sequence remains after trimming terminal Ns: {record.id}")
             input_total += 1
-            record_changed = False
-            idx = len(seq_lines) - 1
-            while idx >= 0:
-                original = seq_lines[idx]
-                trimmed = original.rstrip("Nn")
-                removed_total += len(original) - len(trimmed)
-                if original != trimmed:
-                    record_changed = True
-                if trimmed:
-                    seq_lines[idx] = trimmed
-                    break
-                seq_lines.pop()
-                idx -= 1
-            if record_changed:
-                changed_total += 1
-            out_handle.write(header + "\n")
-            for seq_line in seq_lines:
-                out_handle.write(seq_line + "\n")
+            removed = len(record.sequence) - len(sequence)
+            removed_total += removed
+            changed_total += int(removed > 0)
+            write_fasta_record(out_handle, identifier=record.id,
+                               description=record.description, sequence=sequence)
 
     write_step_log(
         log_path=log_path,
@@ -108,6 +67,8 @@ def write_mss_fasta(
     ensure_dir(output_path.parent)
     with atomic_text_writer(output_path) as out_handle:
         for record in iter_fasta(input_path):
+            if not record.sequence:
+                raise MSSPackError(f"Cannot write an empty submission sequence: {record.id}")
             out_handle.write(f">{record.id}\n")
             seq = record.sequence
             for start in range(0, len(seq), 60):

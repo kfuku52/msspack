@@ -33,10 +33,17 @@ from .database_lock import (
     acquire_database_lock,
     database_lock_path,
 )
-from .fasta import iter_fasta, reverse_complement, write_fasta_record
-from .gff import GFFRecord, child_ids, read_gff_document
+from .execution import command_fingerprint
+from .fasta import iter_fasta, write_fasta_record
 from .product_names import ProductNameContext, standardize_product_name
 from .step_logging import write_step_log, write_step_metrics
+from .transcript_models import (
+    TranscriptModel,
+    spliced_cds_sequence,
+)
+from .transcript_models import (
+    build_transcript_models as _build_transcript_models,
+)
 from .utils import (
     MSSPackError,
     atomic_binary_writer,
@@ -143,13 +150,6 @@ _UNINFORMATIVE_PFAM_PATTERNS = tuple(
     )
 )
 
-
-@dataclass(frozen=True)
-class TranscriptModel:
-    transcript_id: str
-    seqid: str
-    strand: str
-    cds_records: tuple[GFFRecord, ...]
 
 
 @dataclass(frozen=True)
@@ -376,6 +376,10 @@ def _materialize_database_file_unlocked(
     verification_algorithm = ""
     verification_digest = ""
     release = ""
+    materialized_valid = (
+        output_path.is_file()
+        and previous.get("materialized_sha256") == _sha256(output_path)
+    )
 
     if local_value.strip():
         source_path = expand_path(local_value, base_dir)
@@ -383,7 +387,7 @@ def _materialize_database_file_unlocked(
             raise MSSPackError(f"Annotation database file not found: {source_path}")
         source_sha256 = _sha256(source_path)
         origin = str(source_path)
-        if previous.get("origin_sha256") != source_sha256 or not output_path.is_file():
+        if previous.get("origin_sha256") != source_sha256 or not materialized_valid:
             if preserve_compression:
                 if source_path.suffix.casefold() != ".gz":
                     raise MSSPackError(
@@ -397,7 +401,7 @@ def _materialize_database_file_unlocked(
         if not url.strip():
             raise MSSPackError(f"No URL configured for annotation database {stem}")
         origin = url
-        if previous.get("origin") != origin or not output_path.is_file():
+        if previous.get("origin") != origin or not materialized_valid:
             verification = _remote_verification(url)
             expected_size: int | None = None
             if verification is not None:
@@ -496,7 +500,7 @@ def _materialize_database_file(
             return path, origin, digest, provenance
         suffix = "".join(path.suffixes) or expected_suffix
         object_path = cache_dir / "objects" / f"{digest}{suffix}"
-        if not object_path.is_file():
+        if not object_path.is_file() or _sha256(object_path) != digest:
             _copy_binary(path, object_path)
         if object_path.stat().st_size == 0:
             raise MSSPackError(f"Content-addressed database file is empty: {object_path}")
@@ -509,38 +513,6 @@ def _materialize_database_file(
                 "content_object_path": str(object_path),
             },
         )
-
-
-def _build_transcript_models(gff_path: Path) -> list[TranscriptModel]:
-    transcript_records: dict[str, GFFRecord] = {}
-    transcript_order: list[str] = []
-    cds_by_parent: dict[str, list[GFFRecord]] = defaultdict(list)
-    for record in read_gff_document(gff_path).records:
-        record_id = record.attributes.get("ID", "")
-        if record.type in ("mRNA", "transcript") and record_id:
-            transcript_records[record_id] = record
-            transcript_order.append(record_id)
-        elif record.type == "CDS":
-            for parent_id in child_ids(record.attributes.get("Parent")):
-                cds_by_parent[parent_id].append(record)
-                if parent_id not in transcript_records and parent_id not in transcript_order:
-                    transcript_order.append(parent_id)
-
-    models: list[TranscriptModel] = []
-    for transcript_id in transcript_order:
-        cds_records = cds_by_parent.get(transcript_id, [])
-        if not cds_records:
-            continue
-        transcript = transcript_records.get(transcript_id)
-        models.append(
-            TranscriptModel(
-                transcript_id=transcript_id,
-                seqid=transcript.seqid if transcript else cds_records[0].seqid,
-                strand=transcript.strand if transcript else cds_records[0].strand,
-                cds_records=tuple(sorted(cds_records, key=lambda item: (item.start, item.end))),
-            )
-        )
-    return models
 
 
 def write_translated_protein_fasta(
@@ -563,11 +535,7 @@ def write_translated_protein_fasta(
     with atomic_text_writer(output_path) as output:
         for fasta_record in iter_fasta(fasta_path):
             for model in models_by_seqid.get(fasta_record.id, []):
-                sequence = "".join(
-                    fasta_record.sequence[cds.start - 1 : cds.end] for cds in model.cds_records
-                )
-                if model.strand == "-":
-                    sequence = reverse_complement(sequence)
+                sequence = spliced_cds_sequence(fasta_record.sequence, model)
                 usable_length = len(sequence) - (len(sequence) % 3)
                 if usable_length < 3:
                     skipped += 1
@@ -680,25 +648,9 @@ def _prepare_diamond_database(
     lock_settings: DatabaseLockSettings | None = None,
 ) -> DiamondDatabase:
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "database"
-    legacy_dir = cache_dir / safe_name
-    legacy_database_path = legacy_dir / f"{safe_name}.dmnd"
-    legacy_provenance = _read_json(legacy_dir / "database.json")
-    if (
-        legacy_database_path.is_file()
-        and legacy_provenance.get("fasta_sha256") == sha256
-    ):
-        return DiamondDatabase(
-            name,
-            fasta_path,
-            legacy_database_path,
-            weight,
-            origin,
-            sha256,
-            str(source_provenance.get("release", "")),
-            str(source_provenance.get("verification_algorithm", "")),
-            str(source_provenance.get("verification_digest", "")),
-        )
-    version = sha256[:16]
+    builder = command_fingerprint(command)
+    builder_digest = hashlib.sha256(json.dumps(builder, sort_keys=True).encode()).hexdigest()[:12]
+    version = f"{sha256[:16]}-{builder_digest}"
     database_dir = ensure_dir(cache_dir / safe_name / version)
     database_path = database_dir / f"{safe_name}.dmnd"
     provenance_path = database_dir / "database.json"
@@ -708,7 +660,12 @@ def _prepare_diamond_database(
         settings=lock_settings,
     ):
         previous = _read_json(provenance_path)
-        if previous.get("fasta_sha256") != sha256 or not database_path.is_file():
+        if (
+            previous.get("fasta_sha256") != sha256
+            or previous.get("builder") != builder
+            or not database_path.is_file()
+            or previous.get("database_sha256") != _sha256(database_path)
+        ):
             temporary_base = database_dir / f".{safe_name}.{os.getpid()}"
             run_command(
                 [command, "makedb", "--in", str(fasta_path), "--db", str(temporary_base)],
@@ -734,6 +691,8 @@ def _prepare_diamond_database(
                             "verification_digest", ""
                         ),
                         "diamond_command": command,
+                        "builder": builder,
+                        "database_sha256": _sha256(database_path),
                     },
                     indent=2,
                     sort_keys=True,
@@ -1201,18 +1160,25 @@ def _prepare_pfam_database(
         content_addressed=True,
         lock_settings=lock_settings,
     )
-    metadata_path = hmm_path.with_name(f"{hmm_path.stem}.metadata.tsv")
+    builder = command_fingerprint(config.hmmpress_command)
+    builder_digest = hashlib.sha256(json.dumps(builder, sort_keys=True).encode()).hexdigest()[:12]
+    indexed_hmm = pfam_dir / "indexes" / digest / builder_digest / "Pfam-A.hmm"
+    metadata_path = indexed_hmm.with_name(f"{indexed_hmm.stem}.metadata.tsv")
+    source_hmm = hmm_path
+    hmm_path = indexed_hmm
     prepared_path = hmm_path.with_name(f"{hmm_path.stem}.prepared.json")
     pressed_paths = [Path(str(hmm_path) + suffix) for suffix in (".h3f", ".h3i", ".h3m", ".h3p")]
     with acquire_database_lock(
-        database_lock_path(cache_dir, f"pfam-index-{digest[:16]}"),
+        database_lock_path(cache_dir, f"pfam-index-{digest[:16]}-{builder_digest}"),
         label="Pfam hmmpress build",
         settings=lock_settings,
     ):
+        if not hmm_path.is_file() or _sha256(hmm_path) != digest:
+            _copy_binary(source_hmm, hmm_path)
         previous = _read_json(prepared_path)
-        if previous.get("hmm_sha256") != digest or not all(
-            path.is_file() for path in pressed_paths
-        ):
+        indexes = {path.name: _sha256(path) for path in pressed_paths if path.is_file()}
+        if (previous.get("hmm_sha256") != digest or previous.get("builder") != builder
+                or len(indexes) != len(pressed_paths) or previous.get("indexes") != indexes):
             for path in pressed_paths:
                 path.unlink(missing_ok=True)
             run_command(
@@ -1230,6 +1196,8 @@ def _prepare_pfam_database(
                         "hmm_sha256": digest,
                         "metadata_records": metadata_count,
                         "hmmpress_command": config.hmmpress_command,
+                        "builder": builder,
+                        "indexes": {path.name: _sha256(path) for path in pressed_paths},
                     },
                     indent=2,
                     sort_keys=True,

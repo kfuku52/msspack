@@ -10,7 +10,7 @@ from pathlib import Path
 from .config import MSSPackConfig
 from .ddbj_tools import list_installed
 from .fasta import iter_fasta
-from .gff import GFFRecord
+from .gff import GFFRecord, repair_attributes
 from .utils import expand_path, which
 
 
@@ -139,7 +139,8 @@ def _input_checks(config: MSSPackConfig) -> list[Check]:
                 fields = line.split("\t")
                 if len(fields) != 9:
                     raise ValueError(f"line {line_number} has {len(fields)} columns")
-                gff_record = GFFRecord.from_line(line)
+                fields[8], _, _ = repair_attributes(fields[8])
+                gff_record = GFFRecord.from_line("\t".join(fields))
                 if gff_record.start < 1 or gff_record.end < gff_record.start:
                     raise ValueError(
                         f"line {line_number} has invalid coordinates "

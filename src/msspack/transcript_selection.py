@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import re
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict
-from urllib.parse import unquote
 
-from .gff import child_ids, parse_attributes
+from .gff import child_ids, filter_parent_attribute, parse_attributes
 from .step_logging import write_id_list
 from .utils import ensure_dir, write_text
 
@@ -58,38 +56,6 @@ def _ensure_transcript(
     if transcript_id not in transcripts:
         transcripts[transcript_id] = _TranscriptData()
     return transcripts[transcript_id]
-
-
-def _raw_parent_tokens(attributes_text: str) -> list[tuple[str, str]]:
-    for chunk in attributes_text.split(";"):
-        if "=" not in chunk:
-            continue
-        key, value = chunk.split("=", 1)
-        if unquote(key.strip()) != "Parent":
-            continue
-        return [(unquote(token), token) for token in value.split(",") if token]
-    return []
-
-
-def _filter_parent_attribute(line: str, removed_ids: set[str]) -> str | None:
-    fields = line.split("\t")
-    if len(fields) != 9:
-        return line
-    tokens = _raw_parent_tokens(fields[8])
-    if not tokens:
-        return line
-    kept_raw = [raw for decoded, raw in tokens if decoded not in removed_ids]
-    if not kept_raw:
-        return None
-    if len(kept_raw) == len(tokens):
-        return line
-    fields[8] = re.sub(
-        r"(?:(?<=;)|^)Parent=[^;]*",
-        "Parent=" + ",".join(kept_raw),
-        fields[8],
-        count=1,
-    )
-    return "\t".join(fields)
 
 
 def _selected_transcript_ids(
@@ -221,9 +187,9 @@ def select_one_mrna_per_gene(
             continue
         if item.feature_id in selected_gene_ids:
             disallowed_gene_ids = set(item.parents) - selected_gene_ids[item.feature_id]
-            filtered = _filter_parent_attribute(item.raw, disallowed_gene_ids)
+            filtered = filter_parent_attribute(item.raw, disallowed_gene_ids)
         else:
-            filtered = _filter_parent_attribute(item.raw, removed_ids)
+            filtered = filter_parent_attribute(item.raw, removed_ids)
         if filtered is not None:
             output_lines.append(filtered)
 

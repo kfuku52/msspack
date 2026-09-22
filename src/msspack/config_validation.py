@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import fields, is_dataclass
 from datetime import datetime
 
 from Bio.Data import CodonTable
@@ -240,7 +241,19 @@ def _ensure_range(value: float, key: str, minimum: float, maximum: float) -> Non
         raise ConfigError(f"Config value '{key}' must be between {minimum:g} and {maximum:g}")
 
 
+def _ensure_finite_fields(value: object, prefix: str) -> None:
+    if not is_dataclass(value) or isinstance(value, type):
+        return
+    for item in fields(value):
+        member = getattr(value, item.name)
+        key = f"{prefix}.{item.name}"
+        if isinstance(member, float) and not math.isfinite(member):
+            raise ConfigError(f"Config value '{key}' must be finite")
+        _ensure_finite_fields(member, key)
+
+
 def validate_functional_annotation_config(annotation: FunctionalAnnotationConfig) -> None:
+    _ensure_finite_fields(annotation, "functional_annotation")
     ensure_nonempty(annotation.diamond_command, "functional_annotation.diamond_command")
     ensure_nonempty(annotation.hmmscan_command, "functional_annotation.hmmscan_command")
     ensure_nonempty(annotation.hmmpress_command, "functional_annotation.hmmpress_command")

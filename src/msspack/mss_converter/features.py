@@ -5,6 +5,7 @@ from collections import Counter
 from dataclasses import replace
 
 from ..fasta import reverse_complement
+from ..gff import child_ids
 from ..gff_feature_policy import (
     CDS_TYPES,
     CODING_TRANSCRIPT_TYPES,
@@ -33,7 +34,7 @@ _CONTAINER_TYPES = frozenset({"chromosome", "contig", "scaffold", "supercontig",
 
 def _attribute(feature: FeatureRecord, *keys: str) -> str:
     for key in keys:
-        value = feature.attributes.get(key, "").strip()
+        value = feature.attributes.get(key, "")
         if value:
             return value
     return ""
@@ -44,7 +45,7 @@ def _clean_value(value: str) -> str:
 
 
 def _comma_values(value: str) -> list[str]:
-    return [_clean_value(item) for item in value.split(",") if _clean_value(item)]
+    return [_clean_value(item) for item in child_ids(value) if _clean_value(item)]
 
 
 def _location_for_features(
@@ -603,6 +604,10 @@ def convert_contig_features(
     genes = gene_lookup.get(contig_name, [])
     chunks: list[str] = []
     processed: set[int] = set()
+    transcript_ids = {
+        feature.id for feature in seq_lookup.get(contig_name, [])
+        if feature.type in CODING_TRANSCRIPT_TYPES
+    }
 
     def current_locus_tag() -> str:
         return f"{locus_tag_prefix}{str(locus_tag_counter).zfill(9)}"
@@ -824,6 +829,9 @@ def convert_contig_features(
             # duplicate indexes and deliberately avoids duplicate MSS features.
             continue
         if feature.type == "CDS":
+            # A transcript owns its CDS even when coordinate sorting visits the CDS first.
+            if transcript_ids.intersection(child_ids(feature.parent)):
+                continue
             locus_tag_counter += 100
             chunks.append(
                 build_standalone_cds_text(

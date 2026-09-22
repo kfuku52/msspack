@@ -39,7 +39,7 @@ def _is_missing(value: Any) -> bool:
 def _normalize_text(value: Any) -> str:
     if _is_missing(value):
         return ""
-    return str(value)
+    return value if isinstance(value, str) else str(value)
 
 
 def _normalize_phase(value: Any) -> int:
