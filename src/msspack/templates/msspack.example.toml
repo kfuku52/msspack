@@ -1,3 +1,6 @@
+# Starter settings; some values are illustrative rather than omission defaults.
+# See docs/usage.md in the source repository for defaults and override precedence.
+
 [project]
 name = "MySubmission"
 output_dir = "build/MySubmission"
@@ -17,6 +20,7 @@ isolation_source = ""
 geo_loc_name = "Japan"
 collection_date = "2026-01-01"
 sex = ""
+# Example evidence; when omitted, the default is "paired-ends".
 linkage_evidence = "proximity ligation"
 genetic_code = "1"
 
@@ -68,6 +72,7 @@ min_artificial_intron_size = 10
 # Resolve exact-coordinate gene collisions using translated CDS validity, completeness,
 # CDS length, then intron count. Alternatives: "first" and "keep_all".
 coordinate_duplicate_policy = "longest_valid_cds"
+# Example replacement rules; the omission default is an empty list.
 replace_product_patterns = [
   "\\) transport protein",
   "18S rRNA",
@@ -178,6 +183,7 @@ cds_mode = "transcriptome"
 lineage_dataset = ""
 auto_lineage = true
 auto_lineage_scope = "all"
+# Example CPU count; when omitted, BUSCO uses 1 thread.
 threads = 8
 # Leave empty to use databases.root/busco.
 download_path = ""

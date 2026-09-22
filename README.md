@@ -35,18 +35,19 @@ documentation.
 Install `msspack` directly from GitHub:
 
 ```bash
-pip install git+https://github.com/kfuku52/msspack.git
+python -m pip install git+https://github.com/kfuku52/msspack.git
 ```
 
 Python 3.11 or newer is required; an isolated environment is recommended. CI tests
-Python 3.11 through 3.14.
+Python 3.11 through 3.14. The Git URL requires Git on PATH; pip installs the
+Python dependencies (Biopython and ReportLab), but not external runtime tools.
 
 With conda or mamba, install the external runtime tools in the same environment:
 
 ```bash
 conda create -n msspack -c conda-forge -c bioconda "python>=3.11" pip openjdk busco diamond hmmer
 conda activate msspack
-pip install git+https://github.com/kfuku52/msspack.git
+python -m pip install git+https://github.com/kfuku52/msspack.git
 ```
 
 `openjdk` provides the `java` command used by the DDBJ validation tools. BUSCO,
@@ -72,9 +73,14 @@ To try the complete core workflow without preparing input data:
 
 ```bash
 msspack demo --output msspack-demo
-cd msspack-demo
-msspack run --config config.toml --no-busco --no-validate
+(
+  cd msspack-demo &&
+  msspack run --config config.toml --no-busco --no-validate
+)
 ```
+
+The subshell keeps subsequent commands in your original directory. Outputs are
+under `msspack-demo/build/MSSPackDemo/`; see the [output guide](docs/usage.md#outputs-and-interpretation).
 
 The bundled demo uses a fictional organism, fictional sequence and locus IDs, and
 deliberately invalid BioProject, BioSample, and SRA accessions. It is suitable for
@@ -143,6 +149,11 @@ features represented by mRNA locations. See the [update guide](docs/annotation-u
 for the mapping format, commands and validation requirements.
 
 ### GFF3 feature handling
+
+`pack` and `run` select one mRNA/transcript per parent gene before conversion,
+ranked by total CDS length, then total UTR length, then transcript start, end,
+and ID. The converter can represent alternative isoforms when called directly;
+the main pipeline does not preserve all isoforms. See the [input guide](docs/usage.md#inputs).
 
 CDS boundary adjustment is restricted to the targeted coding transcript. Its exon,
 start/stop codon, UTR, and intron rows are synchronized afterward; other transcripts
@@ -278,8 +289,9 @@ the standardized names written to `ann.txt` and their supporting database record
 
 Run `msspack init my_submission.toml`, then edit the generated file. It contains the
 required project, input, sample, submission, submitter, reference, and assembly metadata;
-the complete schema and defaults are in
-[`examples/msspack.example.toml`](examples/msspack.example.toml).
+the [starter example](examples/msspack.example.toml) shows common settings, not
+every accepted key or omission default. For path resolution, overrides, omitted
+settings, and output formats, see the [usage guide](docs/usage.md).
 
 Common optional settings are:
 
@@ -319,7 +331,7 @@ uppercase suffix such as `297X` is accepted but rendered as the DDBJ-preferred `
 - Relative `databases.root` paths are resolved from the TOML file, so downloads go to
   `msspack_db/` beside the config by default. To reuse databases across projects, set
   an absolute path such as `root = "/data/shared/msspack_db"` or pass
-  `msspack run --db-dir /data/shared/msspack_db`.
+  `msspack run --config my_submission.toml --db-dir /data/shared/msspack_db`.
 - Concurrent jobs coordinate each database download and index build with shared
   heartbeat locks. A waiting job rechecks the completed resource instead of
   downloading it again; abandoned locks are recovered automatically. CDD data and

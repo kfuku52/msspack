@@ -3,7 +3,7 @@
 For an existing assembly whose sequence must stay unchanged, use already prepared
 MSS files with `prepare-update`. This command does not rerun trimming, gap
 normalization, CDS adjustment, or protein-ID assignment. Supply a tab-separated
-mapping verified against the public records, with these three columns:
+mapping verified against the public records, with this exact header and column order:
 
 ```text
 entry	accession	submitter_seqid
@@ -18,6 +18,11 @@ msspack prepare-update --ann original.ann.txt --fasta original.fasta \
   --mapping entries.tsv --output-dir update
 msspack validate --ann update/update.ann.txt --fasta update/update.fasta
 ```
+
+Install the DDBJ tools before the `validate` step. For custom Java/cache settings,
+pass `--config your_config.toml`; explicit `validate` requests both tools even if
+pipeline validation is disabled. Its logs and results are written beside the
+annotation file; see [validation behavior](usage.md#external-tools-and-validation).
 
 The command writes a new directory with `update.ann.txt`, `update.fasta`, and
 `update-manifest.json`. It renames annotation entries and FASTA headers together,

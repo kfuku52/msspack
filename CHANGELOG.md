@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.4 - 2026-09-22
+
+- Correct quick-start working-directory handling and distinguish starter values
+  from omission defaults; document configuration precedence and runtime tools.
+- Document input IDs, transcript selection, output formats, validation behavior,
+  and cache reuse; record unresolved BUSCO configuration/diagnostic discrepancies.
+
 ## 0.8.3 - 2026-09-22
 
 - Centralize contributor checks, distinguish offline smoke tests from external and
