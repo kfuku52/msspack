@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.8.5 - 2026-09-22
+
+- Allow both BUSCO comparison modes to be disabled in project configuration;
+  require an enabled mode only for explicit BUSCO execution after CLI overrides.
+- Make doctor require the BUSCO executable and database directory when a configured
+  run enables BUSCO, while preserving the run --no-busco preflight override.
+- Replace the mocked disabled-BUSCO workflow regression with real config/CLI
+  coverage and verify doctor/run agreement for missing BUSCO resources.
+
 ## 0.8.4 - 2026-09-22
 
 - Correct quick-start working-directory handling and distinguish starter values

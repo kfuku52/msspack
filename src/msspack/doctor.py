@@ -167,6 +167,7 @@ def run_doctor(config: MSSPackConfig | None = None) -> list[Check]:
 
     java_cmd = config.tools.java if config else "java"
     busco_cmd = config.busco.command if config else "busco"
+    busco_required = config is not None and (config.busco.run_cds or config.busco.run_genome)
     validation_required = config is None or (
         config.pipeline.validate_with_parser or config.pipeline.validate_with_transchecker
     )
@@ -190,7 +191,7 @@ def run_doctor(config: MSSPackConfig | None = None) -> list[Check]:
         Check("bash", which("bash") is not None, "bash", required=validation_required)
     )
     checks.append(
-        Check("BUSCO (optional)", which(busco_cmd) is not None, busco_cmd, required=False)
+        Check("BUSCO", which(busco_cmd) is not None, busco_cmd, required=busco_required)
     )
     annotation = config.functional_annotation if config is not None else None
     annotation_enabled = bool(annotation and annotation.enabled)
@@ -317,7 +318,7 @@ def run_doctor(config: MSSPackConfig | None = None) -> list[Check]:
                 "BUSCO database root",
                 busco_database_ok,
                 busco_database_detail,
-                required=False,
+                required=busco_required,
             )
         )
         checks.extend(_input_checks(config))

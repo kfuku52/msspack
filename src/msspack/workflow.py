@@ -105,7 +105,7 @@ def _preflight(
         for check in checks:
             if check.name in validation_names:
                 check.required = False
-    busco_names = {"BUSCO (optional)", "BUSCO database root"}
+    busco_names = {"BUSCO", "BUSCO database root"}
     for check in checks:
         if check.name in busco_names:
             check.required = run_busco

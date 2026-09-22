@@ -1353,6 +1353,11 @@ def run_busco_comparison(
         run_cds=run_cds,
     )
     validate_busco_config(busco)
+    if not busco.run_cds and not busco.run_genome:
+        raise MSSPackError(
+            "BUSCO requires at least one comparison mode; enable busco.run_cds or "
+            "busco.run_genome in the config, or pass --cds or --genome."
+        )
     _prepare_busco_lineage_database(config=config, busco=busco)
     if clean_cache:
         cleanup_busco_cache()

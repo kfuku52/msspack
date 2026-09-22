@@ -56,8 +56,11 @@ the config directory. An explicit `busco.download_path` independently overrides
 validation without editing the config. `run --no-report` skips only HTML; plots
 are still generated. `pack` does not run BUSCO, plots, or the HTML report.
 `busco` has its own lineage, thread, mode-selection, and auto-lineage overrides;
-use `msspack busco --help` for their names and choices. Config validation occurs
-before these overrides; see the [unresolved BUSCO issue](documentation-audit.md#unresolved).
+use `msspack busco --help` for their names and choices. Set both `busco.run_cds`
+and `busco.run_genome` to `false` to disable BUSCO in the config. Explicit `busco`
+requires at least one comparison mode after CLI overrides (`--cds` or `--genome`
+can enable a mode disabled in the config). Other config validation still occurs
+before overrides.
 
 The starter config is not an exhaustive schema or a list of omission defaults.
 In particular, its BUSCO `threads = 8`, `sample.linkage_evidence = "proximity ligation"`,
@@ -109,10 +112,11 @@ settings; without it, platform cache and `java` with a `16G` heap are used.
 Standalone validation writes `logs/` and `validation/` beside the resolved
 annotation file, not under `project.output_dir`. It does not upload a submission.
 
-`doctor` is a diagnostic command. In particular its BUSCO check is currently
-optional even when `run` would require BUSCO; see the
-[audit finding](documentation-audit.md#unresolved). Check the reported details,
-not only its exit status.
+`doctor --config` requires the BUSCO executable and usable database directory
+when either configured comparison mode is enabled. Both checks are optional when
+both modes are disabled; `run --no-busco` also makes them optional for that run.
+Without a config, doctor treats BUSCO as optional. These checks do not execute
+BUSCO or verify the contents of a lineage dataset.
 
 ## Outputs and interpretation
 

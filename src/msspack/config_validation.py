@@ -220,8 +220,6 @@ def validate_databases_config(databases: DatabasesConfig) -> None:
 
 def validate_busco_config(busco: BuscoConfig) -> None:
     ensure_nonempty(busco.command, "busco.command")
-    if not busco.run_cds and not busco.run_genome:
-        raise ConfigError("At least one of 'busco.run_cds' or 'busco.run_genome' must be true")
     ensure_choice(busco.mode, "busco.mode", VALID_BUSCO_MODE)
     ensure_choice(busco.cds_mode, "busco.cds_mode", VALID_BUSCO_MODE)
     ensure_choice(

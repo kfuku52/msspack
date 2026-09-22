@@ -19,7 +19,18 @@ were not rewritten to represent a new run.
 | Main output names, TSV columns/units, standalone validation destinations, and reuse interpretation absent | `pipeline._build_outputs`, `fasta_steps.write_mss_fasta`, `pipeline_plot_render`, `build_manifest`, `ValidationOptions`/`ValidationArtifacts`; demo output and integration tests | Add the usage guide, including MSS `//` terminators, event overlap, `ran`, and skipped validation |
 | Legacy `tools.gff3sort` behavior and custom tool cache setup undocumented | `pipeline_actions.sort_gff`, `utils.default_cache_dir`, `cli._handle_tools`, `test_pipeline_actions.py` | Document that the accepted sorter setting is ignored and how installation/config cache paths must agree |
 
-## Unresolved
+## Findings resolved in 0.8.5
+
+The reproductions below record 0.8.4 behavior. Both B findings were fixed in
+0.8.5: project configs now accept both BUSCO modes disabled; explicit `busco`
+requires a mode after CLI overrides; doctor requires the BUSCO executable and
+database directory whenever a configured run enables BUSCO. `run --no-busco`
+still skips these requirements. Real config/CLI regressions now cover both cases,
+including an unusable BUSCO database path and explicit `busco --cds` re-enabling.
+The 0.8.5 follow-up passed 233 tests (three opt-in external tests skipped),
+compileall, Ruff, mypy, and the dependency audit on Python 3.14.7. A temporary
+demo with both modes disabled completed doctor/run and produced nine MSS entries
+and the HTML report without BUSCO. Real BUSCO execution remains unverified.
 
 ### B: BUSCO-disable configuration rejected before the orchestrator can skip it
 

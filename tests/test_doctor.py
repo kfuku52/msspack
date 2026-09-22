@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from msspack.config import load_config
+from msspack.demo import write_demo_dataset
 from msspack.doctor import doctor_succeeded, run_doctor
 
 
@@ -86,8 +87,8 @@ class DoctorTests(unittest.TestCase):
             checks = run_doctor()
 
         by_name = {check.name: check for check in checks}
-        self.assertFalse(by_name["BUSCO (optional)"].ok)
-        self.assertFalse(by_name["BUSCO (optional)"].required)
+        self.assertFalse(by_name["BUSCO"].ok)
+        self.assertFalse(by_name["BUSCO"].required)
         self.assertFalse(by_name["DDBJ parser"].ok)
         self.assertFalse(by_name["DDBJ transchecker"].ok)
         self.assertFalse(by_name["DDBJ ume (optional)"].ok)
@@ -168,3 +169,23 @@ class DoctorTests(unittest.TestCase):
         self.assertFalse(by_name["database root"].ok)
         self.assertTrue(by_name["database root"].required)
         self.assertIn("not a directory", by_name["database root"].detail)
+
+    def test_busco_executable_and_database_requirements_follow_enabled_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = write_demo_dataset(Path(tmp_dir) / "demo")
+            config = load_config(root / "config.toml")
+            blocked = root / "blocked-busco-cache"
+            blocked.write_text("not a directory")
+            config.busco.download_path = str(blocked)
+            config.busco.command = "msspack-test-missing-busco"
+            for run_cds, run_genome in ((True, False), (False, True), (False, False)):
+                with self.subTest(run_cds=run_cds, run_genome=run_genome):
+                    config.busco.run_cds = run_cds
+                    config.busco.run_genome = run_genome
+                    checks = run_doctor(config)
+                    by_name = {check.name: check for check in checks}
+                    enabled = run_cds or run_genome
+                    for name in ("BUSCO", "BUSCO database root"):
+                        self.assertFalse(by_name[name].ok)
+                        self.assertEqual(by_name[name].required, enabled)
+                    self.assertEqual(doctor_succeeded(checks), not enabled)

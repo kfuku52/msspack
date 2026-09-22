@@ -259,7 +259,6 @@ class ConfigTests(unittest.TestCase):
                 "project",
             ),
             ("", '\n[busco]\nauto_lineage = false\nlineage_dataset = ""\n', "lineage_dataset"),
-            ("", "\n[busco]\nrun_cds = false\nrun_genome = false\n", "run_cds"),
             ('hold_date = "20271231"', 'hold_date = "2026-12-31"', "hold_date"),
             ('hold_date = "20271231"', 'hold_date = "20271399"', "hold_date"),
             ('collection_date = "2026-01-02"', 'collection_date = "2026/01/01"', "collection_date"),
