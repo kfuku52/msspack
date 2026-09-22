@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.8.7 - 2026-09-22
+
+- Parse MSS feature and qualifier columns explicitly during CDS postprocessing,
+  preventing notes or entry names from selecting the wrong feature and handling
+  qualifiers on feature headers correctly.
+- Relocate published JSON paths after decoding JSON, preserving escaped and
+  non-ASCII paths, unrelated strings, and sibling directories. Rebuild legacy
+  publication generations once to repair previously misdirected paths.
+- Reject duplicate or empty FASTA inputs and missing GFF sequence IDs in direct
+  MSS conversion without replacing an existing annotation file.
+- Add regressions for these failures, generation reuse, and preservation of
+  published submissions after invalid inputs.
+
 ## 0.8.6 - 2026-09-22
 
 - Share scalar type validation between top-level and nested configuration fields,

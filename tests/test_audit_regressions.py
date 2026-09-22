@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -250,6 +251,53 @@ class AuditRegressionTests(unittest.TestCase):
         (final / source.name).write_text("changed by consumer")
         publish_submission(self.base, [source])
         self.assertEqual((final / source.name).read_bytes(), source.read_bytes())
+
+    def test_publication_relocates_json_paths_without_changing_other_strings(self) -> None:
+        for name in ('plain', 'quoted"path', 'back\\slash', '\u65e5\u672c\u8a9e'):
+            with self.subTest(name=name):
+                root = self.base / name
+                work = root / "work"
+                work.mkdir(parents=True)
+                source = work / "summary.json"
+                payload = {
+                    "outputs": {"ann": str(work / "input.ann.txt")},
+                    "nested": [str(work / "input.fasta"), None, 3],
+                    "sibling": str(root / "work-other" / "result"),
+                    "message": f"Read {work} for diagnostics",
+                }
+                source.write_text(json.dumps(payload), encoding="utf-8")
+                final = publish_submission(root, [source])
+                actual = json.loads((final / source.name).read_text())
+                self.assertEqual(actual["outputs"]["ann"], str(final.resolve() / "input.ann.txt"))
+                self.assertEqual(actual["nested"], [str(final.resolve() / "input.fasta"), None, 3])
+                self.assertEqual(actual["sibling"], payload["sibling"])
+                self.assertEqual(actual["message"], payload["message"])
+                self.assertEqual(json.loads(source.read_text()), payload)
+                generation = final.resolve()
+                publish_submission(root, [source])
+                self.assertEqual(final.resolve(), generation)
+
+    def test_publication_rebuilds_generations_with_legacy_json_relocation(self) -> None:
+        source = self.base / "input.fa"
+        final = publish_submission(self.base, [source])
+        generation = final.resolve()
+        stamp = final / ".msspack-generation.json"
+        payload = json.loads(stamp.read_text())
+        payload.pop("schema_version")
+        stamp.write_text(json.dumps(payload))
+        publish_submission(self.base, [source])
+        if sys.platform != "win32":
+            self.assertNotEqual(final.resolve(), generation)
+        self.assertEqual(json.loads((final / stamp.name).read_text())["schema_version"], 1)
+
+    def test_pack_rejects_duplicate_fasta_without_replacing_published_submission(self) -> None:
+        outputs = run_pipeline(self.config, validate=False)
+        original = outputs.fasta_path.read_bytes()
+        fasta = self.base / "input.fa"
+        fasta.write_text(fasta.read_text() + fasta.read_text())
+        with self.assertRaisesRegex(MSSPackError, "Duplicate.*ctg1"):
+            run_pipeline(self.config, validate=False)
+        self.assertEqual(outputs.fasta_path.read_bytes(), original)
 
     def test_transitive_source_change_invalidates_cache_without_version_bump(self) -> None:
         package = self.base / "package"

@@ -84,6 +84,21 @@ def locked_output(function: Callable[P, T]) -> Callable[P, T]:
     return wrapped
 
 
+def _relocate_json_paths(value: object, source: Path, destination: Path) -> object:
+    if isinstance(value, dict):
+        return {key: _relocate_json_paths(item, source, destination)
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [_relocate_json_paths(item, source, destination) for item in value]
+    if isinstance(value, str):
+        if value == str(source):
+            return str(destination)
+        prefix = str(source) + os.sep
+        if value.startswith(prefix):
+            return str(destination / value[len(prefix):])
+    return value
+
+
 def publish_submission(root: Path, files: list[Path]) -> Path:
     """Publish a complete directory, keeping older generations available to readers."""
     root = root.resolve()
@@ -104,7 +119,8 @@ def publish_submission(root: Path, files: list[Path]) -> Path:
             previous = json.loads(stamp.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             previous = {}
-        if isinstance(previous, dict) and previous.get("sources") == source_signatures:
+        if (isinstance(previous, dict) and previous.get("schema_version") == 1
+                and previous.get("sources") == source_signatures):
             published_signatures = {path.name: _fingerprint(final / path.name) for path in files}
             if previous.get("published") == published_signatures:
                 return final
@@ -116,10 +132,15 @@ def publish_submission(root: Path, files: list[Path]) -> Path:
             shutil.copy2(source, target)
             if target.suffix == ".json":
                 # Validation results should link to the immutable generation they describe.
-                payload = target.read_text(encoding="utf-8")
-                json.loads(payload)
-                target.write_text(payload.replace(str(source.parent), str(final if sys.platform == "win32" else generation)), encoding="utf-8")
+                payload = json.loads(target.read_text(encoding="utf-8"))
+                relocated = _relocate_json_paths(
+                    payload, source.parent, final if sys.platform == "win32" else generation,
+                )
+                target.write_text(
+                    json.dumps(relocated, indent=2) + "\n", encoding="utf-8",
+                )
         (generation / stamp_name).write_text(json.dumps({
+            "schema_version": 1,
             "sources": source_signatures,
             "published": {path.name: _fingerprint(generation / path.name) for path in files},
         }, sort_keys=True) + "\n", encoding="utf-8")

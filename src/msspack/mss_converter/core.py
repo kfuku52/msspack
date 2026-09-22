@@ -98,9 +98,13 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
         else _get_start_codons(options.genetic_code)
     )
     stop_codons = _get_stop_codons(options.genetic_code)
+    seen_seqids: set[str] = set()
 
     with atomic_text_writer(options.output_path) as out_handle:
         for record in iter_fasta(options.fasta_path):
+            if record.id in seen_seqids:
+                raise MSSPackError(f"Duplicate FASTA sequence ID: {record.id}")
+            seen_seqids.add(record.id)
             sequence = record.sequence.upper()
             if not sequence:
                 raise MSSPackError(f"Cannot convert an empty sequence: {record.id}")
@@ -159,6 +163,15 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
                 )
             )
             overall_counts.update(contig_counts)
+
+        if not seen_seqids:
+            raise MSSPackError("No FASTA records to convert")
+        missing_seqids = sorted(set(seq_lookup) - seen_seqids)
+        if missing_seqids:
+            raise MSSPackError(
+                "GFF seqids are missing from the FASTA; refusing to discard annotations: "
+                + ", ".join(missing_seqids[:10])
+            )
 
     return ConversionSummary(
         output_path=options.output_path,

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import TypedDict
 
 from .step_logging import write_id_list
 from .utils import atomic_text_writer
-
-_LOCUS_TAG_PATTERN = re.compile(r"\blocus_tag\s+(\S+)")
 
 
 class MssPostprocessSummary(TypedDict):
@@ -42,9 +39,9 @@ def read_gene_lookup(
 
 def get_locus_tag_from_block(block_lines: list[str]) -> str | None:
     for line in block_lines:
-        match = _LOCUS_TAG_PATTERN.search(line)
-        if match:
-            return match.group(1)
+        fields = line.rstrip("\r\n").split("\t")
+        if len(fields) == 5 and fields[3] == "locus_tag":
+            return fields[4]
     return None
 
 
@@ -55,41 +52,29 @@ def process_feature_block(
     if not block_lines:
         return block_lines, False, False, None, None
 
-    header_line = block_lines[0]
-    header_stripped = header_line.lstrip()
-    was_cds = False
-    was_converted = False
-    final_feature_type: str | None
+    header = block_lines[0].rstrip("\r\n").split("\t")
+    feature_type = header[1] if len(header) >= 3 else None
+    was_cds = feature_type == "CDS"
+    locus_tag = get_locus_tag_from_block(block_lines)
+    matched_gene_id = gene_lookup.get(locus_tag) if locus_tag and was_cds else None
+    if matched_gene_id is None:
+        return block_lines, was_cds, False, feature_type, None
 
-    if header_stripped.startswith("CDS"):
-        was_cds = True
-        locus_tag = get_locus_tag_from_block(block_lines)
-        matched_gene_id = None
-        if locus_tag:
-            matched_gene_id = gene_lookup.get(locus_tag)
-        if matched_gene_id is not None:
-            indent = header_line[: len(header_line) - len(header_line.lstrip())]
-            block_lines[0] = indent + header_stripped.replace("CDS", "misc_feature", 1)
-            was_converted = True
-            new_block_lines: list[str] = []
-            for line in block_lines:
-                stripped = line.strip()
-                if stripped.startswith("transl_table") or stripped.startswith("codon_start"):
+    new_block_lines: list[str] = []
+    for index, line in enumerate(block_lines):
+        fields = line.rstrip("\r\n").split("\t")
+        if index == 0:
+            fields[1] = "misc_feature"
+        if len(fields) == 5:
+            if fields[3] in {"transl_table", "codon_start"}:
+                if index != 0:
                     continue
-                indentation = line[: len(line) - len(line.lstrip())]
-                content = line.lstrip()
-                if content.startswith("product"):
-                    content = content.replace("product", "note", 1)
-                new_block_lines.append(indentation + content)
-            return new_block_lines, was_cds, was_converted, "misc_feature", matched_gene_id
-        final_feature_type = "CDS"
-        return block_lines, was_cds, was_converted, final_feature_type, None
-
-    if header_stripped.startswith("misc_feature"):
-        final_feature_type = "misc_feature"
-    else:
-        final_feature_type = header_stripped.split()[0]
-    return block_lines, was_cds, was_converted, final_feature_type, None
+                fields[3:] = ["", ""]
+            elif fields[3] == "product":
+                fields[3] = "note"
+        ending = line[len(line.rstrip("\r\n")):]
+        new_block_lines.append("\t".join(fields) + ending)
+    return new_block_lines, True, True, "misc_feature", matched_gene_id
 
 
 def _is_block_header(line: str) -> bool:

@@ -9,9 +9,35 @@ from msspack.mss_converter.core import (
     convert_gff_to_mss,
     detect_gap_regions,
 )
+from msspack.utils import MSSPackError
 
 
 class MssConverterTests(unittest.TestCase):
+    def test_invalid_sequence_sets_do_not_replace_existing_annotation(self) -> None:
+        cases = (
+            (">chr1\nATGAAATAA\n>chr1\nATGAAATAA\n", "Duplicate.*chr1"),
+            ("", "No FASTA records"),
+            (">other\nATGAAATAA\n", "missing from.*FASTA.*chr1"),
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            fasta = base / "genome.fa"
+            gff = base / "annotation.gff3"
+            annotation = base / "annotation.tsv"
+            output = base / "output.ann.txt"
+            gff.write_text("chr1\t.\tmisc_feature\t1\t9\t.\t+\t.\tID=feature\n")
+            annotation.write_text("ID\tDescription\n")
+            for content, error in cases:
+                with self.subTest(error=error):
+                    fasta.write_text(content)
+                    output.write_text("previous annotation\n")
+                    with self.assertRaisesRegex(MSSPackError, error):
+                        convert_gff_to_mss(ConversionOptions(
+                            fasta_path=fasta, gff_path=gff, annotation_path=annotation,
+                            output_path=output, locus_tag_prefix="Test", organism_name="Test",
+                        ))
+                    self.assertEqual(output.read_text(), "previous annotation\n")
+
     def test_detect_gap_regions_finds_contiguous_n_runs(self) -> None:
         record = SimpleNamespace(seq="AANNNTAANNNNN")
         out, gaps = detect_gap_regions(

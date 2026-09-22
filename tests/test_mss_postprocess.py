@@ -2,10 +2,52 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from msspack.mss_postprocess import convert_cds_features_to_misc
+from msspack.mss_postprocess import convert_cds_features_to_misc, process_feature_block
 
 
 class MssPostprocessTests(unittest.TestCase):
+    def test_note_mentioning_locus_tag_does_not_select_a_different_gene(self) -> None:
+        block = [
+            "\tCDS\t1..9\tnote\tsimilar to locus_tag Target\n",
+            "\t\t\tlocus_tag\tOther\n",
+        ]
+        result = process_feature_block(block.copy(), {"Target": "Target"})
+        self.assertFalse(result[2])
+        self.assertEqual(result[0], block)
+
+    def test_entry_named_cds_is_not_mistaken_for_a_cds_feature(self) -> None:
+        block = ["CDS_contig\tsource\t1..9\tlocus_tag\tTarget\n"]
+        result = process_feature_block(block.copy(), {"Target": "Target"})
+        self.assertFalse(result[1])
+        self.assertEqual(result[0], block)
+
+    def test_conversion_handles_entry_column_and_inline_product(self) -> None:
+        block = [
+            "contig1\tCDS\t1..9\tproduct\tprotein name\n",
+            "\t\t\tlocus_tag\tTarget\n",
+            "\t\t\tcodon_start\t1\n",
+            "\t\t\ttransl_table\t1\n",
+        ]
+        result = process_feature_block(block.copy(), {"Target": "Target"})
+        self.assertTrue(result[2])
+        self.assertEqual(result[0], [
+            "contig1\tmisc_feature\t1..9\tnote\tprotein name\n",
+            "\t\t\tlocus_tag\tTarget\n",
+        ])
+
+    def test_inline_translation_qualifier_removal_preserves_feature_header(self) -> None:
+        for qualifier in ("transl_table", "codon_start"):
+            with self.subTest(qualifier=qualifier):
+                block = [
+                    f"\tCDS\t1..9\t{qualifier}\t1\n",
+                    "\t\t\tlocus_tag\tTarget\n",
+                ]
+                result = process_feature_block(block, {"Target": "Target"})
+                self.assertEqual(result[0], [
+                    "\tmisc_feature\t1..9\t\t\n",
+                    "\t\t\tlocus_tag\tTarget\n",
+                ])
+
     def test_convert_cds_features_to_misc_updates_target_block_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
