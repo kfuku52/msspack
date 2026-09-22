@@ -19,6 +19,54 @@ from msspack.config_validation import (
 
 
 class ConfigTests(unittest.TestCase):
+    def test_raw_config_scalar_validation_preserves_types_and_error_messages(self) -> None:
+        schemas = (
+            ("functional_annotation", "threads", "min_identity", "enabled"),
+            ("functional_annotation.taxonomy", "target_taxon_id", "distant_specificity_identity", "enabled"),
+            ("functional_annotation.consistency", "source_pair_min_pairs", "family_identity", "enabled"),
+        )
+        for section, integer_key, numeric_key, boolean_key in schemas:
+            cases = (
+                (integer_key, 3, None),
+                (integer_key, True, "must be int, got bool"),
+                (integer_key, 3.0, "must be int, got float"),
+                (numeric_key, 3, None),
+                (numeric_key, 3.0, None),
+                (numeric_key, False, "must be int or float, got bool"),
+                (numeric_key, "3", "must be int or float, got str"),
+                (numeric_key, nan, "must be finite"),
+                (numeric_key, inf, "must be finite"),
+                (numeric_key, -inf, "must be finite"),
+                (boolean_key, False, None),
+                (boolean_key, 0, "must be bool, got int"),
+                (boolean_key, inf, "must be finite"),
+            )
+            for key, value, error in cases:
+                with self.subTest(section=section, key=key, value=value):
+                    raw = {key: value}
+                    for part in reversed(section.split(".")):
+                        raw = {part: raw}
+                    if error is None:
+                        _validate_raw_config(raw)
+                    else:
+                        with self.assertRaises(ConfigError) as caught:
+                            _validate_raw_config(raw)
+                        self.assertEqual(str(caught.exception), f"Config value '{section}.{key}' {error}")
+
+    def test_raw_config_reports_unknown_keys_before_invalid_values(self) -> None:
+        for section in ("functional_annotation", "functional_annotation.taxonomy",
+                        "functional_annotation.consistency"):
+            with self.subTest(section=section):
+                raw = {"enabled": inf, "zzz": 1, "aaa": 2}
+                for part in reversed(section.split(".")):
+                    raw = {part: raw}
+                with self.assertRaises(ConfigError) as caught:
+                    _validate_raw_config(raw)
+                self.assertEqual(
+                    str(caught.exception),
+                    f"Unknown config key(s): {section}.aaa, {section}.zzz",
+                )
+
     def test_collection_date_accepts_an_iso_date_range(self) -> None:
         ensure_collection_date(
             "2020-06-10/2020-10-14",

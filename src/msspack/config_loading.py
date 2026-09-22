@@ -205,6 +205,22 @@ def _type_label(expected: ExpectedType) -> str:
     return expected.__name__
 
 
+def _validate_value_type(value: Any, expected: ExpectedType, key_path: str) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ConfigError(f"Config value '{key_path}' must be finite")
+    # bool subclasses int, but configuration numeric fields must reject it.
+    numeric_bool = isinstance(value, bool) and (
+        expected is int
+        or expected is float
+        or (isinstance(expected, tuple) and any(item in (int, float) for item in expected))
+    )
+    if numeric_bool or not isinstance(value, expected):
+        raise ConfigError(
+            f"Config value '{key_path}' must be {_type_label(expected)}, "
+            f"got {type(value).__name__}"
+        )
+
+
 def _validate_raw_config(data: dict[str, Any]) -> None:
     unknown_sections = sorted(set(data) - set(SECTION_TYPES))
     if unknown_sections:
@@ -218,22 +234,7 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
             dotted = ", ".join(f"{section_name}.{key}" for key in unknown_keys)
             raise ConfigError(f"Unknown config key(s): {dotted}")
         for key, value in values.items():
-            if isinstance(value, float) and not math.isfinite(value):
-                raise ConfigError(f"Config value '{section_name}.{key}' must be finite")
-            expected = schema[key]
-            if isinstance(value, bool) and (
-                expected is int
-                or expected is float
-                or (isinstance(expected, tuple) and any(item in (int, float) for item in expected))
-            ):
-                valid = False
-            else:
-                valid = isinstance(value, expected)
-            if not valid:
-                raise ConfigError(
-                    f"Config value '{section_name}.{key}' must be {_type_label(expected)}, "
-                    f"got {type(value).__name__}"
-                )
+            _validate_value_type(value, schema[key], f"{section_name}.{key}")
             if isinstance(value, list) and any(not isinstance(item, str) for item in value):
                 raise ConfigError(
                     f"Config value '{section_name}.{key}' must contain only strings"
@@ -245,35 +246,21 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
                     if key == "taxonomy"
                     else FUNCTIONAL_ANNOTATION_CONSISTENCY_TYPES
                 )
-                unknown_consistency_keys = sorted(
+                unknown_nested_keys = sorted(
                     set(value) - set(nested_schema)
                 )
-                if unknown_consistency_keys:
+                if unknown_nested_keys:
                     dotted = ", ".join(
                         f"functional_annotation.{key}.{item}"
-                        for item in unknown_consistency_keys
+                        for item in unknown_nested_keys
                     )
                     raise ConfigError(f"Unknown config key(s): {dotted}")
                 for nested_key, nested_value in value.items():
-                    if isinstance(nested_value, float) and not math.isfinite(nested_value):
-                        raise ConfigError(
-                            f"Config value 'functional_annotation.{key}.{nested_key}' must be finite"
-                        )
-                    nested_expected = nested_schema[nested_key]
-                    nested_numeric_bool = isinstance(nested_value, bool) and (
-                        nested_expected is int
-                        or nested_expected is float
-                        or (
-                            isinstance(nested_expected, tuple)
-                            and any(item in (int, float) for item in nested_expected)
-                        )
+                    _validate_value_type(
+                        nested_value,
+                        nested_schema[nested_key],
+                        f"functional_annotation.{key}.{nested_key}",
                     )
-                    if nested_numeric_bool or not isinstance(nested_value, nested_expected):
-                        raise ConfigError(
-                            f"Config value 'functional_annotation.{key}."
-                            f"{nested_key}' must be {_type_label(nested_expected)}, "
-                            f"got {type(nested_value).__name__}"
-                        )
             strings = value if isinstance(value, list) else [value]
             if any(
                 isinstance(item, str)

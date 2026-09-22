@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.6 - 2026-09-22
+
+- Share scalar type validation between top-level and nested configuration fields,
+  preserving finite-value checks, boolean rejection, and diagnostic messages.
+- Add regression coverage for accepted types, exact errors, and unknown-key
+  precedence across functional annotation configuration tables.
+
 ## 0.8.5 - 2026-09-22
 
 - Allow both BUSCO comparison modes to be disabled in project configuration;
