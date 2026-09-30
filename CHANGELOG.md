@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.8 - 2026-09-30
+
 - Reject path-valued locus-tag prefixes before creating outputs, preventing writes
   outside the submission directory.
 - Preserve exonless UTRs during frame and padding adjustments and use declared
