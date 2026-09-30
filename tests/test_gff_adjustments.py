@@ -7,6 +7,42 @@ from msspack.gff_adjustments import apply_padding_to_gff, fix_gff_to_inframe
 
 
 class GffAdjustmentTests(unittest.TestCase):
+    def test_exonless_utrs_survive_inframe_and_padding_adjustments(self) -> None:
+        for strand in ("+", "-"):
+            for phase in (0, 1):
+                with self.subTest(strand=strand, phase=phase), tempfile.TemporaryDirectory() as tmp:
+                    base = Path(tmp)
+                    left_utr = "five_prime_UTR" if strand == "+" else "three_prime_UTR"
+                    right_utr = "three_prime_UTR" if strand == "+" else "five_prime_UTR"
+                    rows = [
+                        f"chr1\t.\tgene\t1\t15\t.\t{strand}\t.\tID=g1",
+                        f"chr1\t.\tmRNA\t1\t15\t.\t{strand}\t.\tID=t1;Parent=g1",
+                        f"chr1\t.\t{left_utr}\t1\t3\t.\t{strand}\t.\tParent=t1",
+                        f"chr1\t.\tCDS\t4\t12\t.\t{strand}\t{phase}\tParent=t1",
+                        f"chr1\t.\t{right_utr}\t13\t15\t.\t{strand}\t.\tParent=t1",
+                    ]
+                    source = base / "in.gff"
+                    source.write_text("\n".join(rows) + "\n")
+                    for operation in ("inframe", "padding"):
+                        target = base / f"{operation}.gff"
+                        if operation == "inframe":
+                            fix_gff_to_inframe(input_path=source, output_path=target,
+                                               log_path=base / "inframe.log")
+                        else:
+                            log = base / "padding.log"
+                            log.write_text("t1, original_seqlen=9, head_padding=2, tail_padding=1, "
+                                           "original_num_stop=0, new_num_stop=0\n")
+                            apply_padding_to_gff(gff_path=source, padding_log_path=log,
+                                                 output_path=target,
+                                                 genes_with_stops_path=base / "stops",
+                                                 updated_genes_path=base / "updated")
+                        with self.subTest(operation=operation):
+                            records = list(iter_gff_records(target))
+                            self.assertEqual([(r.start, r.end) for r in records
+                                              if r.type in {"gene", "mRNA"}], [(1, 15), (1, 15)])
+                            self.assertEqual([(r.start, r.end) for r in records
+                                              if r.type.endswith("UTR")], [(1, 3), (13, 15)])
+
     def test_inframe_trims_across_exhausted_terminal_cds_on_both_strands(self) -> None:
         for strand, spans, expected in (
             ("+", [(1, 4, 0), (10, 10, 2)], (1, 3)),

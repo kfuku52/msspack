@@ -126,6 +126,17 @@ def _sync_introns(
     return changed
 
 
+def transcript_boundary_rows(
+    child_rows: list[list[str]],
+    *,
+    removed_row_ids: set[int],
+) -> list[list[str]]:
+    """Use exon coverage, or CDS and UTR coverage when exons are absent."""
+    active = [row for row in child_rows if id(row) not in removed_row_ids]
+    exons = [row for row in active if row[2] in EXON_TYPES]
+    return exons or [row for row in active if row[2] in CDS_TYPES | UTR_TYPES]
+
+
 def synchronize_transcript_children(
     *,
     transcript_row: list[str],
@@ -142,8 +153,9 @@ def synchronize_transcript_children(
         return 0
 
     changed = 0
-    starts = [int(row[3]) for row in (exons or cdss)]
-    ends = [int(row[4]) for row in (exons or cdss)]
+    boundary_rows = transcript_boundary_rows(active, removed_row_ids=removed_row_ids)
+    starts = [int(row[3]) for row in boundary_rows]
+    ends = [int(row[4]) for row in boundary_rows]
     transcript_start = min(starts)
     transcript_end = max(ends)
     if int(transcript_row[3]) != transcript_start or int(transcript_row[4]) != transcript_end:

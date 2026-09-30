@@ -10,15 +10,26 @@ from msspack.config_loading import (
     load_functional_annotation_config,
     load_pipeline_config,
 )
+from msspack.config_models import SampleConfig
 from msspack.config_validation import (
     ensure_collection_date,
     validate_databases_config,
     validate_functional_annotation_config,
     validate_pipeline_config,
+    validate_sample_config,
 )
 
 
 class ConfigTests(unittest.TestCase):
+    def test_locus_tag_cannot_include_posix_or_windows_paths(self) -> None:
+        for value in ("/tmp/victim", "../victim", "subdir/tag", r"..\victim",
+                      r"C:\victim", "C:victim", r"\\server\share\tag"):
+            with self.subTest(value=value), self.assertRaisesRegex(ConfigError, "sample.locus_tag"):
+                validate_sample_config(SampleConfig(value, 6, "Test organism"))
+        for value in ("Fix", "Test_123", "Test-demo", "Test.v1"):
+            with self.subTest(value=value):
+                validate_sample_config(SampleConfig(value, 6, "Test organism"))
+
     def test_raw_config_scalar_validation_preserves_types_and_error_messages(self) -> None:
         schemas = (
             ("functional_annotation", "threads", "min_identity", "enabled"),

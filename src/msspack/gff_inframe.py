@@ -9,6 +9,7 @@ from typing import TypedDict
 from .gff import child_ids, parse_attributes
 from .gff_feature_sync import (
     synchronize_transcript_children,
+    transcript_boundary_rows,
     validate_parent_child_containment,
 )
 from .step_logging import write_id_list, write_step_log, write_step_metrics
@@ -41,11 +42,11 @@ def _safe_phase(value: str) -> int:
     return int(value) if value.isdigit() else 0
 
 
-def _compute_mrna_boundaries(exons: list[list[str]]) -> tuple[int | None, int | None]:
-    if not exons:
+def _compute_mrna_boundaries(features: list[list[str]]) -> tuple[int | None, int | None]:
+    if not features:
         return None, None
-    starts = [int(exon[3]) for exon in exons]
-    ends = [int(exon[4]) for exon in exons]
+    starts = [int(feature[3]) for feature in features]
+    ends = [int(feature[4]) for feature in features]
     return min(starts), max(ends)
 
 
@@ -306,7 +307,9 @@ def fix_gff_to_inframe(
             if remainder:
                 transcript_changed = True
 
-            new_start, new_end = _compute_mrna_boundaries(exons or cdss)
+            new_start, new_end = _compute_mrna_boundaries(transcript_boundary_rows(
+                mrna_data.children, removed_row_ids=removed_row_ids,
+            ))
             if new_start is None or new_end is None:
                 continue
             if new_start != int(mrna_line[3]) or new_end != int(mrna_line[4]):
@@ -325,18 +328,12 @@ def fix_gff_to_inframe(
                 gene_changed = True
 
         if gene_changed:
-            exon_starts: list[int] = []
-            exon_ends: list[int] = []
-            for mrna_data in mrna_map.values():
-                for exon_line in mrna_data.exons or mrna_data.cdss:
-                    if id(exon_line) in removed_row_ids:
-                        continue
-                    exon_starts.append(int(exon_line[3]))
-                    exon_ends.append(int(exon_line[4]))
-            if exon_starts and exon_ends:
+            transcript_starts = [int(model.line[3]) for model in mrna_map.values()]
+            transcript_ends = [int(model.line[4]) for model in mrna_map.values()]
+            if transcript_starts and transcript_ends:
                 gene_line = gene_data.line
-                gene_line[3] = str(min(exon_starts))
-                gene_line[4] = str(max(exon_ends))
+                gene_line[3] = str(min(transcript_starts))
+                gene_line[4] = str(max(transcript_ends))
                 adjusted_parent_ids.add(gene_id)
             num_updated += 1
             updated_gene_ids.append(gene_id)

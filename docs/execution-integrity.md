@@ -8,6 +8,11 @@ order after splicing. A `gene` row is not required for a coding transcript.
 Parentless transcripts participate in annotation tables and pipeline metrics as
 gene models identified by their transcript IDs. Their generated locus tags use
 that ID with the configured prefix, and padding uses the transcript's strand.
+Isoform selection uses the declared transcript span even when CDS/UTR rows appear
+first. Without exon rows, frame and padding adjustments retain the combined
+CDS/UTR span. MSS conversion joins repeated CDS IDs directly under a gene or
+without a parent; anonymous gene-direct CDS rows are grouped by their parent.
+Distinct CDS IDs remain separate features.
 
 Gap normalization shifts coordinates after a changed N run. Boundaries within
 the run retain their offset where possible and are clipped to the last retained
@@ -15,6 +20,7 @@ N when the run shrinks. Removing a complete annotated feature with a zero-length
 gap is an error. In MSS conversion, an exon/CDS segment entirely within an N run
 retains its uncertain location; the configured gap policy applies to the whole
 feature whenever any segment overlaps a gap.
+The same policy applies to gene-direct and parentless CDS features.
 
 Supported semicolon repairs run before strict GFF parsing and gap normalization.
 Their changes remain in `04.fix-gff-semicolons.log` and its metrics JSON, even
@@ -22,6 +28,9 @@ though that stage now runs earlier. Empty sequences after terminal-N removal
 are errors; they are not silently removed or emitted with an invalid source.
 
 ## Submission publication
+
+The sample locus-tag prefix is also used in output filenames. Configuration rejects
+POSIX/Windows path separators and colons before creating output directories.
 
 `pack` builds candidate final files in `.msspack-work/final/` under the output
 root. Enabled validation runs against these candidates. Only successful candidates
@@ -62,6 +71,8 @@ digests before reuse. DIAMOND and Pfam indexes include builder identity and cont
 hashes. A different builder gets a separate index location; corrupt files are
 rebuilt under the existing database locks. This does not automatically select a
 new upstream database release: changing the configured source is still explicit.
+CDD support-file versions are checked against their expected content hashes and
+provenance before reuse; corrupt versions are rebuilt under the version lock.
 
 Use `run --force-compute` when deliberately recomputing analyses. Downloaded
 databases and published generations are retained. The atomic publication contract

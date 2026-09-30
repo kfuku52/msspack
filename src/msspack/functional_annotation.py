@@ -1565,16 +1565,26 @@ def _prepare_cdd_data_files(
         json.dumps(version_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     version_dir = versions_dir / version_digest
-    required_names = {local_name for _remote, local_name, _stem, _suffix in _CDD_DATA_FILE_SPECS}
+    expected_digests = {name: digest for name, _path, digest in materialized}
     with acquire_database_lock(
         database_lock_path(database_root, f"cdd-data-version-{version_digest[:16]}"),
         label=f"CDD data version {version_digest[:16]}",
         settings=lock_settings,
     ):
+        previous = _read_json(version_dir / "provenance.json")
+        previous_files = previous.get("files")
+        recorded_digests = {
+            name: metadata.get("sha256")
+            for name, metadata in previous_files.items()
+            if isinstance(metadata, dict)
+        } if isinstance(previous_files, dict) else {}
         version_ready = (
-            version_dir.is_dir()
-            and (version_dir / "provenance.json").is_file()
-            and all((version_dir / name).is_file() for name in required_names)
+            previous.get("version_sha256") == version_digest
+            and recorded_digests == expected_digests
+            and all(
+                (version_dir / name).is_file() and _sha256(version_dir / name) == digest
+                for name, digest in expected_digests.items()
+            )
         )
         if not version_ready:
             temporary_dir = Path(

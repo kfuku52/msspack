@@ -310,6 +310,30 @@ def _detect_incomplete_start(
     return True, False, codon_start
 
 
+def _apply_cds_gap_policy(
+    text: str,
+    *,
+    has_gap: bool,
+    feature_with_gap: str,
+    event_counts: Counter[str],
+    artificial_location: bool = False,
+) -> str:
+    if has_gap:
+        if feature_with_gap == "asis":
+            event_counts["gap_artificial_location"] += 1
+            artificial_location = True
+        elif feature_with_gap == "misc_feature":
+            event_counts["gap_misc_feature"] += 1
+            text = re.sub(r"^\tCDS\t", "\tmisc_feature\t", text)
+            text = re.sub(
+                r"(?m)^\t\t\t(?:product|transl_table|codon_start)\t[^\n]*\n", "", text,
+            )
+            artificial_location = False
+    if artificial_location:
+        text += "\t\t\tartificial_location\tlow-quality sequence region\n"
+    return text
+
+
 def build_mrna_text(
     *,
     parent_lookup: dict[str, list[FeatureRecord]],
@@ -433,19 +457,10 @@ def build_mrna_text(
         event_counts["small_introns"] += 1
         artificial_location_flag = True
 
-    if out_gap_flag:
-        if feature_with_gap == "asis":
-            event_counts["gap_artificial_location"] += 1
-            artificial_location_flag = True
-        elif feature_with_gap == "misc_feature":
-            event_counts["gap_misc_feature"] += 1
-            out = re.sub(r"^\tCDS\t", "\tmisc_feature\t", out)
-            out = re.sub(r"\n\t\t\tproduct\t.*\n", "\n", out)
-            out = re.sub(r"\n\t\t\ttransl_table\t.*\n", "\n", out)
-            out = re.sub(r"\n\t\t\tcodon_start\t.*\n", "\n", out)
-            artificial_location_flag = False
-    if artificial_location_flag:
-        out += "\t\t\tartificial_location\tlow-quality sequence region\n"
+    out = _apply_cds_gap_policy(
+        out, has_gap=out_gap_flag, feature_with_gap=feature_with_gap,
+        event_counts=event_counts, artificial_location=artificial_location_flag,
+    )
     if protein_lookup:
         protein_id = protein_lookup.get(transcript_id)
         if protein_id:
@@ -554,9 +569,17 @@ def build_standalone_cds_text(
     annotation_lookup: dict[str, AnnotationEntry],
     gap_regions: GapRegions,
     transl_table: str,
+    cds_features: list[FeatureRecord] | None = None,
+    feature_with_gap: str = "asis",
+    event_counts: Counter[str] | None = None,
 ) -> str:
+    segments = cds_features if cds_features is not None else [cds_feature]
+    first_cds = sorted(
+        segments, key=lambda feature: (feature.start, feature.end),
+        reverse=(cds_feature.strand == "-"),
+    )[0]
     location, out_gap_flag = _location_for_features(
-        [cds_feature],
+        segments,
         strand=cds_feature.strand,
         gap_regions=gap_regions,
     )
@@ -582,11 +605,20 @@ def build_standalone_cds_text(
         product_name=product,
         custom_locus_tag=locus_tag,
         transl_table=transl_table,
-        codon_start=cds_feature.phase + 1,
+        codon_start=first_cds.phase + 1,
     )
-    if out_gap_flag:
-        out += "\t\t\tartificial_location\tlow-quality sequence region\n"
-    return out
+    return _apply_cds_gap_policy(
+        out, has_gap=out_gap_flag, feature_with_gap=feature_with_gap,
+        event_counts=event_counts if event_counts is not None else Counter(),
+    )
+
+
+def _standalone_cds_key(feature: FeatureRecord) -> tuple[str, str, str]:
+    if feature.id:
+        return "ID", feature.id, feature.strand
+    if feature.parent:
+        return "Parent", feature.parent, feature.strand
+    return "row", str(id(feature)), feature.strand
 
 
 def convert_contig_features(
@@ -613,8 +645,13 @@ def convert_contig_features(
     genes = gene_lookup.get(contig_name, [])
     chunks: list[str] = []
     processed: set[int] = set()
+    contig_features = seq_lookup.get(contig_name, [])
+    cds_groups: dict[tuple[str, str, str], list[FeatureRecord]] = {}
+    for feature in contig_features:
+        if feature.type == "CDS":
+            cds_groups.setdefault(_standalone_cds_key(feature), []).append(feature)
     transcript_ids = {
-        feature.id for feature in seq_lookup.get(contig_name, [])
+        feature.id for feature in contig_features
         if feature.type in CODING_TRANSCRIPT_TYPES
     }
 
@@ -700,6 +737,21 @@ def convert_contig_features(
                     emit_transcript_structure=emit_transcript_structure,
                     represented_by_mrna=represented_by_mrna,
                 )
+
+    def render_standalone_cds(feature: FeatureRecord, *, locus_tag: str) -> None:
+        segments = [
+            segment for segment in cds_groups.get(_standalone_cds_key(feature), [feature])
+            if segment is feature or id(segment) not in processed
+        ]
+        processed.update(id(segment) for segment in segments)
+        chunks.append(build_standalone_cds_text(
+            cds_feature=feature, cds_features=segments, locus_tag=locus_tag,
+            annotation_lookup=annotation_lookup, gap_regions=gap_regions,
+            transl_table=transl_table, feature_with_gap=feature_with_gap,
+            event_counts=event_counts,
+        ))
+        if feature.id:
+            render_descendants(feature.id, locus_tag=locus_tag)
 
     for gene_feature in genes:
         processed.add(id(gene_feature))
@@ -788,16 +840,7 @@ def convert_contig_features(
                         )
                     )
             elif child.type == "CDS":
-                chunks.append(
-                    build_standalone_cds_text(
-                        cds_feature=child,
-                        locus_tag=locus_tag,
-                        annotation_lookup=annotation_lookup,
-                        gap_regions=gap_regions,
-                        transl_table=transl_table,
-                    )
-                )
-                render_descendants(child.id, locus_tag=locus_tag)
+                render_standalone_cds(child, locus_tag=locus_tag)
             elif child.type == "rRNA":
                 chunks.append(
                     build_rrna_text(
@@ -841,15 +884,7 @@ def convert_contig_features(
             if transcript_ids.intersection(child_ids(feature.parent)):
                 continue
             locus_tag_counter += 100
-            chunks.append(
-                build_standalone_cds_text(
-                    cds_feature=feature,
-                    locus_tag=current_locus_tag(),
-                    annotation_lookup=annotation_lookup,
-                    gap_regions=gap_regions,
-                    transl_table=transl_table,
-                )
-            )
+            render_standalone_cds(feature, locus_tag=current_locus_tag())
         elif feature.type in CODING_TRANSCRIPT_TYPES:
             locus_tag_counter += 100
             annotation = annotation_lookup.get(feature.id)

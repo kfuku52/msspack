@@ -19,6 +19,7 @@ from msspack.functional_annotation import (
     _fasta_taxonomy,
     _materialize_database_file,
     _pfam_verification,
+    _prepare_cdd_data_files,
     _prepare_cdd_database,
     _rpsblast_database_prefix,
     _submission_safe_product,
@@ -33,6 +34,35 @@ from msspack.utils import MSSPackError
 
 
 class FunctionalAnnotationTests(unittest.TestCase):
+    def test_corrupt_cdd_data_version_and_provenance_are_rebuilt(self) -> None:
+        for corruption in ("data", "provenance", "recorded_digest"):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                data, cache = base / "data", base / "cache"
+                self._write_cdd_data(data, "good")
+                arguments = dict(config=FunctionalAnnotationConfig(cdd_data_dir=str(data)),
+                                 base_dir=base, cache_dir=cache, database_root=cache)
+                version, provenance = _prepare_cdd_data_files(**arguments)
+                if corruption == "data":
+                    (version / "cddid.tbl").write_text("BAD\n")
+                elif corruption == "provenance":
+                    (version / "provenance.json").write_text("{}\n")
+                else:
+                    metadata = json.loads((version / "provenance.json").read_text())
+                    metadata["files"]["cddid.tbl"]["sha256"] = "wrong"
+                    (version / "provenance.json").write_text(json.dumps(metadata))
+                repaired, _ = _prepare_cdd_data_files(**arguments)
+                self.assertEqual(repaired, version)
+                for file in data.iterdir():
+                    self.assertEqual((repaired / file.name).read_bytes(), file.read_bytes())
+                metadata = json.loads((repaired / "provenance.json").read_text())
+                self.assertEqual(metadata["version_sha256"], provenance["version_sha256"])
+                self.assertEqual(metadata["files"], provenance["files"])
+                stamp = (repaired / "cddid.tbl").stat().st_mtime_ns
+                reused, _ = _prepare_cdd_data_files(**arguments)
+                self.assertEqual(reused, repaired)
+                self.assertEqual((reused / "cddid.tbl").stat().st_mtime_ns, stamp)
+
     @staticmethod
     def _write_cdd_data(directory: Path, marker: str) -> None:
         directory.mkdir(parents=True)

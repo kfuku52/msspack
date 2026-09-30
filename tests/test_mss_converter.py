@@ -13,6 +13,71 @@ from msspack.utils import MSSPackError
 
 
 class MssConverterTests(unittest.TestCase):
+    def _convert_direct_cds_model(
+        self, base: Path, *, strand: str, ids: tuple[str, str],
+        with_gene: bool = True, sequence: str | None = None, policy: str = "misc_feature",
+        first_phase: int = 0,
+    ) -> tuple[str, dict[str, int]]:
+        rows = [f"chr1\t.\tgene\t1\t36\t.\t{strand}\t.\tID=g1"] if with_gene else []
+        for index, (start, end) in enumerate(((1, 6), (31, 36))):
+            attrs = ([f"ID={ids[index]}"] if ids[index] else []) + (["Parent=g1"] if with_gene else [])
+            phase = first_phase if index == (1 if strand == "-" else 0) else 0
+            rows.append(f"chr1\t.\tCDS\t{start}\t{end}\t.\t{strand}\t{phase}\t"
+                        + (";".join(attrs) or "."))
+        (base / "input.gff").write_text("\n".join(rows) + "\n")
+        (base / "input.fa").write_text(">chr1\n" + (sequence or "ATGAAA" + "A" * 24 + "CCCTAA") + "\n")
+        (base / "products.tsv").write_text("ID\tDescription\n" + "c1\ttest protein\n")
+        summary = convert_gff_to_mss(ConversionOptions(
+            fasta_path=base / "input.fa", gff_path=base / "input.gff",
+            annotation_path=base / "products.tsv", output_path=base / "out.ann",
+            locus_tag_prefix="Dir", organism_name="Test organism", feature_with_gap=policy,
+        ))
+        return (base / "out.ann").read_text(), summary.overall_counts
+
+    def test_discontinuous_direct_cds_is_one_feature_on_both_strands(self) -> None:
+        for strand in ("+", "-"):
+            for with_gene, ids in ((True, ("c1", "c1")), (True, ("", "")),
+                                   (False, ("c1", "c1"))):
+                with self.subTest(strand=strand, gene=with_gene, ids=ids), tempfile.TemporaryDirectory() as tmp:
+                    text, _ = self._convert_direct_cds_model(
+                        Path(tmp), strand=strand, ids=ids, with_gene=with_gene, first_phase=2,
+                    )
+                    location = "join(1..6,31..36)"
+                    if strand == "-":
+                        location = f"complement({location})"
+                    self.assertEqual(text.count("\tCDS\t"), 1)
+                    self.assertIn(f"\tCDS\t{location}\t", text)
+                    self.assertIn("\t\t\tcodon_start\t3\n", text)
+
+    def test_distinct_direct_cds_ids_are_not_joined(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            text, _ = self._convert_direct_cds_model(Path(tmp), strand="+", ids=("c1", "c2"))
+            self.assertEqual(text.count("\tCDS\t"), 2)
+            self.assertIn("\tCDS\t1..6\t", text)
+            self.assertIn("\tCDS\t31..36\t", text)
+
+    def test_direct_cds_uses_gap_policy_and_counts_the_whole_feature(self) -> None:
+        for strand in ("+", "-"):
+            for policy in ("asis", "misc_feature"):
+                for gap_index in (0, 1):
+                    with self.subTest(strand=strand, policy=policy, gap=gap_index), tempfile.TemporaryDirectory() as tmp:
+                        parts = ["ATGAAA", "CCCTAA"]
+                        parts[gap_index] = "NNN" + parts[gap_index][3:]
+                        text, counts = self._convert_direct_cds_model(
+                            Path(tmp), strand=strand, ids=("c1", "c1"), policy=policy,
+                            sequence=parts[0] + "A" * 24 + parts[1],
+                        )
+                        key = "misc_feature" if policy == "misc_feature" else "CDS"
+                        self.assertEqual(text.count(f"\t{key}\t"), 1)
+                        if policy == "misc_feature":
+                            self.assertNotIn("\tCDS\t", text)
+                            self.assertNotIn("\tproduct\t", text)
+                            self.assertNotIn("\tcodon_start\t", text)
+                            self.assertEqual(counts["gap_misc_feature"], 1)
+                        else:
+                            self.assertIn("\tartificial_location\tlow-quality sequence region", text)
+                            self.assertEqual(counts["gap_artificial_location"], 1)
+
     def _convert_gap_model(
         self,
         base: Path,

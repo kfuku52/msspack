@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Reject path-valued locus-tag prefixes before creating outputs, preventing writes
+  outside the submission directory.
+- Preserve exonless UTRs during frame and padding adjustments and use declared
+  transcript coordinates for row-order-independent isoform selection.
+- Join gene-direct and parentless discontinuous CDS rows into one feature and
+  apply the configured gap policy consistently across CDS representations.
+- Verify CDD data-version contents and provenance before reuse and rebuild
+  corrupt versions under the database lock.
 - Retain coding mRNA features even when their exon coverage matches the CDS,
   while continuing to omit redundant independent exon/UTR rows.
 - Preserve feature boundaries within normalized N gaps, retain fully gap-covered

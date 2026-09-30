@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from msspack.config import load_config
+from msspack.config import ConfigError, load_config
 from msspack.config_validation import validate_functional_annotation_config
 from msspack.doctor import _input_checks
 from msspack.execution import run_if_needed
@@ -40,6 +40,46 @@ class AuditRegressionTests(unittest.TestCase):
         self.base = Path(temporary.name)
         shutil.copytree(FIXTURE, self.base, dirs_exist_ok=True)
         self.config = self.base / "config.toml"
+
+    def test_path_valued_locus_tag_is_rejected_before_creating_outputs(self) -> None:
+        victim = self.base / "victim.fasta"
+        victim.write_text("sentinel\n")
+        self.config.write_text(self.config.read_text().replace(
+            'locus_tag = "Fix"', f'locus_tag = "{self.base / "victim"}"',
+        ))
+        with self.assertRaisesRegex(ConfigError, "sample.locus_tag"):
+            run_pipeline(self.config, validate=False)
+        self.assertEqual(victim.read_text(), "sentinel\n")
+        self.assertFalse((self.base / "build").exists())
+
+    def test_exonless_utrs_survive_the_full_pack_pipeline(self) -> None:
+        (self.base / "input.fa").write_text(">ctg1\nCCCATGAAATAACCC\n")
+        (self.base / "input.gff3").write_text(
+            "ctg1\t.\tgene\t1\t15\t.\t+\t.\tID=g1\n"
+            "ctg1\t.\tmRNA\t1\t15\t.\t+\t.\tID=t1;Parent=g1\n"
+            "ctg1\t.\tfive_prime_UTR\t1\t3\t.\t+\t.\tParent=t1\n"
+            "ctg1\t.\tCDS\t4\t12\t.\t+\t0\tParent=t1\n"
+            "ctg1\t.\tthree_prime_UTR\t13\t15\t.\t+\t.\tParent=t1\n"
+        )
+        outputs = run_pipeline(self.config, validate=False)
+        records = list(iter_gff_records(outputs.intermediate / "12.gff.final-sorted.gff"))
+        self.assertEqual([(r.start, r.end) for r in records if r.type == "mRNA"], [(1, 15)])
+        self.assertEqual({r.type for r in records},
+                         {"gene", "mRNA", "CDS", "five_prime_UTR", "three_prime_UTR"})
+        self.assertIn("\tmRNA\t1..15\t", outputs.ann_path.read_text())
+        self.assertIn("\tCDS\t4..12\t", outputs.ann_path.read_text())
+
+    def test_gene_direct_discontinuous_cds_remains_joined_through_pack(self) -> None:
+        (self.base / "input.fa").write_text(">ctg1\nATGAAA" + "A" * 24 + "CCCTAA\n")
+        (self.base / "input.gff3").write_text(
+            "ctg1\t.\tgene\t1\t36\t.\t+\t.\tID=g1\n"
+            "ctg1\t.\tCDS\t1\t6\t.\t+\t0\tID=c1;Parent=g1\n"
+            "ctg1\t.\tCDS\t31\t36\t.\t+\t0\tID=c1;Parent=g1\n"
+        )
+        outputs = run_pipeline(self.config, validate=False)
+        text = outputs.ann_path.read_text()
+        self.assertEqual(text.count("\tCDS\t"), 1)
+        self.assertIn("\tCDS\tjoin(1..6,31..36)\t", text)
 
     def _write_coding_model(
         self,

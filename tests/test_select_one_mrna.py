@@ -26,6 +26,24 @@ chr1	src	three_prime_UTR	361	380	.	+	.	ID=Gene1-T2.utr3b;Parent=Gene1-T2
 
 
 class SelectOneMrnaTests(unittest.TestCase):
+    def test_coordinate_tie_break_uses_parent_span_in_any_row_order(self) -> None:
+        rows = [
+            "chr1\t.\tgene\t1\t100\t.\t+\t.\tID=g1",
+            "chr1\t.\tmRNA\t1\t100\t.\t+\t.\tID=tA;Parent=g1",
+            "chr1\t.\tmRNA\t1\t90\t.\t+\t.\tID=tB;Parent=g1",
+            "chr1\t.\tCDS\t1\t30\t.\t+\t0\tParent=tA",
+            "chr1\t.\tCDS\t1\t30\t.\t+\t0\tParent=tB",
+        ]
+        for order in ([0, 1, 2, 3, 4], [3, 4, 0, 1, 2], [4, 2, 3, 1, 0]):
+            with self.subTest(order=order), tempfile.TemporaryDirectory() as tmp:
+                source, target = Path(tmp) / "in.gff", Path(tmp) / "out.gff"
+                source.write_text("\n".join(rows[i] for i in order) + "\n")
+                select_one_mrna_per_gene(input_gff_path=source, output_gff_path=target)
+                output = target.read_text()
+                self.assertIn("ID=tB;Parent=g1", output)
+                self.assertNotIn("ID=tA", output)
+                self.assertNotIn("Parent=tA", output)
+
     def test_preserves_non_mrna_features_comments_and_fasta_section(self) -> None:
         gff = """\
 ##gff-version 3

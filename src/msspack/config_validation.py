@@ -120,6 +120,11 @@ def validate_project_config(project: ProjectConfig) -> None:
 
 def validate_sample_config(sample: SampleConfig) -> None:
     ensure_nonempty(sample.locus_tag, "sample.locus_tag")
+    if any(character in sample.locus_tag for character in ("/", "\\", ":")):
+        raise ConfigError(
+            "Config value 'sample.locus_tag' must be a filename prefix "
+            "without path separators or ':'"
+        )
     ensure_positive(sample.locus_tag_digits, "sample.locus_tag_digits")
     ensure_nonempty(sample.scientific_name, "sample.scientific_name")
     ensure_collection_date(sample.collection_date, "sample.collection_date")

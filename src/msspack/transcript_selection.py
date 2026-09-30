@@ -132,7 +132,6 @@ def select_one_mrna_per_gene(
                 _ensure_gene(genes, feature_id)
                 continue
             if feature_type in ("mRNA", "transcript") and feature_id:
-                declared_transcript_ids.add(feature_id)
                 transcript = _ensure_transcript(transcripts, feature_id)
                 for gene_id in parents:
                     gene = _ensure_gene(genes, gene_id)
@@ -141,8 +140,13 @@ def select_one_mrna_per_gene(
                     if gene_id not in transcript.gene_ids:
                         transcript.gene_ids.append(gene_id)
                 candidate_key = (int(start), int(end), feature_id)
-                if transcript.sort_key is None or candidate_key < transcript.sort_key:
+                if (
+                    feature_id not in declared_transcript_ids
+                    or transcript.sort_key is None
+                    or candidate_key < transcript.sort_key
+                ):
                     transcript.sort_key = candidate_key
+                declared_transcript_ids.add(feature_id)
                 continue
             if feature_type in ("CDS", "five_prime_UTR", "three_prime_UTR"):
                 for transcript_id in parents:
