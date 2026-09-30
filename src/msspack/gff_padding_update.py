@@ -91,7 +91,8 @@ def _group_gene_records(
                 gene_order.append(gene_id)
         elif feature_type in ("mRNA", "transcript"):
             transcript_id = attrs.get("ID")
-            for gene_id in child_ids(attrs.get("Parent")):
+            parent_ids = child_ids(attrs.get("Parent")) or ([transcript_id] if transcript_id else [])
+            for gene_id in parent_ids:
                 if transcript_id and gene_id and transcript_id not in transcript_to_gene:
                     transcript_to_gene[transcript_id] = gene_id
                 if gene_id and gene_id not in gene_dict:
@@ -106,7 +107,10 @@ def _group_gene_records(
             if gene_id:
                 matched_gene_ids = [gene_id]
         elif feature_type in ("mRNA", "transcript"):
-            matched_gene_ids = child_ids(attrs.get("Parent"))
+            transcript_id = attrs.get("ID")
+            matched_gene_ids = child_ids(attrs.get("Parent")) or (
+                [transcript_id] if transcript_id else []
+            )
         else:
             seen_gene_ids: set[str] = set()
             for parent_id in child_ids(attrs.get("Parent")):
@@ -264,6 +268,10 @@ def apply_padding_to_gff(
             mrna_lines = [rec for rec in raw_records if rec[2] in ("mRNA", "transcript")]
             if mrna_lines:
                 strand = mrna_lines[0][6]
+            else:
+                cds_lines = [rec for rec in raw_records if rec[2] == "CDS"]
+                if cds_lines:
+                    strand = cds_lines[0][6]
 
         exons: list[_FeatureSpan] = []
         cdss: list[_FeatureSpan] = []

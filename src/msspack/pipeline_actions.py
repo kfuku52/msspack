@@ -16,7 +16,7 @@ from .mss_postprocess import convert_cds_features_to_misc
 from .step_logging import (
     count_fasta_records,
     count_gff_feature_records,
-    count_gff_gene_records,
+    count_gff_gene_models,
     count_mss_feature_blocks,
     count_nonempty_lines,
     count_reordered_feature_lines,
@@ -276,7 +276,7 @@ def run_apply_padding_to_gff(
         genes_with_stops_path=genes_with_stops_path,
         updated_genes_path=updated_genes_path,
     )
-    input_total = count_gff_gene_records(gff_path)
+    input_total = count_gff_gene_models(gff_path)
     lines = [
         f"Number of genes with stops (new_num_stop>0): {len(summary['genes_with_stops']):,}",
         f"Number of updated genes (new_num_stop=0): {len(summary['updated_genes']):,}",
@@ -299,7 +299,7 @@ def run_apply_padding_to_gff(
         count_unit="genes",
         input_total=input_total,
         changed_total=len(summary["updated_genes"]),
-        output_total=count_gff_gene_records(output_path),
+        output_total=count_gff_gene_models(output_path),
         details=lines,
     )
     if metrics_path is not None:
@@ -309,7 +309,7 @@ def run_apply_padding_to_gff(
             count_unit="genes",
             input_total=input_total,
             changed_total=len(summary["updated_genes"]) + len(summary["genes_with_stops"]),
-            output_total=count_gff_gene_records(output_path),
+            output_total=count_gff_gene_models(output_path),
             details={
                 "genes_with_stops": len(summary["genes_with_stops"]),
                 "updated_genes": len(summary["updated_genes"]),
@@ -336,8 +336,8 @@ def run_select_one_mrna(
         output_gff_path=output_path,
         changed_gene_ids_path=changed_gene_ids_path,
     )
-    input_total = count_gff_gene_records(input_path)
-    output_total = count_gff_gene_records(output_path)
+    input_total = count_gff_gene_models(input_path)
+    output_total = count_gff_gene_models(output_path)
     write_step_log(
         log_path=log_path,
         command=f"msspack internal select-one-mrna --input {input_path} --output {output_path}",

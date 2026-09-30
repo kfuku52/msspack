@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from msspack.coordinate_duplicates import read_coordinate_duplicate_map
+from msspack.fasta import reverse_complement
 from msspack.gff import (
     iter_gff_records,
     parse_attributes,
@@ -19,6 +20,34 @@ from msspack.utils import MSSPackError
 
 
 class GffSortTests(unittest.TestCase):
+    def test_duplicate_selection_applies_initial_cds_phase_on_both_strands(self) -> None:
+        for strand in ("+", "-"):
+            for phase in (1, 2):
+                with self.subTest(strand=strand, phase=phase), tempfile.TemporaryDirectory() as tmp:
+                    base = Path(tmp)
+                    coding = "A" * phase + "ATGAAATAA"
+                    sequence = coding if strand == "+" else reverse_complement(coding)
+                    length = len(sequence)
+                    (base / "input.fa").write_text(f">chr1\n{sequence}\n")
+                    rows = []
+                    for identifier, first_phase in (("partial", 0), ("correct", phase)):
+                        rows.extend([
+                            f"chr1\t.\tgene\t1\t{length}\t.\t{strand}\t.\tID={identifier}",
+                            f"chr1\t.\tmRNA\t1\t{length}\t.\t{strand}\t.\tID={identifier}.t;Parent={identifier}",
+                            f"chr1\t.\tCDS\t1\t{length}\t.\t{strand}\t{first_phase}\tParent={identifier}.t",
+                        ])
+                    (base / "input.gff3").write_text("\n".join(rows) + "\n")
+                    drop_duplicate_coordinate_genes(
+                        input_path=base / "input.gff3", fasta_path=base / "input.fa",
+                        output_path=base / "out.gff3", log_path=base / "log",
+                        duplicate_map_path=base / "duplicates.tsv",
+                    )
+                    pair = read_coordinate_duplicate_map(base / "duplicates.tsv")[0]
+                    self.assertEqual(pair.kept_gene_id, "correct")
+                    self.assertEqual(pair.kept_cds_length, 9)
+                    self.assertTrue(pair.kept_structurally_valid)
+                    self.assertTrue(pair.kept_complete)
+
     def test_duplicate_coordinate_cleanup_records_kept_removed_pairs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

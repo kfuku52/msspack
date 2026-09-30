@@ -56,6 +56,11 @@ def compare_exon_to_gaps(
     exon_start = exon_feature.start
     exon_end = exon_feature.end
 
+    if any(start <= exon_start <= exon_end <= end for start, end in gap_regions):
+        # There is no flanking sequence to split out. Retain this uncertain
+        # segment and let the configured gap policy mark the enclosing feature.
+        return [(exon_start, exon_end)], True, True, True
+
     for gap_start, gap_end in gap_regions:
         if gap_end < exon_start or exon_end < gap_start:
             continue
@@ -114,30 +119,16 @@ def append_position(
     gap_regions: GapRegions,
     strand: str,
 ) -> tuple[str, str, str, bool]:
+    """Join surviving segments without relying on the number of input rows."""
+
     joint = ""
     joint_close = ""
     gap_segments, gap_flag, _, _ = compare_exon_to_gaps(feature, gap_regions, strand)
-    if count == 1:
-        for cds_start, cds_end in gap_segments:
-            count += 1
-            if count == 2:
-                if cds_start == cds_end:
-                    position += str(cds_start)
-                elif cds_start <= cds_end:
-                    position += f"{cds_start}..{cds_end}"
-            elif count >= 3:
-                if cds_start == cds_end:
-                    position += f",{cds_start}"
-                elif cds_start <= cds_end:
-                    position += f",{cds_start}..{cds_end}"
-                joint = "join("
-                joint_close = ")"
-    else:
-        for cds_start, cds_end in gap_segments:
-            if cds_start == cds_end:
-                position += f",{cds_start}"
-            elif cds_start <= cds_end:
-                position += f",{cds_start}..{cds_end}"
-            joint = "join("
-            joint_close = ")"
+    for cds_start, cds_end in gap_segments:
+        if cds_start > cds_end:
+            continue
+        segment = str(cds_start) if cds_start == cds_end else f"{cds_start}..{cds_end}"
+        position += ("," if position else "") + segment
+    if "," in position:
+        joint, joint_close = "join(", ")"
     return position, joint, joint_close, gap_flag

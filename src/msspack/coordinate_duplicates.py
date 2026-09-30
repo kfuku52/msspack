@@ -266,6 +266,10 @@ def _transcript_sequence(
     )
     if model.gene.strand == "-":
         nucleotide_sequence = reverse_complement(nucleotide_sequence)
+    if ordered:
+        first_cds = ordered[-1] if model.gene.strand == "-" else ordered[0]
+        if first_cds.phase in {"0", "1", "2"}:
+            nucleotide_sequence = nucleotide_sequence[int(first_cds.phase):]
 
     splice_motifs: list[str] = []
     for left, right in zip(ordered, ordered[1:], strict=False):

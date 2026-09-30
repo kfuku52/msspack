@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Retain coding mRNA features even when their exon coverage matches the CDS,
+  while continuing to omit redundant independent exon/UTR rows.
+- Preserve feature boundaries within normalized N gaps, retain fully gap-covered
+  segments, and apply the configured MSS gap policy when any segment overlaps a gap.
+- Apply initial CDS phase during coordinate-duplicate ranking and trim incomplete
+  terminal codons across short CDS segments with matching exon updates.
+- Correct minus-strand padding for parentless transcripts, retain their functional
+  annotations and gene-direct CDS products, and count the same gene models across
+  pipeline stages so full runs, plots, and reports complete without negative counts.
+- Add strand/phase, gap, annotation, and full-workflow regressions for these cases.
+
 ## 0.8.7 - 2026-09-22
 
 - Parse MSS feature and qualifier columns explicitly during CDS postprocessing,

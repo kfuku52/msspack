@@ -9,12 +9,13 @@ from pathlib import Path
 from .fasta import iter_fasta, write_fasta_record
 from .gff import GFFDocument, read_gff_document, write_gff_document
 from .step_logging import write_step_log, write_step_metrics
-from .utils import atomic_text_writer, ensure_dir, link_or_copy
+from .utils import MSSPackError, atomic_text_writer, ensure_dir, link_or_copy
 
 # Some of the gap-normalization logic below is carried forward from earlier
 # internal tooling used before msspack unified the MSS packaging workflow.
 
-GapJustification = tuple[int, int]
+# Original zero-based start, length change, and original gap length.
+GapJustification = tuple[int, int, int]
 
 
 def _justify_gap(
@@ -56,7 +57,7 @@ def _apply_gapjust_to_sequence(
         if _justify_gap(gap_length, target_gap_length, gap_just_min, gap_just_max):
             rebuilt.append("N" * target_gap_length)
             edit_len = target_gap_length - gap_length
-            justifications.append((start, edit_len))
+            justifications.append((start, edit_len, gap_length))
             num_justifications += 1
             if (min_original_gap_length is None) or (gap_length < min_original_gap_length):
                 min_original_gap_length = gap_length
@@ -69,17 +70,26 @@ def _apply_gapjust_to_sequence(
     return "".join(rebuilt), justifications, num_justifications, min_original_gap_length, max_original_gap_length
 
 
-def _shift_coordinate(value: int, justifications: Iterable[GapJustification]) -> int:
-    updated = value
+def _shift_coordinate(
+    value: int,
+    justifications: Iterable[GapJustification],
+    *,
+    is_end: bool = False,
+) -> int:
     cumulative_offset = 0
-    for original_start_zero_based, edit_len in sorted(justifications, key=lambda item: item[0]):
-        if edit_len == 0:
-            continue
-        actual_edit_start = original_start_zero_based + 1 + cumulative_offset
-        if updated > actual_edit_start:
-            updated += edit_len
+    for start, edit_len, original_length in sorted(justifications, key=lambda item: item[0]):
+        if value <= start:
+            break
+        if value <= start + original_length:
+            new_length = original_length + edit_len
+            if new_length == 0:
+                # Clip starts to the next base and ends to the preceding base.
+                return start + cumulative_offset + (0 if is_end else 1)
+            # A boundary within the retained Ns keeps its offset. A boundary in
+            # the removed suffix maps to the last N, never to an upstream base.
+            return start + cumulative_offset + min(value - start, new_length)
         cumulative_offset += edit_len
-    return updated
+    return value + cumulative_offset
 
 
 def _apply_gapjust_to_gff(
@@ -96,7 +106,12 @@ def _apply_gapjust_to_gff(
         old_start = record.start
         old_end = record.end
         record.start = _shift_coordinate(record.start, justifications)
-        record.end = _shift_coordinate(record.end, justifications)
+        record.end = _shift_coordinate(record.end, justifications, is_end=True)
+        if record.start < 1 or record.end < record.start:
+            raise MSSPackError(
+                f"Gap normalization would remove every base of {record.type} "
+                f"{record.seqid}:{old_start}..{old_end}; retain this gap or revise the feature"
+            )
         start_changed = old_start != record.start
         end_changed = old_end != record.end
         if start_changed:

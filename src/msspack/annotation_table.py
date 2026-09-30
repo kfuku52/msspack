@@ -18,6 +18,9 @@ def build_annotation_table(
 ) -> None:
     started_at = datetime.now()
     gene_to_mrnas: dict[str, list[str]] = {}
+    gene_ids: set[str] = set()
+    transcript_ids: set[str] = set()
+    cds_parent_ids: dict[str, None] = {}
     transcript_to_product: dict[str, str] = {}
     hypothetical_count = 0
     other_product_count = 0
@@ -26,23 +29,32 @@ def build_annotation_table(
         if record.type == "gene":
             gene_id = record.attributes.get("ID")
             if gene_id:
+                gene_ids.add(gene_id)
                 gene_to_mrnas.setdefault(gene_id, [])
         elif record.type in ("mRNA", "transcript"):
             mrna_id = record.attributes.get("ID")
             parent_gene_ids = child_ids(record.attributes.get("Parent"))
-            if not (parent_gene_ids and mrna_id):
+            if not mrna_id:
                 continue
-            for parent_gene_id in parent_gene_ids:
+            transcript_ids.add(mrna_id)
+            for parent_gene_id in parent_gene_ids or [mrna_id]:
                 gene_to_mrnas.setdefault(parent_gene_id, []).append(mrna_id)
             product = record.attributes.get("product")
             if product:
                 transcript_to_product[mrna_id] = product
         elif record.type == "CDS":
+            parents = child_ids(record.attributes.get("Parent"))
+            for parent_id in parents:
+                cds_parent_ids.setdefault(parent_id, None)
             product = record.attributes.get("product")
             if product:
-                for transcript_id in child_ids(record.attributes.get("Parent")):
+                for transcript_id in parents:
                     if transcript_id:
                         transcript_to_product.setdefault(transcript_id, product)
+
+    for parent_id in cds_parent_ids:
+        if parent_id in gene_ids and parent_id not in transcript_ids:
+            gene_to_mrnas[parent_id].append(parent_id)
 
     ensure_dir(output_path.parent)
     with atomic_text_writer(output_path) as out_handle:

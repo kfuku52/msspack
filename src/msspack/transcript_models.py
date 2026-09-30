@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +17,25 @@ class TranscriptModel:
     seqid: str
     strand: str
     cds_records: tuple[GFFRecord, ...]
+
+
+def gene_model_ids(records: Iterable[GFFRecord]) -> tuple[str, ...]:
+    """Identify explicit genes and virtual containers for root transcripts.
+
+    Keep one model per Parent gene, or per transcript ID when Parent is absent.
+    This is also the unit used by CDS adjustment and pipeline plot metrics.
+    """
+    identifiers: dict[str, None] = {}
+    for record in records:
+        identifier = record.attributes.get("ID", "")
+        if not identifier:
+            continue
+        if record.type == "gene":
+            identifiers.setdefault(identifier, None)
+        elif record.type in {"mRNA", "transcript"}:
+            for gene_id in child_ids(record.attributes.get("Parent")) or [identifier]:
+                identifiers.setdefault(gene_id, None)
+    return tuple(identifiers)
 
 
 def build_transcript_models(gff_path: Path) -> list[TranscriptModel]:

@@ -2,10 +2,38 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from msspack.gff import iter_gff_records
 from msspack.gff_adjustments import apply_padding_to_gff, fix_gff_to_inframe
 
 
 class GffAdjustmentTests(unittest.TestCase):
+    def test_inframe_trims_across_exhausted_terminal_cds_on_both_strands(self) -> None:
+        for strand, spans, expected in (
+            ("+", [(1, 4, 0), (10, 10, 2)], (1, 3)),
+            ("-", [(1, 1, 2), (7, 10, 0)], (8, 10)),
+        ):
+            with self.subTest(strand=strand), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                rows = [
+                    f"chr1\t.\tgene\t1\t10\t.\t{strand}\t.\tID=g1",
+                    f"chr1\t.\tmRNA\t1\t10\t.\t{strand}\t.\tID=t1;Parent=g1",
+                ]
+                for index, (start, end, phase) in enumerate(spans):
+                    rows.extend([
+                        f"chr1\t.\texon\t{start}\t{end}\t.\t{strand}\t.\tID=e{index};Parent=t1",
+                        f"chr1\t.\tCDS\t{start}\t{end}\t.\t{strand}\t{phase}\tID=c{index};Parent=t1",
+                    ])
+                rows.append(f"chr1\t.\tintron\t{spans[0][1] + 1}\t{spans[1][0] - 1}\t.\t{strand}\t.\tParent=t1")
+                (base / "in.gff3").write_text("\n".join(rows) + "\n")
+                fix_gff_to_inframe(
+                    input_path=base / "in.gff3", output_path=base / "out.gff3",
+                    log_path=base / "log",
+                )
+                records = list(iter_gff_records(base / "out.gff3"))
+                self.assertEqual({r.type for r in records}, {"gene", "mRNA", "exon", "CDS"})
+                self.assertTrue(all((r.start, r.end) == expected for r in records))
+                self.assertEqual(sum(r.end - r.start + 1 for r in records if r.type == "CDS"), 3)
+
     def test_fix_gff_to_inframe_synchronizes_explicit_terminal_codons(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

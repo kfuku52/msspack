@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .fasta import iter_fasta
+from .gff import iter_gff_records
+from .transcript_models import gene_model_ids
 from .utils import shell_join, write_text
 
 
@@ -172,6 +174,10 @@ def count_gff_gene_records(path: str | Path) -> int:
             if len(fields) >= 3 and fields[2] == "gene":
                 count += 1
     return count
+
+
+def count_gff_gene_models(path: str | Path) -> int:
+    return len(gene_model_ids(iter_gff_records(Path(path))))
 
 
 def count_tabular_rows(path: str | Path, *, has_header: bool = True) -> int:

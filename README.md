@@ -160,16 +160,16 @@ start/stop codon, UTR, and intron rows are synchronized afterward; other transcr
 and non-coding genes are not adjusted. Every adjusted model is checked for parent-child
 containment, three-base terminal codons, and UTR/CDS overlap before the next stage.
 
-The MSS converter emits CDS by default. For a coding transcript, it emits mRNA
-only when the mature transcript adds information beyond the CDS—for example UTR
-sequence, non-coding exons, or alternative isoforms. A model whose exon coverage
-is identical to its CDS is rendered as CDS alone. Transcripts without a CDS remain
-explicit mRNA features. Exons represented by mRNA locations are not emitted as
+The MSS converter emits mRNA for coding transcripts by default, including models
+whose exon coverage is identical to their CDS. It uses exon locations, or joined
+CDS/UTR segments when exons are absent, to describe the mature transcript without
+including introns. CDS features and transcripts without a CDS are retained.
+Exons represented by mRNA locations are not emitted as
 independent features. UTR sequence remains in the mRNA location; independent UTR
 features are omitted by default. Set `pipeline.retain_utr_features = true` (or
 `--retain-utr-features` in the internal converter) to retain them. Standalone
 annotations without a representing mRNA are retained. Conversion metrics count
-emitted/omitted mRNAs and redundant exon/UTR omissions.
+emitted mRNAs and redundant exon/UTR omissions.
 
 rRNA, tRNA, tmRNA, ncRNA, repeat, regulatory, mobile-element, peptide, and other
 recognized GFF3 annotations are retained and mapped to DDBJ-supported INSDC feature

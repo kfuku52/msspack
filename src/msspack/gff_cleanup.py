@@ -13,6 +13,7 @@ from .coordinate_duplicates import (
 from .fasta import iter_fasta
 from .gff import GFFRecord, child_ids, filter_parent_attribute, parse_attributes, repair_attributes
 from .step_logging import write_id_list, write_step_log, write_step_metrics
+from .transcript_models import gene_model_ids
 from .utils import MSSPackError, atomic_text_writer, ensure_dir
 
 
@@ -203,6 +204,7 @@ def drop_duplicate_coordinate_genes(
         policy=selection_policy,
     )
     removed_gene_ids = [pair.removed_gene_id for pair in duplicate_pairs]
+    input_model_total = len(gene_model_ids(records))
     to_remove = set(removed_gene_ids)
     parents_by_id: dict[str, set[str]] = defaultdict(set)
     for _, _, _, rec_id, parent in lines:
@@ -240,9 +242,9 @@ def drop_duplicate_coordinate_genes(
         step="drop-duplicate-coordinate-gene",
         started_at=started_at,
         count_unit="genes",
-        input_total=input_gene_total,
+        input_total=input_model_total,
         changed_total=len(removed_gene_ids),
-        output_total=input_gene_total - len(removed_gene_ids),
+        output_total=input_model_total - len(removed_gene_ids),
         details=[
             f"Output feature count: {kept:,}",
             f"Coordinate collision groups: {collision_groups:,}",
@@ -262,9 +264,9 @@ def drop_duplicate_coordinate_genes(
             metrics_path=metrics_path,
             step="drop-duplicate-coordinate-gene",
             count_unit="genes",
-            input_total=input_gene_total,
+            input_total=input_model_total,
             changed_total=len(removed_gene_ids),
-            output_total=input_gene_total - len(removed_gene_ids),
+            output_total=input_model_total - len(removed_gene_ids),
             details={
                 "output_feature_count": kept,
                 "coordinate_collision_groups": collision_groups,

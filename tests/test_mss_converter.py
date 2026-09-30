@@ -13,6 +13,80 @@ from msspack.utils import MSSPackError
 
 
 class MssConverterTests(unittest.TestCase):
+    def _convert_gap_model(
+        self,
+        base: Path,
+        *,
+        sequence: str,
+        spans: list[tuple[int, int]],
+        strand: str,
+        policy: str = "misc_feature",
+        rna_type: str = "mRNA",
+    ) -> tuple[str, dict[str, int]]:
+        (base / "input.fa").write_text(f">chr1\n{sequence}\n")
+        rows = [
+            f"chr1\t.\tgene\t{spans[0][0]}\t{spans[-1][1]}\t.\t{strand}\t.\tID=g1",
+            f"chr1\t.\t{rna_type}\t{spans[0][0]}\t{spans[-1][1]}\t.\t{strand}\t.\tID=t1;Parent=g1;Name=test;Type=16S",
+        ]
+        for index, (start, end) in enumerate(spans):
+            rows.append(f"chr1\t.\texon\t{start}\t{end}\t.\t{strand}\t.\tID=e{index};Parent=t1")
+            if rna_type == "mRNA":
+                rows.append(f"chr1\t.\tCDS\t{start}\t{end}\t.\t{strand}\t0\tParent=t1")
+        (base / "input.gff3").write_text("\n".join(rows) + "\n")
+        (base / "products.tsv").write_text("ID\tDescription\nt1\ttest protein\n")
+        summary = convert_gff_to_mss(ConversionOptions(
+            fasta_path=base / "input.fa", gff_path=base / "input.gff3",
+            annotation_path=base / "products.tsv", output_path=base / "out.ann.txt",
+            locus_tag_prefix="Gap", organism_name="Test organism", feature_with_gap=policy,
+        ))
+        return (base / "out.ann.txt").read_text(), summary.overall_counts
+
+    def test_gap_policy_applies_when_any_cds_segment_intersects_a_gap(self) -> None:
+        for strand in ("+", "-"):
+            for gap_index in (0, 1):
+                for policy in ("misc_feature", "asis"):
+                    with self.subTest(strand=strand, gap=gap_index, policy=policy):
+                        with tempfile.TemporaryDirectory() as tmp:
+                            segments = ["ATGAAATTT", "AAAAAATAA"]
+                            segments[gap_index] = segments[gap_index][:3] + "NNN" + segments[gap_index][6:]
+                            text, counts = self._convert_gap_model(
+                                Path(tmp), sequence=segments[0] + "A" * 10 + segments[1],
+                                spans=[(1, 9), (20, 28)], strand=strand, policy=policy,
+                            )
+                            if policy == "misc_feature":
+                                self.assertIn("\tmisc_feature\t", text)
+                                self.assertNotIn("\tCDS\t", text)
+                                self.assertEqual(counts["gap_misc_feature"], 1)
+                            else:
+                                self.assertIn("\tCDS\t", text)
+                                self.assertEqual(counts["gap_artificial_location"], 1)
+
+    def test_multi_exon_rrna_and_trna_retain_gap_quality_annotation(self) -> None:
+        for rna_type in ("rRNA", "tRNA"):
+            with self.subTest(rna_type=rna_type), tempfile.TemporaryDirectory() as tmp:
+                text, _ = self._convert_gap_model(
+                    Path(tmp), sequence="ATGNNNTTT" + "A" * 19,
+                    spans=[(1, 9), (20, 28)], strand="-", rna_type=rna_type,
+                )
+                self.assertIn(f"\t{rna_type}\tcomplement(join(1..3,7..9,20..28))", text)
+                self.assertIn("\t\t\tartificial_location\tlow-quality sequence region", text)
+
+    def test_wholly_gap_segments_are_retained_and_marked_by_gap_policy(self) -> None:
+        for strand in ("+", "-"):
+            for spans in ([(1, 3), (10, 12), (20, 25)], [(10, 12)]):
+                with self.subTest(strand=strand, spans=spans), tempfile.TemporaryDirectory() as tmp:
+                    text, counts = self._convert_gap_model(
+                        Path(tmp), sequence="ATG" + "A" * 6 + "NNN" + "A" * 7 + "AAATAA",
+                        spans=spans, strand=strand,
+                    )
+                    location = "join(1..3,10..12,20..25)" if len(spans) == 3 else "10..12"
+                    if strand == "-":
+                        location = f"complement({location})"
+                    self.assertIn(f"\tmRNA\t{location}", text)
+                    self.assertIn(f"\tmisc_feature\t{location}", text)
+                    self.assertNotIn("\tCDS\t", text)
+                    self.assertEqual(counts["gap_misc_feature"], 1)
+
     def test_invalid_sequence_sets_do_not_replace_existing_annotation(self) -> None:
         cases = (
             (">chr1\nATGAAATAA\n>chr1\nATGAAATAA\n", "Duplicate.*chr1"),
@@ -156,7 +230,7 @@ class MssConverterTests(unittest.TestCase):
             self.assertIn("\t5'UTR\t1..9", retained)
             self.assertNotIn("\texon\t1..90", retained)
 
-    def test_suppresses_transcript_structure_when_exons_equal_cds(self) -> None:
+    def test_retains_mrna_when_exons_equal_cds(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
             fasta = base / "genome.fa"
@@ -186,7 +260,7 @@ class MssConverterTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            convert_gff_to_mss(
+            summary = convert_gff_to_mss(
                 ConversionOptions(
                     fasta_path=fasta,
                     gff_path=gff,
@@ -198,10 +272,53 @@ class MssConverterTests(unittest.TestCase):
             )
 
             text = output.read_text(encoding="utf-8")
-            self.assertNotIn("\tmRNA\t", text)
+            self.assertIn("\tmRNA\tjoin(1..30,61..90)\tlocus_tag\tRed000000100", text)
             self.assertNotIn("\texon\t", text)
             self.assertNotIn("\tintron\t", text)
             self.assertIn("\tCDS\tjoin(1..30,61..90)\tlocus_tag\tRed000000100", text)
+            self.assertEqual(summary.overall_counts["mrna_emitted"], 1)
+            self.assertEqual(summary.overall_counts.get("mrna_omitted", 0), 0)
+
+    def test_retains_cds_only_mrna_without_exons(self) -> None:
+        for with_gene in (True, False):
+            for strand in ("+", "-"):
+                with self.subTest(with_gene=with_gene, strand=strand):
+                    with tempfile.TemporaryDirectory() as tmp_dir:
+                        base = Path(tmp_dir)
+                        fasta = base / "genome.fa"
+                        gff = base / "annotation.gff3"
+                        annotation = base / "annotation.tsv"
+                        output = base / "output.ann.txt"
+                        fasta.write_text(">chr1\n" + "A" * 120 + "\n", encoding="utf-8")
+                        rows = ["##gff-version 3"]
+                        if with_gene:
+                            rows.append(f"chr1\tsrc\tgene\t1\t90\t.\t{strand}\t.\tID=g1")
+                        parent = ";Parent=g1" if with_gene else ""
+                        rows.extend([
+                            f"chr1\tsrc\tmRNA\t1\t90\t.\t{strand}\t.\tID=tx1{parent}",
+                            f"chr1\tsrc\tCDS\t1\t30\t.\t{strand}\t0\tID=cds1;Parent=tx1",
+                            f"chr1\tsrc\tCDS\t61\t90\t.\t{strand}\t0\tID=cds2;Parent=tx1",
+                        ])
+                        gff.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                        annotation.write_text(
+                            "ID\tDescription\ntx1\ttest protein\n", encoding="utf-8"
+                        )
+                        summary = convert_gff_to_mss(ConversionOptions(
+                            fasta_path=fasta, gff_path=gff, annotation_path=annotation,
+                            output_path=output, locus_tag_prefix="NoEx",
+                            organism_name="Test organism",
+                        ))
+                        text = output.read_text(encoding="utf-8")
+                        location = "join(1..30,61..90)"
+                        if strand == "-":
+                            location = f"complement({location})"
+                        self.assertIn(
+                            f"\tmRNA\t{location}\tlocus_tag\tNoEx000000100", text
+                        )
+                        self.assertIn(f"\tCDS\t{location}\tlocus_tag\tNoEx000000100", text)
+                        self.assertEqual(text.count("\tmRNA\t"), 1)
+                        self.assertEqual(summary.overall_counts["mrna_emitted"], 1)
+                        self.assertEqual(summary.overall_counts.get("mrna_omitted", 0), 0)
 
     def test_single_base_cds_segment_does_not_break_intron_size_detection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

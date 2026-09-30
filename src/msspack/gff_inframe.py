@@ -126,42 +126,29 @@ def _truncate_last_cds_to_multiple_of_three(
     cdss: list[list[str]],
     strand: str,
     exons: list[list[str]],
-) -> tuple[int, list[str] | None]:
+    removed_row_ids: set[int],
+) -> int:
     remainder = _compute_total_cds_length(cdss) % 3
-    if remainder == 0:
-        return 0, None
-
-    last_cds = _find_terminal_cds(cdss, strand, first=False)
-    if last_cds is None:
-        return 0, None
-    old_start = int(last_cds[3])
-    old_end = int(last_cds[4])
-
-    if strand == "+":
-        new_end = old_end - remainder
-        last_cds[4] = str(new_end)
-        if new_end >= old_start:
-            _update_matching_exons(
-                exons,
-                old_start=old_start,
-                old_end=old_end,
-                new_start=old_start,
-                new_end=new_end,
-                strand=strand,
-            )
-    else:
-        new_start = old_start + remainder
-        last_cds[3] = str(new_start)
-        if new_start <= old_end:
-            _update_matching_exons(
-                exons,
-                old_start=old_start,
-                old_end=old_end,
-                new_start=new_start,
-                new_end=old_end,
-                strand=strand,
-            )
-    return remainder, last_cds
+    remaining = remainder
+    while remaining and cdss:
+        last_cds = _find_terminal_cds(cdss, strand, first=False)
+        assert last_cds is not None
+        old_start, old_end = int(last_cds[3]), int(last_cds[4])
+        length = old_end - old_start + 1
+        if length <= remaining:
+            # Remove matching exons before mutating the CDS coordinates.
+            _remove_cds_and_matching_exons(cdss, exons, last_cds, removed_row_ids)
+            remaining -= length
+            continue
+        new_start = old_start + remaining if strand == "-" else old_start
+        new_end = old_end - remaining if strand == "+" else old_end
+        last_cds[3], last_cds[4] = str(new_start), str(new_end)
+        _update_matching_exons(
+            exons, old_start=old_start, old_end=old_end,
+            new_start=new_start, new_end=new_end, strand=strand,
+        )
+        remaining = 0
+    return remainder
 
 
 def _remove_cds_and_matching_exons(
@@ -258,10 +245,10 @@ def fix_gff_to_inframe(
     owned = {transcript_id for gene in genes.values() for transcript_id in gene.mrnas}
     for row, feature_type, feature_id in typed_lines:
         if feature_type in ("mRNA", "transcript") and feature_id and feature_id not in owned:
-            genes[feature_id] = _GeneModel(
-                line=row.copy(),
-                mrnas=OrderedDict([(feature_id, _MrnaModel(line=row))]),
-            )
+            parent_ids = child_ids(parse_attributes(row[8]).get("Parent")) or [feature_id]
+            for gene_id in parent_ids:
+                gene = genes.setdefault(gene_id, _GeneModel(line=row.copy()))
+                gene.mrnas[feature_id] = _MrnaModel(line=row)
     for gene_id, gene in genes.items():
         if any(child[2] == "CDS" for child in children_of.get(gene_id, [])):
             gene.mrnas.setdefault(gene_id, _MrnaModel(line=gene.line.copy()))
@@ -313,11 +300,11 @@ def fix_gff_to_inframe(
                         removed_row_ids,
                     )
 
-            remainder, last_cds = _truncate_last_cds_to_multiple_of_three(cdss, strand, exons)
+            remainder = _truncate_last_cds_to_multiple_of_three(
+                cdss, strand, exons, removed_row_ids,
+            )
             if remainder:
                 transcript_changed = True
-                if last_cds is not None and int(last_cds[3]) > int(last_cds[4]):
-                    _remove_cds_and_matching_exons(cdss, exons, last_cds, removed_row_ids)
 
             new_start, new_end = _compute_mrna_boundaries(exons or cdss)
             if new_start is None or new_end is None:

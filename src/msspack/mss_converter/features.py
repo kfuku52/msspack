@@ -114,18 +114,16 @@ def _covered_intervals(features: list[FeatureRecord]) -> tuple[tuple[int, int], 
     )
 
 
-def _mrna_adds_submission_information(
+def _has_additional_transcript_structure(
     feature: FeatureRecord,
     parent_lookup: dict[str, list[FeatureRecord]],
     *,
     alternative_isoforms: bool,
 ) -> bool:
-    """Return whether an mRNA conveys information beyond its CDS.
+    """Return whether independent transcript structure adds to the CDS.
 
-    A coding transcript whose explicit exon coverage is identical to its CDS
-    coverage adds no mature-transcript information to a DDBJ feature table.
-    Transcripts with UTR/non-coding exon sequence, alternative isoforms, or no
-    CDS remain informative.
+    Keep the existing suppression of redundant exon/intron rows for CDS-only
+    models. This does not control emission of the mRNA feature itself.
     """
 
     children = parent_lookup.get(feature.id, []) if feature.id else []
@@ -138,8 +136,8 @@ def _mrna_adds_submission_information(
         return True
     exon_features = [child for child in children if child.type in EXON_TYPES]
     if not exon_features:
-        # A bare GFF mRNA span includes introns and cannot safely describe the
-        # mature transcript when no exon or UTR structure was supplied.
+        # There is no additional exon or UTR structure to retain. The mRNA
+        # itself uses CDS segments rather than the span containing introns.
         return False
     return _covered_intervals(exon_features) != _covered_intervals(cds_features)
 
@@ -373,13 +371,14 @@ def build_mrna_text(
         cds_by_position, cds_by_transcript, strict=True
     ):
         count += 1
-        position, joint_prefix, joint_suffix, out_gap_flag = append_position(
+        position, joint_prefix, joint_suffix, feature_gap = append_position(
             genomic_feature,
             count,
             position,
             gap_regions,
             strand,
         )
+        out_gap_flag = out_gap_flag or feature_gap
         incomplete_5_tmp, reverse_incomplete_5_tmp, codon_start = _detect_incomplete_start(
             transcript_feature,
             count,
@@ -479,13 +478,14 @@ def build_rrna_text(
     ]
     for sub_feature in location_features:
         count += 1
-        position, joint_prefix, joint_suffix, out_gap_flag = append_position(
+        position, joint_prefix, joint_suffix, feature_gap = append_position(
             sub_feature,
             count,
             position,
             gap_regions,
             rna_feature.strand,
         )
+        out_gap_flag = out_gap_flag or feature_gap
     joined_location = strand_prefix + joint_prefix + position + joint_suffix + strand_suffix
     rrna_name = (
         _attribute(rna_feature, "product", "Product")
@@ -525,13 +525,14 @@ def build_trna_text(
     ]
     for sub_feature in location_features:
         count += 1
-        position, joint_prefix, joint_suffix, out_gap_flag = append_position(
+        position, joint_prefix, joint_suffix, feature_gap = append_position(
             sub_feature,
             count,
             position,
             gap_regions,
             rna_feature.strand,
         )
+        out_gap_flag = out_gap_flag or feature_gap
     joined_location = strand_prefix + joint_prefix + position + joint_suffix + strand_suffix
     out = render_trna_feature(
         position=joined_location,
@@ -560,6 +561,14 @@ def build_standalone_cds_text(
         gap_regions=gap_regions,
     )
     annotation = annotation_lookup.get(cds_feature.id)
+    if annotation is None:
+        annotation = next(
+            (annotation_lookup[parent_id] for parent_id in child_ids(cds_feature.parent)
+             if parent_id in annotation_lookup),
+            None,
+        )
+    if annotation is not None and annotation.custom_locus_tag:
+        locus_tag = annotation.custom_locus_tag
     product = (
         annotation.product_name
         if annotation is not None
@@ -738,23 +747,22 @@ def convert_contig_features(
                     for descendant in parent_lookup.get(child.id, []):
                         processed.add(id(descendant))
                     continue
-                emit_mrna = _mrna_adds_submission_information(
+                emit_transcript_structure = _has_additional_transcript_structure(
                     child,
                     parent_lookup,
                     alternative_isoforms=alternative_isoforms,
                 )
-                event_counts["mrna_emitted" if emit_mrna else "mrna_omitted"] += 1
-                if emit_mrna:
-                    render_generic(
-                        child,
-                        locus_tag=transcript_locus_tag,
-                        product_override=product_override,
-                    )
+                event_counts["mrna_emitted"] += 1
+                render_generic(
+                    child,
+                    locus_tag=transcript_locus_tag,
+                    product_override=product_override,
+                )
                 render_descendants(
                     child.id,
                     locus_tag=transcript_locus_tag,
-                    emit_transcript_structure=emit_mrna,
-                    represented_by_mrna=child if emit_mrna else None,
+                    emit_transcript_structure=emit_transcript_structure,
+                    represented_by_mrna=child,
                 )
                 if any(
                     descendant.type == "CDS"
@@ -850,23 +858,22 @@ def convert_contig_features(
                 if annotation is not None and annotation.custom_locus_tag
                 else current_locus_tag()
             )
-            emit_mrna = _mrna_adds_submission_information(
+            emit_transcript_structure = _has_additional_transcript_structure(
                 feature,
                 parent_lookup,
                 alternative_isoforms=False,
             )
-            event_counts["mrna_emitted" if emit_mrna else "mrna_omitted"] += 1
-            if emit_mrna:
-                render_generic(
-                    feature,
-                    locus_tag=transcript_locus_tag,
-                    product_override=annotation.product_name if annotation else "",
-                )
+            event_counts["mrna_emitted"] += 1
+            render_generic(
+                feature,
+                locus_tag=transcript_locus_tag,
+                product_override=annotation.product_name if annotation else "",
+            )
             render_descendants(
                 feature.id,
                 locus_tag=transcript_locus_tag,
-                emit_transcript_structure=emit_mrna,
-                represented_by_mrna=feature if emit_mrna else None,
+                emit_transcript_structure=emit_transcript_structure,
+                represented_by_mrna=feature,
             )
             if any(
                 descendant.type == "CDS"

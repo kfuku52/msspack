@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-from .gff import parse_attributes
+from .gff import child_ids, iter_gff_records
 from .pipeline_plot_models import (
     GENE_SET_SPECS,
     SANKEY_COLORS,
@@ -18,6 +18,7 @@ from .pipeline_plot_models import (
     PipelinePlotDataBundle,
     PipelinePlotMetrics,
 )
+from .transcript_models import gene_model_ids
 from .utils import MSSPackError
 from .validation import ValidationSummary, load_validation_summary
 
@@ -378,31 +379,18 @@ def _load_plot_gene_id_map(output_root: Path) -> dict[str, str]:
     if not gff_path.is_file():
         return {}
 
-    gene_ids: set[str] = set()
+    records = list(iter_gff_records(gff_path))
+    gene_ids = set(gene_model_ids(records))
     parents_by_id: dict[str, str] = {}
-    with gff_path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip() or line.startswith("#"):
-                continue
-            fields = line.rstrip("\n").split("\t")
-            if len(fields) != 9:
-                raise MSSPackError(
-                    f"Expected 9 GFF columns at {gff_path}:{line_number}, found {len(fields)}"
-                )
-            try:
-                attributes = parse_attributes(fields[8])
-            except ValueError as exc:
-                raise MSSPackError(
-                    f"Invalid GFF attributes at {gff_path}:{line_number}: {exc}"
-                ) from exc
-            identifier = attributes.get("ID", "").strip()
-            if not identifier:
-                continue
-            if fields[2].casefold() in {"gene", "pseudogene"}:
-                gene_ids.add(identifier)
-            parent = attributes.get("Parent", "").split(",", 1)[0].strip()
-            if parent:
-                parents_by_id[identifier] = parent
+    for record in records:
+        identifier = record.attributes.get("ID", "")
+        if not identifier:
+            continue
+        if record.type.casefold() == "pseudogene":
+            gene_ids.add(identifier)
+        parents = child_ids(record.attributes.get("Parent"))
+        if parents:
+            parents_by_id[identifier] = parents[0]
 
     gene_id_map = {identifier: identifier for identifier in gene_ids}
     for identifier in parents_by_id:

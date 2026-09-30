@@ -21,7 +21,7 @@ from msspack.functional_annotation import (
     _prepare_diamond_database,
     write_translated_protein_fasta,
 )
-from msspack.gff import child_ids, parse_attributes
+from msspack.gff import child_ids, iter_gff_records, parse_attributes
 from msspack.gff_cleanup import drop_duplicate_coordinate_genes
 from msspack.output_state import output_directory_lock, publish_submission
 from msspack.padding_tools import write_spliced_cds_fasta
@@ -40,6 +40,105 @@ class AuditRegressionTests(unittest.TestCase):
         self.base = Path(temporary.name)
         shutil.copytree(FIXTURE, self.base, dirs_exist_ok=True)
         self.config = self.base / "config.toml"
+
+    def _write_coding_model(
+        self,
+        sequence: str,
+        spans: list[tuple[int, int, int]],
+        *,
+        strand: str = "+",
+        with_gene: bool = True,
+    ) -> None:
+        (self.base / "input.fa").write_text(f">ctg1\n{sequence}\n")
+        start, end = spans[0][0], spans[-1][1]
+        rows = [f"ctg1\t.\tmRNA\t{start}\t{end}\t.\t{strand}\t.\tID=tx1"
+                + (";Parent=g1" if with_gene else "")]
+        if with_gene:
+            rows.insert(0, f"ctg1\t.\tgene\t{start}\t{end}\t.\t{strand}\t.\tID=g1")
+        for index, (left, right, phase) in enumerate(spans):
+            rows.extend([
+                f"ctg1\t.\texon\t{left}\t{right}\t.\t{strand}\t.\tID=e{index};Parent=tx1",
+                f"ctg1\t.\tCDS\t{left}\t{right}\t.\t{strand}\t{phase}\tParent=tx1",
+            ])
+        (self.base / "input.gff3").write_text("\n".join(rows) + "\n")
+
+    def test_gap_shrink_inside_feature_preserves_submission_annotation(self) -> None:
+        self._write_coding_model("ATG" + "N" * 120 + "AAA", [(1, 15, 0)])
+        self.config.write_text(self.config.read_text().replace("run_gapjust = false", "run_gapjust = true"))
+        outputs = run_pipeline(self.config, validate=False)
+        final_records = list(iter_gff_records(outputs.intermediate / "12.gff.final-sorted.gff"))
+        self.assertEqual([(r.start, r.end) for r in final_records if r.type == "CDS"], [(1, 15)])
+        self.assertIn("\tmisc_feature\t", outputs.ann_path.read_text())
+        self.assertIn("Fix_g1", outputs.ann_path.read_text())
+        self.assertEqual(json.loads(outputs.manifest_path.read_text())["status"], "completed")
+
+    def test_orphan_minus_padding_preserves_translation_and_completes_full_run(self) -> None:
+        self._write_coding_model(
+            "TTATTA" + "A" * 6 + "TTATTA" + "A" * 22,
+            [(1, 6, 0), (13, 18, 0)], strand="-", with_gene=False,
+        )
+        self.config.write_text(self.config.read_text().replace("min_artificial_intron_size = 10",
+                                                             "min_artificial_intron_size = 0"))
+        artifacts = run_all(self.config, run_busco=False, validate=False)
+        outputs = artifacts.pipeline
+        final_gff = outputs.intermediate / "12.gff.final-sorted.gff"
+        self.assertEqual([(r.start, r.end) for r in iter_gff_records(final_gff) if r.type == "CDS"],
+                         [(2, 6), (13, 16)])
+        write_translated_protein_fasta(
+            fasta_path=outputs.intermediate / "02.gap-normalized.genome.fasta", gff_path=final_gff,
+            output_path=self.base / "protein.fa", genetic_code="1", log_path=self.base / "protein.log",
+            metrics_path=self.base / "protein.json",
+        )
+        self.assertEqual([r.sequence for r in iter_fasta(self.base / "protein.fa")], ["III"])
+        for stage in ("06.drop-duplicate-coordinate-gene", "07.select-one-mrna",
+                      "09.update-gff-to-inframe", "11.update-gff-with-padding"):
+            metrics = json.loads((outputs.logs / f"{stage}.metrics.json").read_text())
+            self.assertEqual((metrics["input_total"], metrics["output_total"]), (1, 1))
+        manifest = json.loads(outputs.manifest_path.read_text())
+        self.assertEqual(manifest["run"]["status"], "completed")
+        self.assertTrue(artifacts.plots.gene_flow_svg.is_file())
+        self.assertIsNotNone(artifacts.report)
+        self.assertTrue((outputs.root / "report" / "index.html").is_file())
+
+    def test_wholly_gap_cds_segment_completes_pack_with_gap_policy_applied(self) -> None:
+        self._write_coding_model("ATG" + "A" * 6 + "NNN" + "A" * 7 + "AAATAA",
+                                 [(1, 3, 0), (10, 12, 0), (20, 25, 0)])
+        outputs = run_pipeline(self.config, validate=False)
+        text = outputs.ann_path.read_text()
+        self.assertIn("\tmisc_feature\tjoin(1..3,10..12,20..25)", text)
+        self.assertNotIn("\tCDS\t", text)
+        self.assertEqual(json.loads(outputs.manifest_path.read_text())["status"], "completed")
+
+    def test_orphan_functional_hit_reaches_mss_and_full_report(self) -> None:
+        self._write_coding_model("ATGAAATAA", [(1, 9, 0)], with_gene=False)
+        diamond = self.base / "fake-diamond.py"
+        diamond.write_text(
+            "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+            "args = sys.argv[1:]\n"
+            "if args[0] == 'makedb':\n"
+            "    Path(args[args.index('--db') + 1] + '.dmnd').write_bytes(b'fake database')\n"
+            "elif args[0] == 'blastp':\n"
+            "    Path(args[args.index('--out') + 1]).write_text('tx1\\tref1\\t100\\t2\\t2\\t100\\t100\\t1e-30\\t100\\tref1 ATP synthase subunit alpha\\n')\n"
+            "else:\n    raise SystemExit(2)\n"
+        )
+        diamond.chmod(0o755)
+        (self.base / "reference.faa").write_text(">ref1 ATP synthase subunit alpha\nMK\n")
+        self.config.write_text(self.config.read_text() + (
+            f'\n[functional_annotation]\nenabled = true\ndiamond_command = "{diamond}"\n'
+            'swissprot_enabled = false\npfam_enabled = false\nreference_proteins = "reference.faa"\n'
+            '[functional_annotation.taxonomy]\nenabled = false\n'
+        ))
+        for parent_type in ("mRNA", "gene"):
+            with self.subTest(parent_type=parent_type):
+                if parent_type == "gene":
+                    gff = self.base / "input.gff3"
+                    gff.write_text(gff.read_text().replace("\tmRNA\t", "\tgene\t"))
+                artifacts = run_all(self.config, run_busco=False, validate=False)
+                self.assertIn("\t\t\tproduct\tATP synthase subunit alpha", artifacts.pipeline.ann_path.read_text())
+                self.assertIn("\tlocus_tag\tFix_tx1", artifacts.pipeline.ann_path.read_text())
+                self.assertTrue(artifacts.plots.gene_flow_svg.is_file())
+                self.assertEqual(json.loads(artifacts.pipeline.manifest_path.read_text())["run"]["status"],
+                                 "completed")
 
     def test_shared_descendants_survive_coordinate_deduplication(self) -> None:
         gff = self.base / "input.gff3"

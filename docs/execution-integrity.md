@@ -5,6 +5,16 @@ remains one identifier. Coordinate duplicate removal preserves features with a
 surviving parent. Transcript extraction is shared by padding and annotation,
 accepts child-first input, and applies the initial CDS phase in transcription
 order after splicing. A `gene` row is not required for a coding transcript.
+Parentless transcripts participate in annotation tables and pipeline metrics as
+gene models identified by their transcript IDs. Their generated locus tags use
+that ID with the configured prefix, and padding uses the transcript's strand.
+
+Gap normalization shifts coordinates after a changed N run. Boundaries within
+the run retain their offset where possible and are clipped to the last retained
+N when the run shrinks. Removing a complete annotated feature with a zero-length
+gap is an error. In MSS conversion, an exon/CDS segment entirely within an N run
+retains its uncertain location; the configured gap policy applies to the whole
+feature whenever any segment overlaps a gap.
 
 Supported semicolon repairs run before strict GFF parsing and gap normalization.
 Their changes remain in `04.fix-gff-semicolons.log` and its metrics JSON, even
