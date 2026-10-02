@@ -266,11 +266,11 @@ def fix_gff_to_inframe(
                     or (child[2] == "exon" and any(child[3:5] == cds[3:5] for cds in cdss))
                 ]
             )
-            line = gene.line.copy()
-            line[3] = str(min(int(child[3]) for child in children))
-            line[4] = str(max(int(child[4]) for child in children))
+            virtual_line = gene.line.copy()
+            virtual_line[3] = str(min(int(child[3]) for child in children))
+            virtual_line[4] = str(max(int(child[4]) for child in children))
             gene.mrnas[model_id] = _MrnaModel(
-                line=line, cdss=cdss, children=children,
+                line=virtual_line, cdss=cdss, children=children,
                 exons=[child for child in children if child[2] == "exon"],
             )
 

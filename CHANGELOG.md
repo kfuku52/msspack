@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.8.10 - 2026-10-02
+
+- Keep gene-direct CDS adjustment compatible with the minimum supported mypy
+  version by separating text-line and feature-row variables.
+
 ## 0.8.9 - 2026-10-02
 
 - Keep distinct gene-direct CDS IDs independent during extraction, frame and
