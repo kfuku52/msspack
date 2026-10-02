@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 from xml.sax.saxutils import escape
 
+from .busco_state import available_busco_comparisons
 from .chart_primitives import (
     CHART_FONT_SIZE_PT,
     GRID_RGB,
@@ -182,6 +183,8 @@ def _busco_input_sequence_count(
 
 
 def load_sankey_busco_summaries(output_root: Path) -> tuple[SankeyBuscoSummary, ...]:
+    if "cds" not in available_busco_comparisons(output_root):
+        return ()
     comparison_path = output_root / "busco" / "cds" / "comparison.json"
     if not comparison_path.exists():
         return ()

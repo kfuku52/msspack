@@ -197,6 +197,7 @@ def run_pipeline_plots(
     )
     run_if_needed(
         outputs=[artifacts.gene_flow_svg],
+        cache_key={"busco_available": bool(busco_summaries)},
         dependencies=[
             artifacts.summary_json,
             artifacts.gene_flow_tsv,
@@ -216,6 +217,7 @@ def run_pipeline_plots(
     )
     run_if_needed(
         outputs=[artifacts.gene_flow_pdf],
+        cache_key={"busco_available": bool(busco_summaries)},
         dependencies=[
             artifacts.summary_json,
             artifacts.gene_flow_tsv,

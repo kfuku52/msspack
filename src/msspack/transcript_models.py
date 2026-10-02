@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
 from .fasta import reverse_complement
 from .gff import GFFRecord, child_ids, iter_gff_records
@@ -17,6 +18,24 @@ class TranscriptModel:
     seqid: str
     strand: str
     cds_records: tuple[GFFRecord, ...]
+    parent_id: str = ""
+
+
+_CDS = TypeVar("_CDS")
+
+
+def group_direct_cds(parent_id: str, records: Iterable[tuple[str, _CDS]]) -> dict[str, list[_CDS]]:
+    """Repeated CDS IDs join; distinct IDs under a gene are separate coding units.
+
+    Retain the parent identifier for a single coding unit, including anonymous
+    CDS segments, so existing extraction and annotation identifiers stay valid.
+    """
+    groups: dict[str, list[_CDS]] = {}
+    for identifier, record in records:
+        groups.setdefault(identifier or parent_id, []).append(record)
+    if len(groups) == 1:
+        return {parent_id: next(iter(groups.values()))}
+    return groups
 
 
 def gene_model_ids(records: Iterable[GFFRecord]) -> tuple[str, ...]:
@@ -57,12 +76,19 @@ def build_transcript_models(gff_path: Path) -> list[TranscriptModel]:
         if not cdss:
             continue
         parent = parents.get(identifier, cdss[0])
-        if any(cds.seqid != parent.seqid or cds.strand != parent.strand for cds in cdss):
-            raise MSSPackError(f"Inconsistent CDS sequence/strand for {identifier}")
-        models.append(TranscriptModel(
-            identifier, parent.seqid, parent.strand,
-            tuple(sorted(cdss, key=lambda row: (row.start, row.end))),
-        ))
+        groups = (
+            {identifier: cdss} if parent.type in {"mRNA", "transcript"}
+            else group_direct_cds(identifier, (
+                (cds.attributes.get("ID", ""), cds) for cds in cdss
+            ))
+        )
+        for model_id, segments in groups.items():
+            if any(cds.seqid != parent.seqid or cds.strand != parent.strand for cds in segments):
+                raise MSSPackError(f"Inconsistent CDS sequence/strand for {model_id}")
+            models.append(TranscriptModel(
+                model_id, parent.seqid, parent.strand,
+                tuple(sorted(segments, key=lambda row: (row.start, row.end))), identifier,
+            ))
     return models
 
 

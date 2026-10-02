@@ -4,12 +4,13 @@ import gzip
 import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from .config import MSSPackConfig
 from .fasta import iter_fasta_handle
 from .fasta_steps import remove_trailing_ns_fasta, write_mss_fasta
 from .gap_normalization import normalize_gap_lengths
-from .gff import sort_gff_file_precise
+from .gff import parse_attributes, sort_gff_file_precise
 from .gff_adjustments import apply_padding_to_gff, fix_gff_to_inframe
 from .mss_converter import ConversionOptions, convert_gff_to_mss, format_event_summary
 from .mss_postprocess import convert_cds_features_to_misc
@@ -401,6 +402,7 @@ def run_mss_cds_to_misc(
             f"Total number of CDS in input: {summary['cds_input']:,}",
             f"Total number of CDS in output: {summary['cds_output']:,}",
             f"Total number of misc_feature in output: {summary['misc_feature_output']:,}",
+            f"Number of converted genes: {len(summary['converted_gene_ids']):,}",
         ],
     )
     if metrics_path is not None:
@@ -413,6 +415,7 @@ def run_mss_cds_to_misc(
             output_total=output_total,
             details={
                 "genes_read": int(summary["genes_read"]),
+                "converted_genes": len(summary["converted_gene_ids"]),
                 "cds_input": int(summary["cds_input"]),
                 "cds_output": int(summary["cds_output"]),
                 "misc_feature_output": int(summary["misc_feature_output"]),
@@ -484,8 +487,31 @@ def pad_locus_tags(
         return f"{prefix}_{int(match.group(1)):0{digits}d}"
 
     output_lines: list[str] = []
+    in_fasta = False
     for line in text.splitlines():
-        updated = pattern.sub(repl, line)
+        if line == "##FASTA":
+            in_fasta = True
+        updated = line
+        if not in_fasta and line and not line.startswith("#"):
+            fields = line.split("\t")
+            if len(fields) == 9:
+                attributes = []
+                for attribute in fields[8].split(";"):
+                    key, sep, value = attribute.partition("=")
+                    decoded_key = next(iter(parse_attributes(attribute)), "") if sep else ""
+                    if decoded_key in {"ID", "Parent", "Derives_from", "locus_tag", "gene_id", "transcript_id"}:
+                        tokens = value.split(",") if decoded_key in {"Parent", "Derives_from"} else [value]
+                        updated_tokens = []
+                        for token in tokens:
+                            decoded = parse_attributes("ID=" + token).get("ID", "")
+                            padded = pattern.sub(repl, decoded)
+                            updated_tokens.append(
+                                quote(padded, safe=".:_-") if padded != decoded else token
+                            )
+                        attribute = key + sep + ",".join(updated_tokens)
+                    attributes.append(attribute)
+                fields[8] = ";".join(attributes)
+                updated = "\t".join(fields)
         if updated != line:
             modified_lines += 1
         output_lines.append(updated)

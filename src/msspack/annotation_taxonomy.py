@@ -362,13 +362,18 @@ def _busco_dataset_query(dataset: str) -> str:
 
 
 def discover_busco_summary_paths(output_root: Path) -> list[Path]:
+    from .busco_state import available_busco_comparisons
+
+    comparisons = available_busco_comparisons(output_root)
+    if not comparisons:
+        return []
     busco_root = output_root / "busco"
     if not busco_root.is_dir():
         return []
     return sorted(
         path
         for path in busco_root.glob("*/*.summary.json")
-        if path.is_file()
+        if path.is_file() and path.parent.name in comparisons
     )
 
 

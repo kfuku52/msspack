@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from msspack.config import load_config
 from msspack.databases import (
@@ -10,9 +11,34 @@ from msspack.databases import (
     write_database_manifest,
 )
 from msspack.demo import write_demo_dataset
+from msspack.functional_annotation import _prepare_pfam_database
 
 
 class DatabaseStatusTests(unittest.TestCase):
+    def test_detects_pfam_indexes_created_by_current_database_builder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            demo_root = write_demo_dataset(Path(tmp_dir) / "demo")
+            config = load_config(demo_root / "config.toml")
+            source = demo_root / "pfam.hmm"
+            source.write_text("HMMER3/f\nNAME Demo\nACC PF00001.1\nDESC Test domain\n//\n")
+            config.functional_annotation.pfam_hmm = str(source)
+            config.functional_annotation.hmmpress_command = "/usr/bin/true"
+
+            def press(command: list[str], **kwargs: object) -> None:
+                for suffix in (".h3f", ".h3i", ".h3m", ".h3p"):
+                    Path(command[-1] + suffix).write_bytes(b"index")
+
+            with patch("msspack.functional_annotation.run_command", side_effect=press):
+                indexed, _, _ = _prepare_pfam_database(
+                    config=config.functional_annotation, base_dir=demo_root,
+                    cache_dir=config.database_dir,
+                )
+            pfam = next(item for item in collect_database_status(config).resources if item.name == "Pfam")
+            self.assertTrue(pfam.ready)
+            Path(str(indexed) + ".h3p").unlink()
+            pfam = next(item for item in collect_database_status(config).resources if item.name == "Pfam")
+            self.assertFalse(pfam.ready)
+
     def test_reports_project_database_root_and_writes_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             demo_root = write_demo_dataset(Path(tmp_dir) / "demo")

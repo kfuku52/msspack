@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .gff import child_ids, iter_gff_records
 from .step_logging import write_step_log, write_step_metrics
+from .transcript_models import build_transcript_models
 from .utils import atomic_text_writer, ensure_dir
 
 
@@ -20,7 +21,6 @@ def build_annotation_table(
     gene_to_mrnas: dict[str, list[str]] = {}
     gene_ids: set[str] = set()
     transcript_ids: set[str] = set()
-    cds_parent_ids: dict[str, None] = {}
     transcript_to_product: dict[str, str] = {}
     hypothetical_count = 0
     other_product_count = 0
@@ -44,17 +44,21 @@ def build_annotation_table(
                 transcript_to_product[mrna_id] = product
         elif record.type == "CDS":
             parents = child_ids(record.attributes.get("Parent"))
-            for parent_id in parents:
-                cds_parent_ids.setdefault(parent_id, None)
             product = record.attributes.get("product")
             if product:
                 for transcript_id in parents:
                     if transcript_id:
                         transcript_to_product.setdefault(transcript_id, product)
 
-    for parent_id in cds_parent_ids:
-        if parent_id in gene_ids and parent_id not in transcript_ids:
-            gene_to_mrnas[parent_id].append(parent_id)
+    for model in build_transcript_models(gff_path):
+        if model.parent_id in gene_ids and model.parent_id not in transcript_ids:
+            gene_to_mrnas[model.parent_id].append(model.transcript_id)
+            product = next((
+                record.attributes["product"] for record in model.cds_records
+                if record.attributes.get("product")
+            ), "")
+            if product:
+                transcript_to_product[model.transcript_id] = product
 
     ensure_dir(output_path.parent)
     with atomic_text_writer(output_path) as out_handle:

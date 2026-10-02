@@ -13,6 +13,7 @@ from .gff_feature_sync import (
     validate_parent_child_containment,
 )
 from .step_logging import write_id_list, write_step_log, write_step_metrics
+from .transcript_models import group_direct_cds
 from .utils import MSSPackError, atomic_text_writer
 
 
@@ -251,12 +252,33 @@ def fix_gff_to_inframe(
                 gene = genes.setdefault(gene_id, _GeneModel(line=row.copy()))
                 gene.mrnas[feature_id] = _MrnaModel(line=row)
     for gene_id, gene in genes.items():
-        if any(child[2] == "CDS" for child in children_of.get(gene_id, [])):
-            gene.mrnas.setdefault(gene_id, _MrnaModel(line=gene.line.copy()))
+        direct_children = children_of.get(gene_id, [])
+        groups = group_direct_cds(gene_id, (
+            (parse_attributes(child[8]).get("ID", ""), child)
+            for child in direct_children if child[2] == "CDS"
+        ))
+        for model_id, cdss in groups.items():
+            children = (
+                [child for child in direct_children if child[2] not in {"mRNA", "transcript"}]
+                if len(groups) == 1 else [
+                    child for child in direct_children
+                    if any(child is cds for cds in cdss)
+                    or (child[2] == "exon" and any(child[3:5] == cds[3:5] for cds in cdss))
+                ]
+            )
+            line = gene.line.copy()
+            line[3] = str(min(int(child[3]) for child in children))
+            line[4] = str(max(int(child[4]) for child in children))
+            gene.mrnas[model_id] = _MrnaModel(
+                line=line, cdss=cdss, children=children,
+                exons=[child for child in children if child[2] == "exon"],
+            )
 
     for gene_data in genes.values():
         mrna_map = gene_data.mrnas
         for mrna_id, mrna_data in mrna_map.items():
+            if mrna_data.children:
+                continue
             for child in children_of.get(mrna_id, []):
                 mrna_data.children.append(child)
                 if child[2] == "exon":
@@ -330,6 +352,11 @@ def fix_gff_to_inframe(
         if gene_changed:
             transcript_starts = [int(model.line[3]) for model in mrna_map.values()]
             transcript_ends = [int(model.line[4]) for model in mrna_map.values()]
+            direct_children = [
+                row for row in children_of.get(gene_id, []) if id(row) not in removed_row_ids
+            ]
+            transcript_starts.extend(int(row[3]) for row in direct_children)
+            transcript_ends.extend(int(row[4]) for row in direct_children)
             if transcript_starts and transcript_ends:
                 gene_line = gene_data.line
                 gene_line[3] = str(min(transcript_starts))

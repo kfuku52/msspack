@@ -11,6 +11,7 @@ from .gff_feature_sync import (
     synchronize_transcript_children,
     validate_parent_child_containment,
 )
+from .transcript_models import build_transcript_models
 from .utils import MSSPackError, write_text
 
 
@@ -25,10 +26,12 @@ def _parse_padding_log(log_path: str | Path) -> dict[str, dict[str, int]]:
             line = raw_line.strip()
             if "original_seqlen=" not in line or "head_padding=" not in line:
                 continue
-            parts = [chunk.strip() for chunk in line.split(",")]
-            record_id = parts[0]
+            record_id, sep, fields = line.rpartition(", original_seqlen=")
+            if not sep:
+                continue
+            parts = [chunk.strip() for chunk in ("original_seqlen=" + fields).split(",")]
             values: dict[str, int] = {}
-            for part in parts[1:]:
+            for part in parts:
                 key, sep, value = part.partition("=")
                 if not sep:
                     continue
@@ -220,6 +223,239 @@ def _update_phase(old_start: int, new_start: int, old_phase: int) -> int:
     return (old_phase + (old_start - new_start)) % 3
 
 
+def _apply_gene_padding(
+    gene_id: str,
+    raw_records: list[list[str]],
+    transcript_to_gene: dict[str, str],
+    target_record_id: str,
+    info: dict[str, int],
+    direct_cds_ids: set[str] | None,
+    split_direct_cds: bool,
+) -> tuple[list[list[str]], bool, bool, list[str], int, int]:
+    forced_first_cds_warnings: list[str] = []
+    removed_feature_count = 0
+    synchronized_features = 0
+    if info["new_num_stop"] > 0:
+        return raw_records, True, False, [], 0, 0
+
+    strand = "+"
+    gene_lines = [rec for rec in raw_records if rec[2] == "gene"]
+    if gene_lines:
+        strand = gene_lines[0][6]
+    else:
+        mrna_lines = [rec for rec in raw_records if rec[2] in ("mRNA", "transcript")]
+        if mrna_lines:
+            strand = mrna_lines[0][6]
+        else:
+            cds_lines = [rec for rec in raw_records if rec[2] == "CDS"]
+            if cds_lines:
+                strand = cds_lines[0][6]
+
+    exons: list[_FeatureSpan] = []
+    cdss: list[_FeatureSpan] = []
+    gene_structs: list[_FeatureSpan] = []
+    mrna_structs: list[_FeatureSpan] = []
+    others: list[_FeatureSpan] = []
+    for rec in raw_records:
+        item = _FeatureSpan(
+            rec=rec,
+            start=int(rec[3]),
+            end=int(rec[4]),
+            phase=rec[7],
+        )
+        if rec[2] == "gene":
+            gene_structs.append(item)
+        elif rec[2] in ("mRNA", "transcript"):
+            mrna_structs.append(item)
+        elif rec[2] == "exon":
+            exons.append(item)
+        elif rec[2] == "CDS":
+            cdss.append(item)
+        else:
+            others.append(item)
+    all_transcript_ids = {
+        parse_attributes(item.rec[8]).get("ID", "")
+        for item in mrna_structs
+        if parse_attributes(item.rec[8]).get("ID", "")
+    }
+    target_transcript_ids = (
+        {target_record_id}
+        if target_record_id in transcript_to_gene
+        else (set() if direct_cds_ids is not None else set(all_transcript_ids))
+    )
+    target_parent_ids = target_transcript_ids or {gene_id}
+
+    def belongs_to_target(
+        item: _FeatureSpan,
+        parent_ids: frozenset[str] = frozenset(target_parent_ids),
+    ) -> bool:
+        parents = set(child_ids(parse_attributes(item.rec[8]).get("Parent")))
+        return bool(parents & parent_ids)
+
+    target_cdss = [
+        item for item in cdss if belongs_to_target(item)
+        and (direct_cds_ids is None or parse_attributes(item.rec[8]).get("ID", "") in direct_cds_ids)
+    ]
+    target_exons = [
+        item for item in exons if belongs_to_target(item)
+        and (not split_direct_cds or any(
+            item.start == cds.start and item.end == cds.end for cds in target_cdss
+        ))
+    ]
+    original_adjustable_row_ids = {
+        id(item.rec) for item in target_exons + target_cdss
+    }
+
+    def sorter(item: _FeatureSpan) -> tuple[int, int]:
+        return item.start, item.end
+
+    target_exons.sort(key=sorter, reverse=(strand == "-"))
+    target_cdss.sort(key=sorter, reverse=(strand == "-"))
+
+    head_trim = (3 - info["head_padding"]) % 3
+    tail_trim = (3 - info["tail_padding"]) % 3
+
+    if head_trim > 0:
+        if strand == "+":
+            _clip_from_5prime_plus(target_exons, head_trim)
+            _clip_from_5prime_plus(target_cdss, head_trim)
+        else:
+            _clip_from_5prime_minus(target_exons, head_trim)
+            _clip_from_5prime_minus(target_cdss, head_trim)
+    if tail_trim > 0:
+        if strand == "+":
+            _clip_from_3prime_plus(target_exons, tail_trim)
+            _clip_from_3prime_plus(target_cdss, tail_trim)
+        else:
+            _clip_from_3prime_minus(target_exons, tail_trim)
+            _clip_from_3prime_minus(target_cdss, tail_trim)
+
+    target_exons = _remove_zero_length(target_exons)
+    target_cdss = _remove_zero_length(target_cdss)
+    if not target_cdss:
+        forced_first_cds_warnings.append(
+            f"Gene {gene_id}: padding adjustment would remove every CDS; model was left unchanged."
+        )
+        return raw_records, False, False, forced_first_cds_warnings, 0, 0
+    removed_row_ids = original_adjustable_row_ids - {
+        id(item.rec) for item in target_exons + target_cdss
+    }
+    removed_feature_count += len(removed_row_ids)
+    target_exons.sort(key=sorter)
+    target_cdss.sort(key=sorter)
+
+    if target_cdss:
+        if len(target_cdss) == 1:
+            cds = target_cdss[0]
+            new_phase = _update_phase(int(cds.rec[3]), cds.start, _safe_phase(cds.rec[7]))
+            if new_phase != 0:
+                forced_first_cds_warnings.append(
+                    f"Gene {gene_id}: after 5' trim, single CDS forced phase from {new_phase} to 0."
+                )
+                new_phase = 0
+            cds.phase = str(new_phase)
+        else:
+            first_cds = target_cdss[0]
+            first_phase = _update_phase(
+                int(first_cds.rec[3]),
+                first_cds.start,
+                _safe_phase(first_cds.rec[7]),
+            )
+            if first_phase != 0:
+                forced_first_cds_warnings.append(
+                    f"Gene {gene_id}: after 5' trim, first CDS forced phase from {first_phase} to 0."
+                )
+                first_phase = 0
+            first_cds.phase = str(first_phase)
+
+            last_cds = target_cdss[-1]
+            last_cds.phase = str(
+                _update_phase(
+                    int(last_cds.rec[3]),
+                    last_cds.start,
+                    _safe_phase(last_cds.rec[7]),
+                )
+            )
+
+    for feature in exons:
+        feature.rec[3] = str(feature.start)
+        feature.rec[4] = str(feature.end)
+    for feature in cdss:
+        feature.rec[3] = str(feature.start)
+        feature.rec[4] = str(feature.end)
+        feature.rec[7] = feature.phase
+
+    transcript_ids: set[str] = set()
+    for transcript in mrna_structs:
+        transcript_id = parse_attributes(transcript.rec[8]).get("ID", "")
+        if not transcript_id:
+            continue
+        if transcript_id not in target_transcript_ids:
+            continue
+        transcript_ids.add(transcript_id)
+        children = [
+            rec
+            for rec in raw_records
+            if transcript_id in child_ids(parse_attributes(rec[8]).get("Parent"))
+        ]
+        synchronized_features += synchronize_transcript_children(
+            transcript_row=transcript.rec,
+            child_rows=children,
+            removed_row_ids=removed_row_ids,
+        )
+        transcript.start = int(transcript.rec[3])
+        transcript.end = int(transcript.rec[4])
+
+    boundary_features = [
+        feature
+        for feature in mrna_structs
+        if id(feature.rec) not in removed_row_ids
+    ] or [
+        feature for feature in (exons or cdss) if id(feature.rec) not in removed_row_ids
+    ]
+    if direct_cds_ids is not None:
+        boundary_features.extend(
+            feature for feature in [*exons, *cdss, *others]
+            if id(feature.rec) not in removed_row_ids and belongs_to_target(feature)
+        )
+    min_start = min(feature.start for feature in boundary_features)
+    max_end = max(feature.end for feature in boundary_features)
+    for feature in gene_structs:
+        feature.start = min_start
+        feature.end = max_end
+        feature.rec[3] = str(min_start)
+        feature.rec[4] = str(max_end)
+
+    scope_parent_ids = {gene_id, *transcript_ids}
+    hierarchy_issues = validate_parent_child_containment(
+        raw_records,
+        scope_parent_ids=scope_parent_ids,
+        removed_row_ids=removed_row_ids,
+    )
+    if hierarchy_issues:
+        issue_text = "; ".join(issue.message for issue in hierarchy_issues[:5])
+        raise MSSPackError(
+            f"Padding adjustment produced an invalid GFF hierarchy: {issue_text}"
+        )
+
+    updated_records = [
+        feature
+        for feature in [*gene_structs, *mrna_structs, *exons, *cdss, *others]
+        if id(feature.rec) not in removed_row_ids
+    ]
+    rank_map = {"gene": 0, "mRNA": 1, "transcript": 1, "exon": 2, "CDS": 3}
+    updated_records.sort(
+        key=lambda feature: (
+            rank_map.get(feature.rec[2], 4),
+            int(feature.rec[3]),
+        )
+    )
+    return (
+        [feature.rec for feature in updated_records], False, True,
+        forced_first_cds_warnings, removed_feature_count, synchronized_features,
+    )
+
+
 def apply_padding_to_gff(
     *,
     gff_path: str | Path,
@@ -236,11 +472,6 @@ def apply_padding_to_gff(
         ungrouped_records,
         fasta_lines,
     ) = _group_gene_records(gff_path)
-    gene_info: dict[str, tuple[str, dict[str, int]]] = {}
-    for record_id, padding_info in padding_entries.items():
-        gene_id = transcript_to_gene.get(record_id, record_id)
-        gene_info[gene_id] = (record_id, padding_info)
-
     genes_with_stops: list[str] = []
     updated_genes: list[str] = []
     final_lines: list[str] = list(header_lines)
@@ -248,220 +479,44 @@ def apply_padding_to_gff(
     removed_feature_count = 0
     synchronized_features = 0
 
+    models = build_transcript_models(Path(gff_path))
+    direct_group_counts: dict[str, int] = {}
+    for model in models:
+        if model.parent_id not in transcript_to_gene:
+            direct_group_counts[model.parent_id] = direct_group_counts.get(model.parent_id, 0) + 1
+    direct_targets = {
+        model.transcript_id: (model.parent_id, {
+            record.attributes.get("ID", "") for record in model.cds_records
+        })
+        for model in models
+        if model.parent_id not in transcript_to_gene
+    }
+    gene_info: dict[str, list[tuple[str, dict[str, int], set[str] | None, bool]]] = {}
+    for record_id, padding_info in padding_entries.items():
+        direct_target = direct_targets.get(record_id)
+        gene_id = direct_target[0] if direct_target else transcript_to_gene.get(record_id, record_id)
+        gene_info.setdefault(gene_id, []).append((
+            record_id, padding_info, direct_target[1] if direct_target else None,
+            direct_group_counts.get(gene_id, 0) > 1,
+        ))
     for gene_id, raw_records in gene_dict.items():
-        target_info = gene_info.get(gene_id)
-        if target_info is None:
-            final_lines.extend("\t".join(rec) for rec in raw_records)
-            continue
-        target_record_id, info = target_info
-
-        if info["new_num_stop"] > 0:
+        stopped = False
+        changed = False
+        for target_record_id, info, direct_cds_ids, split_direct_cds in gene_info.get(gene_id, []):
+            raw_records, has_stops, updated, warnings, removed, synchronized = _apply_gene_padding(
+                gene_id, raw_records, transcript_to_gene, target_record_id, info, direct_cds_ids,
+                split_direct_cds,
+            )
+            stopped |= has_stops
+            changed |= updated
+            forced_first_cds_warnings.extend(warnings)
+            removed_feature_count += removed
+            synchronized_features += synchronized
+        if stopped:
             genes_with_stops.append(gene_id)
-            final_lines.extend("\t".join(rec) for rec in raw_records)
-            continue
-
-        strand = "+"
-        gene_lines = [rec for rec in raw_records if rec[2] == "gene"]
-        if gene_lines:
-            strand = gene_lines[0][6]
-        else:
-            mrna_lines = [rec for rec in raw_records if rec[2] in ("mRNA", "transcript")]
-            if mrna_lines:
-                strand = mrna_lines[0][6]
-            else:
-                cds_lines = [rec for rec in raw_records if rec[2] == "CDS"]
-                if cds_lines:
-                    strand = cds_lines[0][6]
-
-        exons: list[_FeatureSpan] = []
-        cdss: list[_FeatureSpan] = []
-        gene_structs: list[_FeatureSpan] = []
-        mrna_structs: list[_FeatureSpan] = []
-        others: list[_FeatureSpan] = []
-        for rec in raw_records:
-            item = _FeatureSpan(
-                rec=rec,
-                start=int(rec[3]),
-                end=int(rec[4]),
-                phase=rec[7],
-            )
-            if rec[2] == "gene":
-                gene_structs.append(item)
-            elif rec[2] in ("mRNA", "transcript"):
-                mrna_structs.append(item)
-            elif rec[2] == "exon":
-                exons.append(item)
-            elif rec[2] == "CDS":
-                cdss.append(item)
-            else:
-                others.append(item)
-        all_transcript_ids = {
-            parse_attributes(item.rec[8]).get("ID", "")
-            for item in mrna_structs
-            if parse_attributes(item.rec[8]).get("ID", "")
-        }
-        target_transcript_ids = (
-            {target_record_id}
-            if target_record_id in transcript_to_gene
-            else set(all_transcript_ids)
-        )
-        target_parent_ids = target_transcript_ids or {gene_id}
-
-        def belongs_to_target(
-            item: _FeatureSpan,
-            parent_ids: frozenset[str] = frozenset(target_parent_ids),
-        ) -> bool:
-            parents = set(child_ids(parse_attributes(item.rec[8]).get("Parent")))
-            return bool(parents & parent_ids)
-
-        target_exons = [item for item in exons if belongs_to_target(item)]
-        target_cdss = [item for item in cdss if belongs_to_target(item)]
-        original_adjustable_row_ids = {
-            id(item.rec) for item in target_exons + target_cdss
-        }
-
-        def sorter(item: _FeatureSpan) -> tuple[int, int]:
-            return item.start, item.end
-
-        target_exons.sort(key=sorter, reverse=(strand == "-"))
-        target_cdss.sort(key=sorter, reverse=(strand == "-"))
-
-        head_trim = (3 - info["head_padding"]) % 3
-        tail_trim = (3 - info["tail_padding"]) % 3
-
-        if head_trim > 0:
-            if strand == "+":
-                _clip_from_5prime_plus(target_exons, head_trim)
-                _clip_from_5prime_plus(target_cdss, head_trim)
-            else:
-                _clip_from_5prime_minus(target_exons, head_trim)
-                _clip_from_5prime_minus(target_cdss, head_trim)
-        if tail_trim > 0:
-            if strand == "+":
-                _clip_from_3prime_plus(target_exons, tail_trim)
-                _clip_from_3prime_plus(target_cdss, tail_trim)
-            else:
-                _clip_from_3prime_minus(target_exons, tail_trim)
-                _clip_from_3prime_minus(target_cdss, tail_trim)
-
-        target_exons = _remove_zero_length(target_exons)
-        target_cdss = _remove_zero_length(target_cdss)
-        if not target_cdss:
-            forced_first_cds_warnings.append(
-                f"Gene {gene_id}: padding adjustment would remove every CDS; model was left unchanged."
-            )
-            final_lines.extend("\t".join(rec) for rec in raw_records)
-            continue
-        removed_row_ids = original_adjustable_row_ids - {
-            id(item.rec) for item in target_exons + target_cdss
-        }
-        removed_feature_count += len(removed_row_ids)
-        updated_genes.append(gene_id)
-        target_exons.sort(key=sorter)
-        target_cdss.sort(key=sorter)
-
-        if target_cdss:
-            if len(target_cdss) == 1:
-                cds = target_cdss[0]
-                new_phase = _update_phase(int(cds.rec[3]), cds.start, _safe_phase(cds.rec[7]))
-                if new_phase != 0:
-                    forced_first_cds_warnings.append(
-                        f"Gene {gene_id}: after 5' trim, single CDS forced phase from {new_phase} to 0."
-                    )
-                    new_phase = 0
-                cds.phase = str(new_phase)
-            else:
-                first_cds = target_cdss[0]
-                first_phase = _update_phase(
-                    int(first_cds.rec[3]),
-                    first_cds.start,
-                    _safe_phase(first_cds.rec[7]),
-                )
-                if first_phase != 0:
-                    forced_first_cds_warnings.append(
-                        f"Gene {gene_id}: after 5' trim, first CDS forced phase from {first_phase} to 0."
-                    )
-                    first_phase = 0
-                first_cds.phase = str(first_phase)
-
-                last_cds = target_cdss[-1]
-                last_cds.phase = str(
-                    _update_phase(
-                        int(last_cds.rec[3]),
-                        last_cds.start,
-                        _safe_phase(last_cds.rec[7]),
-                    )
-                )
-
-        for feature in exons:
-            feature.rec[3] = str(feature.start)
-            feature.rec[4] = str(feature.end)
-        for feature in cdss:
-            feature.rec[3] = str(feature.start)
-            feature.rec[4] = str(feature.end)
-            feature.rec[7] = feature.phase
-
-        transcript_ids: set[str] = set()
-        for transcript in mrna_structs:
-            transcript_id = parse_attributes(transcript.rec[8]).get("ID", "")
-            if not transcript_id:
-                continue
-            if transcript_id not in target_transcript_ids:
-                continue
-            transcript_ids.add(transcript_id)
-            children = [
-                rec
-                for rec in raw_records
-                if transcript_id in child_ids(parse_attributes(rec[8]).get("Parent"))
-            ]
-            synchronized_features += synchronize_transcript_children(
-                transcript_row=transcript.rec,
-                child_rows=children,
-                removed_row_ids=removed_row_ids,
-            )
-            transcript.start = int(transcript.rec[3])
-            transcript.end = int(transcript.rec[4])
-
-        boundary_features = [
-            feature
-            for feature in mrna_structs
-            if id(feature.rec) not in removed_row_ids
-        ] or [
-            feature for feature in (exons or cdss) if id(feature.rec) not in removed_row_ids
-        ]
-        min_start = min(feature.start for feature in boundary_features)
-        max_end = max(feature.end for feature in boundary_features)
-        for feature in gene_structs:
-            feature.start = min_start
-            feature.end = max_end
-            feature.rec[3] = str(min_start)
-            feature.rec[4] = str(max_end)
-
-        scope_parent_ids = {gene_id, *transcript_ids}
-        hierarchy_issues = validate_parent_child_containment(
-            raw_records,
-            scope_parent_ids=scope_parent_ids,
-            removed_row_ids=removed_row_ids,
-        )
-        if hierarchy_issues:
-            issue_text = "; ".join(issue.message for issue in hierarchy_issues[:5])
-            raise MSSPackError(
-                f"Padding adjustment produced an invalid GFF hierarchy: {issue_text}"
-            )
-
-        updated_records = [
-            feature
-            for feature in [*gene_structs, *mrna_structs, *exons, *cdss, *others]
-            if id(feature.rec) not in removed_row_ids
-        ]
-        rank_map = {"gene": 0, "mRNA": 1, "transcript": 1, "exon": 2, "CDS": 3}
-        updated_records.sort(
-            key=lambda feature: (
-                rank_map.get(feature.rec[2], 4),
-                int(feature.rec[3]),
-            )
-        )
-        final_lines.extend("\t".join(feature.rec) for feature in updated_records)
+        elif changed:
+            updated_genes.append(gene_id)
+        final_lines.extend("\t".join(rec) for rec in raw_records)
 
     final_lines.extend("\t".join(rec) for rec in ungrouped_records)
     final_lines.extend(fasta_lines)

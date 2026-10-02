@@ -138,6 +138,7 @@ def convert_cds_features_to_misc(
         if current_block:
             write_processed_block(current_block)
 
+    converted_gene_ids = list(dict.fromkeys(converted_gene_ids))
     if converted_gene_ids_path is not None:
         write_id_list(Path(converted_gene_ids_path), converted_gene_ids)
     return {

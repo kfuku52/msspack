@@ -49,6 +49,7 @@ def _pfam_database_ready(root: Path) -> bool:
     candidates = [
         root / "pfam" / "Pfam-A.hmm",
         *(root / "pfam" / "objects").glob("*.hmm"),
+        *(root / "pfam" / "indexes").glob("*/*/Pfam-A.hmm"),
     ]
     return any(
         path.is_file()

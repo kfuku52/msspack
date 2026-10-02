@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.8.9 - 2026-10-02
+
+- Keep distinct gene-direct CDS IDs independent during extraction, frame and
+  padding adjustment, and functional annotation; retain joined repeated IDs and
+  count their parent gene once in plots and CDS-to-misc conversion summaries.
+- Apply padding updates to percent-decoded IDs containing commas.
+- Restrict locus-tag padding to identifier attributes and references, preserving
+  sequence IDs, free-text metadata, comments, and embedded FASTA.
+- Exclude stale or skipped BUSCO results from plots, reports, and taxonomy
+  inference while retaining historical summaries and recording input hashes.
+- Extract BUSCO input CDS from repaired GFF attributes and translate protein-mode
+  inputs with the configured genetic code, strand, and initial phase.
+- Detect complete Pfam indexes in the current content-addressed builder layout.
+- Add regressions for these cases, including cache mode/visibility changes and
+  full runs with multiple gene-direct protein annotations.
+
 ## 0.8.8 - 2026-09-30
 
 - Reject path-valued locus-tag prefixes before creating outputs, preventing writes

@@ -12,6 +12,7 @@ from msspack.busco import (
     _busco_auto_resources_ready,
     _busco_lineage_ready,
     _discover_short_summary,
+    _extract_cds_fastas,
     _publish_busco_workspace,
     _read_summary_json,
     _run_busco_once,
@@ -25,10 +26,43 @@ from msspack.busco import (
 )
 from msspack.config import BuscoConfig
 from msspack.database_lock import DatabaseLockSettings
+from msspack.fasta import iter_fasta, reverse_complement
 from msspack.utils import MSSPackError
 
 
 class BuscoTests(unittest.TestCase):
+    def test_cds_protein_mode_honors_phase_strand_code_and_cache_mode_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fasta = root / "genome.fa"
+            gff = root / "input.gff"
+            fasta.write_text(">ctg1\n" + reverse_complement("AATGTGATAA") + "\n")
+            gff.write_text(
+                "ctg1\t.\tCDS\t1\t10\t.\t-\t1\tParent=t1\n"
+                "ctg1\t.\tmRNA\t1\t10\t.\t-\t.\tID=t1\n",
+            )
+            artifacts = BuscoComparisonArtifacts(
+                root=root, logs_dir=root / "logs", raw_root=root / "raw",
+                input_fasta=root / "input.fa", processed_fasta=root / "processed.fa",
+                input_summary_json=root / "input.summary.json",
+                processed_summary_json=root / "processed.summary.json",
+                comparison_json=root / "comparison.json", comparison_tsv=root / "comparison.tsv",
+                comparison_svg=root / "comparison.svg", comparison_pdf=root / "comparison.pdf",
+            )
+            for mode, code, expected in (
+                ("proteins", "2", "MW"), ("proteins", "1", "MX"),
+                ("transcriptome", "1", "ATGTGATAA"),
+            ):
+                with self.subTest(mode=mode, code=code):
+                    outputs = _extract_cds_fastas(
+                        artifacts=artifacts, input_genome_fasta=fasta, input_gff=gff,
+                        processed_genome_fasta=fasta, processed_gff=gff, dependencies=[],
+                        mode=mode, genetic_code=code,
+                    )
+                    for output in outputs:
+                        self.assertEqual([(row.id, row.sequence) for row in iter_fasta(output)],
+                                         [("t1", expected)])
+
     def test_partial_lineage_without_dataset_config_is_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

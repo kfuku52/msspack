@@ -11,6 +11,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from msspack.annotation_taxonomy import discover_busco_summary_paths
+from msspack.busco_state import busco_results_available
 from msspack.config import ConfigError, load_config
 from msspack.config_validation import validate_functional_annotation_config
 from msspack.doctor import _input_checks
@@ -26,6 +28,12 @@ from msspack.gff_cleanup import drop_duplicate_coordinate_genes
 from msspack.output_state import output_directory_lock, publish_submission
 from msspack.padding_tools import write_spliced_cds_fasta
 from msspack.pipeline import run_pipeline
+from msspack.pipeline_plot_data import (
+    load_annotation_consistency_summary,
+    load_functional_annotation_summary,
+)
+from msspack.pipeline_plot_render import load_sankey_busco_summaries
+from msspack.report import run_html_report
 from msspack.submission_update import prepare_update
 from msspack.utils import MSSPackError
 from msspack.workflow import run_all
@@ -80,6 +88,184 @@ class AuditRegressionTests(unittest.TestCase):
         text = outputs.ann_path.read_text()
         self.assertEqual(text.count("\tCDS\t"), 1)
         self.assertIn("\tCDS\tjoin(1..6,31..36)\t", text)
+
+    def test_distinct_gene_direct_cds_are_extracted_and_adjusted_independently(self) -> None:
+        for strand in ("+", "-"):
+            with self.subTest(strand=strand):
+                sequences = ["ATGAAATAAC", "ATGCCCTAAC"]
+                if strand == "-":
+                    sequences = [reverse_complement(sequence) for sequence in sequences]
+                (self.base / "input.fa").write_text(
+                    ">ctg1\n" + sequences[0] + "A" * 20 + sequences[1] + "\n",
+                )
+                gff = self.base / "input.gff3"
+                gff.write_text(
+                    f"ctg1\t.\tgene\t1\t40\t.\t{strand}\t.\tID=g1\n"
+                    f"ctg1\t.\tCDS\t1\t10\t.\t{strand}\t0\tID=c1;Parent=g1;product=first protein\n"
+                    f"ctg1\t.\tCDS\t31\t40\t.\t{strand}\t0\tID=c2;Parent=g1;product=second protein\n"
+                )
+                write_spliced_cds_fasta(
+                    fasta_path=self.base / "input.fa", gff_path=gff,
+                    output_path=self.base / "cds.fa", log_path=self.base / "cds.log",
+                )
+                self.assertEqual([(row.id, len(row.sequence)) for row in iter_fasta(self.base / "cds.fa")],
+                                 [("c1", 10), ("c2", 10)])
+                artifacts = run_all(self.config, run_busco=False, validate=False)
+                final_gff = artifacts.pipeline.intermediate / "12.gff.final-sorted.gff"
+                cdss = [record for record in iter_gff_records(final_gff) if record.type == "CDS"]
+                expected = [(1, 9), (31, 39)] if strand == "+" else [(2, 10), (32, 40)]
+                self.assertEqual([(record.start, record.end) for record in cdss], expected)
+                write_translated_protein_fasta(
+                    fasta_path=artifacts.pipeline.intermediate / "02.gap-normalized.genome.fasta",
+                    gff_path=final_gff, output_path=self.base / "protein.fa", genetic_code="1",
+                    log_path=self.base / "protein.log", metrics_path=self.base / "protein.json",
+                )
+                self.assertEqual([(row.id, row.sequence) for row in iter_fasta(self.base / "protein.fa")],
+                                 [("c1", "MK"), ("c2", "MP")])
+                ann = artifacts.pipeline.ann_path.read_text()
+                self.assertEqual(ann.count("\tCDS\t"), 2)
+                self.assertIn("product\tfirst protein", ann)
+                self.assertIn("product\tsecond protein", ann)
+
+    def test_escaped_comma_identifier_receives_padding_in_full_run(self) -> None:
+        self._write_coding_model("ATGTAATAA", [(1, 9, 0)])
+        gff = self.base / "input.gff3"
+        gff.write_text(gff.read_text().replace("tx1", "tx%2Cone"))
+        artifacts = run_all(self.config, run_busco=False, validate=False)
+        cdss = [record for record in iter_gff_records(
+            artifacts.pipeline.intermediate / "12.gff.final-sorted.gff",
+        ) if record.type == "CDS"]
+        self.assertEqual([(record.start, record.end) for record in cdss], [(3, 8)])
+
+    def test_multiple_standalone_cds_conversions_count_one_gene(self) -> None:
+        (self.base / "input.fa").write_text(">ctg1\nTAAATAAATAAAAAA" + "A" * 15 + "ATGTAATAA\n")
+        (self.base / "input.gff3").write_text(
+            "ctg1\t.\tgene\t1\t39\t.\t+\t.\tID=g1\n"
+            "ctg1\t.\tCDS\t1\t15\t.\t+\t0\tID=c1;Parent=g1\n"
+            "ctg1\t.\tCDS\t31\t39\t.\t+\t0\tID=c2;Parent=g1\n",
+        )
+        artifacts = run_all(self.config, run_busco=False, validate=False)
+        self.assertEqual(artifacts.pipeline.ann_path.read_text().count("\tmisc_feature\t"), 2)
+        summary = json.loads(artifacts.plots.summary_json.read_text())["metrics"]
+        self.assertEqual(summary["converted_to_misc_genes"], 1)
+        self.assertEqual(summary["final_cds_genes"], 0)
+
+    def test_multiple_gene_direct_proteins_reach_annotation_and_gene_level_plots(self) -> None:
+        (self.base / "input.fa").write_text(">ctg1\nATGAAATAA" + "A" * 21 + "ATGCCCTAA\n")
+        (self.base / "input.gff3").write_text(
+            "ctg1\t.\tgene\t1\t39\t.\t+\t.\tID=g1\n"
+            "ctg1\t.\tCDS\t1\t9\t.\t+\t0\tID=c1;Parent=g1\n"
+            "ctg1\t.\tCDS\t31\t39\t.\t+\t0\tID=c2;Parent=g1\n",
+        )
+        diamond = self.base / "fake-diamond.py"
+        diamond.write_text(f"#!{sys.executable}\n" + """
+import sys
+from pathlib import Path
+args = sys.argv[1:]
+if args[0] == 'makedb':
+    Path(args[args.index('--db') + 1] + '.dmnd').write_bytes(b'fake database')
+elif args[0] == 'blastp':
+    text = ''
+    if 'stitle' in args:
+        text = ('c1\\tref1\\t100\\t2\\t2\\t100\\t100\\t1e-30\\t100\\tref1 ATP synthase subunit alpha\\n'
+                'c2\\tref2\\t100\\t2\\t2\\t100\\t100\\t1e-30\\t100\\tref2 DNA polymerase\\n')
+    Path(args[args.index('--out') + 1]).write_text(text)
+else:
+    raise SystemExit(2)
+""")
+        diamond.chmod(0o755)
+        (self.base / "reference.faa").write_text(
+            ">ref1 ATP synthase subunit alpha\nMK\n>ref2 DNA polymerase\nMP\n",
+        )
+        self.config.write_text(self.config.read_text() + (
+            f'\n[functional_annotation]\nenabled = true\ndiamond_command = "{diamond}"\n'
+            'swissprot_enabled = false\npfam_enabled = false\nreference_proteins = "reference.faa"\n'
+            '[functional_annotation.taxonomy]\nenabled = false\n'
+            '[functional_annotation.consistency]\nenabled = true\n'
+        ))
+        artifacts = run_all(self.config, run_busco=False, validate=False)
+        ann = artifacts.pipeline.ann_path.read_text()
+        self.assertIn("product\tATP synthase subunit alpha", ann)
+        self.assertIn("product\tDNA polymerase", ann)
+        summary = load_functional_annotation_summary(artifacts.pipeline.root)
+        consistency = load_annotation_consistency_summary(artifacts.pipeline.root)
+        assert summary is not None and consistency is not None
+        self.assertEqual(summary.total, 1)
+        self.assertEqual(consistency.total, 1)
+        self.assertTrue(artifacts.report.index_html.is_file())
+
+    def _configure_fake_busco(self) -> None:
+        executable = self.base / "fake-busco.py"
+        executable.write_text(f"#!{sys.executable}\n" + """
+import json
+import sys
+from pathlib import Path
+args = sys.argv[1:]
+fasta = Path(args[args.index('-i') + 1])
+mode = args[args.index('-m') + 1]
+out = Path(args[args.index('--out_path') + 1]) / args[args.index('-o') + 1]
+out.mkdir(parents=True, exist_ok=True)
+(out / 'short_summary.specific.fixture.txt').write_text(
+    '# BUSCO version is: test-stub\\n'
+    '# The lineage dataset is: fixture_odb12\\n'
+    f'# BUSCO was run in mode: {mode}\\n'
+    'C:100.0%[S:100.0%,D:0.0%],F:0.0%,M:0.0%,n:10\\n'
+    '10 Complete BUSCOs (C)\\n10 Complete and single-copy BUSCOs (S)\\n'
+    '0 Complete and duplicated BUSCOs (D)\\n0 Fragmented BUSCOs (F)\\n0 Missing BUSCOs (M)\\n'
+)
+with (Path(__file__).parent / 'captured.jsonl').open('a') as handle:
+    handle.write(json.dumps({'mode': mode, 'fasta': fasta.read_text()}) + '\\n')
+""")
+        executable.chmod(0o755)
+        self.config.write_text(self.config.read_text() + (
+            f'\n[busco]\ncommand = "{executable}"\ncds_mode = "proteins"\n'
+            'auto_lineage = false\nlineage_dataset = "fixture_odb12"\noffline = true\n'
+        ))
+
+    def test_busco_uses_repaired_gff_and_passes_protein_input(self) -> None:
+        self._write_coding_model("ATGAAATAA", [(1, 9, 0)])
+        gff = self.base / "input.gff3"
+        gff.write_text(gff.read_text().replace("Parent=tx1", "Parent=tx1;Note=alpha;beta"))
+        self._configure_fake_busco()
+        artifacts = run_all(self.config, validate=False)
+        invocations = [json.loads(line) for line in (self.base / "captured.jsonl").read_text().splitlines()]
+        self.assertEqual(invocations, [
+            {"mode": "proteins", "fasta": ">tx1\nMK\n"},
+            {"mode": "proteins", "fasta": ">tx1\nMK\n"},
+        ])
+        self.assertTrue(busco_results_available(artifacts.pipeline.root))
+
+    def test_stale_and_skipped_busco_results_are_excluded_from_all_consumers(self) -> None:
+        self._write_coding_model("ATGAAATAA", [(1, 9, 0)])
+        self._configure_fake_busco()
+        first = run_all(self.config, validate=False)
+        root = first.pipeline.root
+        self.assertEqual(len(load_sankey_busco_summaries(root)), 2)
+        summary_paths = discover_busco_summary_paths(root)
+        historical = {path: path.read_bytes() for path in summary_paths}
+        self.assertTrue(historical)
+        (self.base / "input.fa").write_text(">ctg1\nATGCCCTAA\n")
+        run_pipeline(self.config, validate=False)
+        self.assertFalse(busco_results_available(root))
+        self.assertEqual(load_sankey_busco_summaries(root), ())
+        self.assertEqual(discover_busco_summary_paths(root), [])
+        report = run_html_report(self.config)
+        self.assertNotIn("BUSCO cds", report.index_html.read_text())
+        second = run_all(self.config, run_busco=False, validate=False)
+        manifest = json.loads(second.pipeline.manifest_path.read_text())
+        self.assertFalse(manifest["busco"]["enabled"])
+        self.assertEqual(manifest["busco"]["status"], "skipped")
+        self.assertNotIn("BUSCO results (CDS;", second.plots.gene_flow_svg.read_text())
+        self.assertEqual({path: path.read_bytes() for path in summary_paths}, historical)
+        # Visibility changes must invalidate the plot even when its inputs do not change.
+        run_all(self.config, validate=False)
+        third = run_all(self.config, run_busco=False, validate=False)
+        self.assertNotIn("BUSCO results (CDS;", third.plots.gene_flow_svg.read_text())
+        self.config.write_text(self.config.read_text() + 'run_cds = false\nrun_genome = true\n')
+        fourth = run_all(self.config, validate=False)
+        self.assertEqual(load_sankey_busco_summaries(root), ())
+        self.assertEqual({path.parent.name for path in discover_busco_summary_paths(root)}, {"genome"})
+        self.assertNotIn("BUSCO cds", fourth.report.index_html.read_text())
 
     def _write_coding_model(
         self,

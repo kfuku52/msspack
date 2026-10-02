@@ -12,7 +12,15 @@ Isoform selection uses the declared transcript span even when CDS/UTR rows appea
 first. Without exon rows, frame and padding adjustments retain the combined
 CDS/UTR span. MSS conversion joins repeated CDS IDs directly under a gene or
 without a parent; anonymous gene-direct CDS rows are grouped by their parent.
-Distinct CDS IDs remain separate features.
+Distinct gene-direct CDS IDs remain separate coding units throughout extraction,
+frame/padding adjustment, functional annotation, BUSCO, and MSS rendering. A
+single gene-direct coding unit retains its parent ID in extracted FASTA and
+annotation tables; multiple units use their CDS IDs. Gene-level plots count the
+parent once, prefer the source order existing/reference/Swiss-Prot/UniRef90/Pfam/CDD,
+and show the most actionable consistency status (review, resolved, unannotated,
+no close-family peer, consistent). Per-CDS evidence remains in the TSV files.
+Stop-containing genes retain the existing gene-wide CDS-to-misc conversion policy;
+converted feature counts and distinct converted gene counts are recorded separately.
 
 Gap normalization shifts coordinates after a changed N run. Boundaries within
 the run retain their offset where possible and are clipped to the last retained
@@ -26,6 +34,10 @@ Supported semicolon repairs run before strict GFF parsing and gap normalization.
 Their changes remain in `04.fix-gff-semicolons.log` and its metrics JSON, even
 though that stage now runs earlier. Empty sequences after terminal-N removal
 are errors; they are not silently removed or emitted with an invalid source.
+BUSCO input CDS extraction also uses the repaired GFF with the original genome
+coordinates. Its `proteins` mode translates with the configured genetic code,
+strand, and initial CDS phase. Locus-tag padding changes identifier attributes
+and references without changing sequence IDs, free-text metadata, or embedded FASTA.
 
 ## Submission publication
 
@@ -65,6 +77,10 @@ in addition to declared input/output content hashes and settings. Changing a
 transitively imported helper invalidates caches without requiring a version bump.
 Pipeline external commands and validation Java commands include executable content
 fingerprints, so replacing a binary at the same pathname invalidates its cache.
+BUSCO manifests record content hashes of configuration, source inputs, and compared
+stage inputs. Plots, reports, and taxonomy inference exclude results whose inputs
+have changed. A `run --no-busco` marks retained BUSCO results skipped and excludes
+them from current outputs without deleting the historical summaries.
 
 Materialized databases and content-addressed objects are checked against recorded
 digests before reuse. DIAMOND and Pfam indexes include builder identity and content

@@ -238,6 +238,10 @@ def _build_metrics_from_records(records: dict[str, ParsedStepRecord]) -> Pipelin
     converted_to_misc_genes = _required_count(
         cds_to_misc.changed_total, "Changed total", cds_to_misc.path
     )
+    if "converted_genes" in cds_to_misc.details or "Number of converted genes" in cds_to_misc.details:
+        converted_to_misc_genes = _detail_count(
+            cds_to_misc, keys=("converted_genes", "Number of converted genes"),
+        )
     total_cds_input = _detail_count(cds_to_misc, keys=("cds_input", "Total number of CDS in input"))
     total_cds_output = _detail_count(
         cds_to_misc, keys=("cds_output", "Total number of CDS in output")
@@ -374,6 +378,15 @@ def _annotation_source_sort_key(source: str) -> tuple[int, str]:
     return 0, normalized
 
 
+def _gene_annotation_source_key(source: str) -> tuple[int, str]:
+    normalized = source.casefold()
+    priority = {
+        "existing": 0, "reference": 1, "swissprot": 2, "uniref90": 3,
+        "pfam": 4, "cdd": 5, "none": 9,
+    }
+    return priority.get(normalized, 6), normalized
+
+
 def _load_plot_gene_id_map(output_root: Path) -> dict[str, str]:
     gff_path = output_root / "intermediate" / "12.gff.final-sorted.gff"
     if not gff_path.is_file():
@@ -420,6 +433,7 @@ def load_functional_annotation_summary(
     gene_id_map = _load_plot_gene_id_map(output_root)
     grouped_ids: dict[str, list[str]] = {}
     seen_ids: set[str] = set()
+    gene_sources: dict[str, str] = {}
     with evidence_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         required = {"ID", "Locus_tag", "source"}
@@ -435,13 +449,20 @@ def load_functional_annotation_summary(
                 raise MSSPackError(
                     f"Functional annotation evidence contains an empty identifier: {evidence_path}"
                 )
-            if identifier in seen_ids:
+            feature_id = row["ID"].strip()
+            if feature_id in seen_ids or (
+                identifier in gene_sources and gene_id_map.get(feature_id) != identifier
+            ):
                 raise MSSPackError(
                     f"Functional annotation evidence contains duplicate locus tag {identifier}: "
                     f"{evidence_path}"
                 )
-            seen_ids.add(identifier)
-            grouped_ids.setdefault(source, []).append(identifier)
+            seen_ids.add(feature_id)
+            previous = gene_sources.get(identifier)
+            if previous is None or _gene_annotation_source_key(source) < _gene_annotation_source_key(previous):
+                gene_sources[identifier] = source
+    for identifier, source in gene_sources.items():
+        grouped_ids.setdefault(source, []).append(identifier)
 
     groups: list[FunctionalAnnotationGroup] = []
     used_keys: set[str] = set()
@@ -505,6 +526,10 @@ def load_annotation_consistency_summary(
     }
     grouped_ids: dict[str, list[str]] = {key: [] for key in styles}
     seen: set[str] = set()
+    gene_statuses: dict[str, str] = {}
+    status_priority = {key: index for index, key in enumerate((
+        "review", "resolved", "unannotated", "no_close_family_peer", "consistent",
+    ))}
     with audit_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         required = {"ID", "Locus_tag", "name_consistency"}
@@ -524,13 +549,20 @@ def load_annotation_consistency_summary(
                 raise MSSPackError(
                     f"Unknown functional annotation consistency status {status!r}: {audit_path}"
                 )
-            if not identifier or identifier in seen:
+            feature_id = row["ID"].strip()
+            if not identifier or feature_id in seen or (
+                identifier in gene_statuses and gene_id_map.get(feature_id) != identifier
+            ):
                 raise MSSPackError(
                     "Functional annotation consistency evidence contains an empty or "
                     f"duplicate locus tag: {audit_path}"
                 )
-            seen.add(identifier)
-            grouped_ids[status].append(identifier)
+            seen.add(feature_id)
+            previous = gene_statuses.get(identifier)
+            if previous is None or status_priority[status] < status_priority[previous]:
+                gene_statuses[identifier] = status
+    for identifier, status in gene_statuses.items():
+        grouped_ids[status].append(identifier)
     groups = tuple(
         AnnotationConsistencyGroup(
             key=key,

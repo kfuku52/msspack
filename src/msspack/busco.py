@@ -7,14 +7,15 @@ import re
 import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import TypedDict
 from xml.sax.saxutils import escape
 
 from .annotation_taxonomy import (
-    discover_busco_summary_paths,
     resolve_annotation_taxonomy,
 )
+from .busco_state import busco_input_provenance
 from .chart_primitives import (
     CHART_FONT_SIZE_PT,
     GRID_RGB,
@@ -33,6 +34,7 @@ from .config import BuscoConfig, MSSPackConfig, load_config
 from .config_validation import validate_busco_config
 from .database_lock import DatabaseLockSettings, acquire_database_lock, database_lock_path
 from .execution import module_origin, run_if_needed
+from .functional_annotation import write_translated_protein_fasta
 from .output_state import locked_output
 from .padding_tools import write_spliced_cds_fasta
 from .pipeline import PipelineOutputs, prepare_pipeline_for_busco, run_pipeline
@@ -996,7 +998,7 @@ def _stage_fastas(outputs: PipelineOutputs) -> tuple[Path, Path]:
 
 
 def _stage_gffs(outputs: PipelineOutputs) -> tuple[Path, Path]:
-    input_gff = outputs.intermediate / "00.input.annotations.gff"
+    input_gff = outputs.intermediate / "04.gff.semicolons-fixed.gff"
     processed_gff = outputs.intermediate / "12.gff.final-sorted.gff"
     if not input_gff.exists():
         raise MSSPackError(f"BUSCO input GFF is missing: {input_gff}")
@@ -1127,27 +1129,36 @@ def _extract_cds_fastas(
     processed_genome_fasta: Path,
     processed_gff: Path,
     dependencies: Sequence[Path],
+    mode: str = "transcriptome",
+    genetic_code: str = "1",
 ) -> tuple[Path, Path]:
-    run_if_needed(
-        outputs=[artifacts.input_fasta, artifacts.logs_dir / "extract-input-cds.log"],
-        dependencies=[input_genome_fasta, input_gff, *dependencies],
-        action=lambda: write_spliced_cds_fasta(
-            fasta_path=input_genome_fasta,
-            gff_path=input_gff,
-            output_path=artifacts.input_fasta,
-            log_path=artifacts.logs_dir / "extract-input-cds.log",
-        ),
-    )
-    run_if_needed(
-        outputs=[artifacts.processed_fasta, artifacts.logs_dir / "extract-processed-cds.log"],
-        dependencies=[processed_genome_fasta, processed_gff, *dependencies],
-        action=lambda: write_spliced_cds_fasta(
-            fasta_path=processed_genome_fasta,
-            gff_path=processed_gff,
-            output_path=artifacts.processed_fasta,
-            log_path=artifacts.logs_dir / "extract-processed-cds.log",
-        ),
-    )
+    for label, fasta, gff, output in (
+        ("input", input_genome_fasta, input_gff, artifacts.input_fasta),
+        ("processed", processed_genome_fasta, processed_gff, artifacts.processed_fasta),
+    ):
+        log = artifacts.logs_dir / f"extract-{label}-cds.log"
+        metrics = artifacts.logs_dir / f"extract-{label}-cds.metrics.json"
+        if mode == "proteins":
+            run_if_needed(
+                outputs=[output, log, metrics],
+                dependencies=[fasta, gff, *dependencies],
+                cache_key={"mode": mode, "genetic_code": genetic_code},
+                action=partial(
+                    write_translated_protein_fasta,
+                    fasta_path=fasta, gff_path=gff, output_path=output,
+                    genetic_code=genetic_code, log_path=log, metrics_path=metrics,
+                ),
+            )
+        else:
+            run_if_needed(
+                outputs=[output, log],
+                dependencies=[fasta, gff, *dependencies],
+                cache_key={"mode": mode},
+                action=partial(
+                    write_spliced_cds_fasta,
+                    fasta_path=fasta, gff_path=gff, output_path=output, log_path=log,
+                ),
+            )
     return artifacts.input_fasta, artifacts.processed_fasta
 
 
@@ -1297,6 +1308,7 @@ def _update_busco_manifest(
     busco: BuscoConfig,
     artifacts: BuscoArtifacts,
     taxonomy_crosscheck_path: Path | None = None,
+    provenance_paths: Sequence[Path] = (),
 ) -> None:
     payload: dict[str, object]
     if manifest_path.exists():
@@ -1310,6 +1322,7 @@ def _update_busco_manifest(
         comparisons["genome"] = _comparison_manifest_entry(artifacts.genome)
     busco_payload: dict[str, object] = {
         "enabled": True,
+        "status": "completed",
         "command": busco.command,
         "run_cds": busco.run_cds,
         "run_genome": busco.run_genome,
@@ -1321,6 +1334,8 @@ def _update_busco_manifest(
         "threads": busco.threads,
         "comparisons": comparisons,
     }
+    if provenance_paths:
+        busco_payload["input_provenance"] = busco_input_provenance(provenance_paths)
     if taxonomy_crosscheck_path is not None:
         busco_payload["taxonomy_crosscheck"] = str(taxonomy_crosscheck_path)
     payload["busco"] = busco_payload
@@ -1443,6 +1458,8 @@ def run_busco_comparison(
             processed_genome_fasta=processed_fasta,
             processed_gff=processed_gff,
             dependencies=[config_path, padding_tools_module],
+            mode=busco.cds_mode,
+            genetic_code=config.sample.genetic_code,
         )
         cds_busco = replace(busco, mode=busco.cds_mode)
         cds_input_summary = _run_busco_once(
@@ -1500,7 +1517,10 @@ def run_busco_comparison(
         resolve_annotation_taxonomy(
             scientific_name=config.sample.scientific_name,
             configured_busco_lineage=busco.lineage_dataset,
-            busco_summary_paths=discover_busco_summary_paths(outputs.root),
+            busco_summary_paths=[
+                path for group in (artifacts.cds, artifacts.genome) if group is not None
+                for path in (group.input_summary_json, group.processed_summary_json)
+            ],
             output_path=taxonomy_crosscheck_path,
             log_path=artifacts.root / "taxonomy-crosscheck.log",
             metrics_path=artifacts.root / "taxonomy-crosscheck.metrics.json",
@@ -1512,5 +1532,9 @@ def run_busco_comparison(
         busco=busco,
         artifacts=artifacts,
         taxonomy_crosscheck_path=taxonomy_crosscheck_path,
+        provenance_paths=[
+            config_path, config.fasta_path, config.gff_path,
+            input_fasta, processed_fasta, input_gff, processed_gff,
+        ],
     )
     return artifacts

@@ -9,6 +9,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from .busco_state import busco_results_available
 from .config import load_config
 from .output_state import locked_output
 from .pipeline_plots import run_pipeline_plots
@@ -183,6 +184,8 @@ def _render_stage_table(report_root: Path, logs_dir: Path) -> str:
 
 
 def _render_busco_section(report_root: Path, payload: dict[str, Any]) -> str:
+    if not busco_results_available(report_root.parent, payload):
+        return ""
     busco = payload.get("busco")
     if not isinstance(busco, dict) or not busco.get("enabled"):
         return ""

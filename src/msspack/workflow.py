@@ -149,6 +149,11 @@ def _update_run_manifest(
         "force_compute": force_compute,
         "error": error or None,
     }
+    if status == "running" and not busco_enabled:
+        busco = payload.get("busco")
+        if isinstance(busco, dict):
+            busco["enabled"] = False
+            busco["status"] = "skipped"
     write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
