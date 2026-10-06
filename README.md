@@ -184,6 +184,12 @@ original type in `note`; it is never silently discarded. GFF3 `start_codon` and
 by the CDS location rather than independent MSS feature keys. See the official
 [DDBJ feature-key definitions](https://www.ddbj.nig.ac.jp/ddbj/features-e.html).
 
+CDS fragments explicitly labelled in `Note` as `coding region represented as
+misc_feature because of ...` are joined into one `misc_feature` per transcript.
+Their coding locations, strand, locus tag, replacement reason, partial status,
+and transcript ID are retained; the annotated product name is recorded in `note`.
+Other `misc_feature` records remain independent.
+
 ## Command Workflow
 
 ```mermaid

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.8.11 - 2026-10-06
+
+- Join explicitly labelled CDS replacement fragments into one misc_feature per
+  transcript, preserving coding locations, strand, locus tag, replacement and
+  partial notes, transcript ID, and product names as notes.
+- Preserve independent misc_feature records and shared replacement fragments
+  across isoforms; let root transcripts own coordinate-sorted child features.
+- Add regressions for both strands, root transcripts, single fragments,
+  independent regions, and distinct or shared isoform fragments.
+
 ## 0.8.10 - 2026-10-02
 
 - Keep gene-direct CDS adjustment compatible with the minimum supported mypy

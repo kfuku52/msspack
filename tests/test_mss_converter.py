@@ -13,6 +13,106 @@ from msspack.utils import MSSPackError
 
 
 class MssConverterTests(unittest.TestCase):
+    def _convert_replacement_model(
+        self, base: Path, *, strand: str = "+", with_gene: bool = True,
+        single_segment: bool = False, extra_rows: list[str] | None = None,
+        second_transcript: bool = False, shared_segments: bool = False,
+        annotated: bool = True,
+    ) -> tuple[str, dict[str, int]]:
+        reason = "coding region represented as misc_feature because of CDS length not multiple of 3"
+        rows = [f"chr1\t.\tgene\t1\t30\t.\t{strand}\t.\tID=g1"] if with_gene else []
+        parents = ";Parent=g1" if with_gene else ""
+        for transcript in ("t1", "t2") if second_transcript else ("t1",):
+            rows += [
+                f"chr1\t.\tmRNA\t1\t30\t.\t{strand}\t.\tID={transcript}{parents};"
+                f"Note={reason}%3B partial CDS at 3 prime end",
+                f"chr1\t.\texon\t1\t9\t.\t{strand}\t.\tParent={transcript}",
+                f"chr1\t.\texon\t20\t30\t.\t{strand}\t.\tParent={transcript}",
+            ]
+            if shared_segments and transcript == "t2":
+                continue
+            segment_parent = "t1,t2" if shared_segments else transcript
+            spans = [(4, 9)] if single_segment else [(4, 9), (20, 26)]
+            if transcript == "t2":
+                spans = [(5, 9), (20, 25)]
+            for index, (start, end) in enumerate(spans):
+                rows.append(
+                    f"chr1\t.\tmisc_feature\t{start}\t{end}\t.\t{strand}\t.\t"
+                    f"ID={transcript}.cds{index};Parent={segment_parent};Note={reason}"
+                )
+        rows += extra_rows or []
+        (base / "input.gff").write_text("\n".join(rows) + "\n")
+        (base / "input.fa").write_text(">chr1\n" + "A" * 30 + "\n")
+        products = "ID\tDescription\tLocus_tag\n"
+        if annotated:
+            products += "t1\ttest protein\tFix_g1\nt2\tsecond protein\tFix_g1\n"
+        (base / "products.tsv").write_text(products)
+        summary = convert_gff_to_mss(ConversionOptions(
+            fasta_path=base / "input.fa", gff_path=base / "input.gff",
+            annotation_path=base / "products.tsv", output_path=base / "out.ann",
+            locus_tag_prefix="Fix", organism_name="Test organism",
+        ))
+        return (base / "out.ann").read_text(), summary.overall_counts
+
+    def test_cds_replacements_form_one_coding_region_on_both_strands(self) -> None:
+        for strand in ("+", "-"):
+            for with_gene in (True, False):
+                with self.subTest(strand=strand, gene=with_gene), tempfile.TemporaryDirectory() as tmp:
+                    text, counts = self._convert_replacement_model(
+                        Path(tmp), strand=strand, with_gene=with_gene,
+                    )
+                    coding = "join(4..9,20..26)"
+                    mrna = "join(1..9,20..30)"
+                    if strand == "-":
+                        coding, mrna = f"complement({coding})", f"complement({mrna})"
+                    self.assertEqual(text.count("\tmisc_feature\t"), 1)
+                    self.assertIn(f"\tmisc_feature\t{coding}\tlocus_tag\tFix_g1\n", text)
+                    self.assertIn(f"\tmRNA\t{mrna}\t", text)
+                    self.assertIn("\tnote\ttranscript_id:t1\n", text)
+                    self.assertIn("partial CDS at 3 prime end", text)
+                    self.assertIn("\tnote\ttest protein\n", text)
+                    self.assertNotIn("\tproduct\t", text)
+                    self.assertNotIn("\tCDS\t", text)
+                    self.assertEqual(counts["non_cds_features"], 2)
+
+    def test_single_cds_replacement_retains_identity_and_unknown_product(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            text, _ = self._convert_replacement_model(
+                Path(tmp), single_segment=True, annotated=False,
+            )
+            self.assertEqual(text.count("\tmisc_feature\t"), 1)
+            self.assertIn("\tmisc_feature\t4..9\t", text)
+            self.assertIn("\tnote\thypothetical protein\n", text)
+            self.assertIn("\tnote\ttranscript_id:t1\n", text)
+
+    def test_unrelated_misc_features_are_not_joined_with_cds_replacements(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            text, _ = self._convert_replacement_model(Path(tmp), extra_rows=[
+                "chr1\t.\tmisc_feature\t12\t14\t.\t+\t.\tID=other;Parent=t1;Note=independent region",
+                "chr1\t.\tmisc_feature\t16\t18\t.\t-\t.\tID=opposite;Parent=t1;"
+                "Note=coding region represented as misc_feature because of internal stop codon",
+            ])
+            self.assertEqual(text.count("\tmisc_feature\t"), 3)
+            self.assertIn("\tmisc_feature\tjoin(4..9,20..26)\t", text)
+            self.assertIn("\tmisc_feature\t12..14\t", text)
+            self.assertIn("\tmisc_feature\tcomplement(16..18)\t", text)
+            self.assertIn("independent region", text)
+
+    def test_cds_replacements_are_joined_per_transcript_even_with_one_locus_tag(self) -> None:
+        for shared in (False, True):
+            with self.subTest(shared=shared), tempfile.TemporaryDirectory() as tmp:
+                text, _ = self._convert_replacement_model(
+                    Path(tmp), second_transcript=True, shared_segments=shared,
+                )
+                self.assertEqual(text.count("\tmisc_feature\t"), 2)
+                self.assertIn("\tmisc_feature\tjoin(4..9,20..26)\t", text)
+                if not shared:
+                    self.assertIn("\tmisc_feature\tjoin(5..9,20..25)\t", text)
+                self.assertEqual(text.count("\tnote\ttranscript_id:t1\n"), 2)
+                self.assertEqual(text.count("\tnote\ttranscript_id:t2\n"), 2)
+                self.assertIn("\tnote\ttest protein\n", text)
+                self.assertIn("\tnote\tsecond protein\n", text)
+
     def _convert_direct_cds_model(
         self, base: Path, *, strand: str, ids: tuple[str, str],
         with_gene: bool = True, sequence: str | None = None, policy: str = "misc_feature",

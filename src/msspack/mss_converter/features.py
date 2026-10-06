@@ -30,6 +30,7 @@ from .render import (
 )
 
 _CONTAINER_TYPES = frozenset({"chromosome", "contig", "scaffold", "supercontig", "region"})
+_CDS_REPLACEMENT_PREFIX = "coding region represented as misc_feature because of "
 
 
 def _attribute(feature: FeatureRecord, *keys: str) -> str:
@@ -621,6 +622,72 @@ def _standalone_cds_key(feature: FeatureRecord) -> tuple[str, str, str]:
     return "row", str(id(feature)), feature.strand
 
 
+def _cds_replacement_segments(
+    transcript: FeatureRecord,
+    parent_lookup: dict[str, list[FeatureRecord]],
+) -> list[FeatureRecord]:
+    """Recognize explicitly labelled CDS replacements, not arbitrary misc features."""
+
+    return [
+        child for child in parent_lookup.get(transcript.id, [])
+        if child.type == "misc_feature"
+        and child.seq_id == transcript.seq_id
+        and child.strand == transcript.strand
+        and _attribute(child, "Note", "note", "description", "Description").startswith(
+            _CDS_REPLACEMENT_PREFIX
+        )
+    ]
+
+
+def build_cds_replacement_text(
+    *,
+    transcript: FeatureRecord,
+    segments: list[FeatureRecord],
+    locus_tag: str,
+    annotation_lookup: dict[str, AnnotationEntry],
+    gap_regions: GapRegions,
+) -> str:
+    location, out_gap_flag = _location_for_features(
+        segments, strand=transcript.strand, gap_regions=gap_regions,
+    )
+    qualifiers = _generic_qualifiers(transcript, feature_key="mRNA", locus_tag=locus_tag)
+
+    def add_qualifier(key: str, value: str) -> None:
+        value = _clean_value(value)
+        if not value or (key, value) in qualifiers:
+            return
+        if key == "note" and value.startswith(_CDS_REPLACEMENT_PREFIX) and any(
+            existing_key == "note" and existing_value.startswith(value)
+            for existing_key, existing_value in qualifiers
+        ):
+            return
+        qualifiers.append((key, value))
+
+    annotation = annotation_lookup.get(transcript.id)
+    product = (
+        annotation.product_name if annotation is not None else ""
+    ) or _attribute(transcript, "product", "Product") or next(
+        (_attribute(segment, "product", "Product") for segment in segments
+         if _attribute(segment, "product", "Product")),
+        "hypothetical protein",
+    )
+    add_qualifier("note", product)
+    for segment in segments:
+        for key, value in _generic_qualifiers(
+            segment, feature_key="misc_feature", locus_tag=None,
+        ):
+            if key == "note":
+                # This describes a single predicted coding region; the original
+                # per-row GFF type boilerplate adds no biological information.
+                value = _attribute(segment, "Note", "note", "description", "Description")
+            add_qualifier("note" if key == "product" else key, value)
+    if out_gap_flag:
+        add_qualifier("artificial_location", "low-quality sequence region")
+    return render_generic_feature(
+        feature_key="misc_feature", position=location, qualifiers=qualifiers,
+    )
+
+
 def convert_contig_features(
     *,
     gene_lookup: dict[str, list[FeatureRecord]],
@@ -753,6 +820,20 @@ def convert_contig_features(
         if feature.id:
             render_descendants(feature.id, locus_tag=locus_tag)
 
+    def render_cds_replacements(transcript: FeatureRecord, *, locus_tag: str) -> None:
+        segments = _cds_replacement_segments(transcript, parent_lookup)
+        if not segments:
+            return
+        chunks.append(build_cds_replacement_text(
+            transcript=transcript, segments=segments, locus_tag=locus_tag,
+            annotation_lookup=annotation_lookup, gap_regions=gap_regions,
+        ))
+        event_counts["non_cds_features"] += 1
+        processed.update(id(segment) for segment in segments)
+        for segment in segments:
+            if segment.id:
+                render_descendants(segment.id, locus_tag=locus_tag)
+
     for gene_feature in genes:
         processed.add(id(gene_feature))
         locus_tag_counter += 100
@@ -810,6 +891,7 @@ def convert_contig_features(
                     locus_tag=transcript_locus_tag,
                     product_override=product_override,
                 )
+                render_cds_replacements(child, locus_tag=transcript_locus_tag)
                 render_descendants(
                     child.id,
                     locus_tag=transcript_locus_tag,
@@ -872,6 +954,13 @@ def convert_contig_features(
     for feature in seq_lookup.get(contig_name, []):
         if id(feature) in processed:
             continue
+        if (
+            feature.type not in CODING_TRANSCRIPT_TYPES
+            and transcript_ids.intersection(child_ids(feature.parent))
+        ):
+            # Root transcripts own their children even when coordinate sorting
+            # visits an exon or coding-region fragment before the transcript.
+            continue
         processed.add(id(feature))
         if feature.type in _CONTAINER_TYPES or feature.type in CODON_TYPES:
             continue
@@ -880,9 +969,6 @@ def convert_contig_features(
             # duplicate indexes and deliberately avoids duplicate MSS features.
             continue
         if feature.type == "CDS":
-            # A transcript owns its CDS even when coordinate sorting visits the CDS first.
-            if transcript_ids.intersection(child_ids(feature.parent)):
-                continue
             locus_tag_counter += 100
             render_standalone_cds(feature, locus_tag=current_locus_tag())
         elif feature.type in CODING_TRANSCRIPT_TYPES:
@@ -904,6 +990,7 @@ def convert_contig_features(
                 locus_tag=transcript_locus_tag,
                 product_override=annotation.product_name if annotation else "",
             )
+            render_cds_replacements(feature, locus_tag=transcript_locus_tag)
             render_descendants(
                 feature.id,
                 locus_tag=transcript_locus_tag,
