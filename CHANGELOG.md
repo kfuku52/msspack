@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.8.12 - 2026-10-13
+
+- Notify the central Dependabot controller after prepared updates finish CI.
+
 ## 0.8.11 - 2026-10-06
 
 - Join explicitly labelled CDS replacement fragments into one misc_feature per
