@@ -9,6 +9,8 @@ from msspack.mss_converter.core import (
     convert_gff_to_mss,
     detect_gap_regions,
 )
+from msspack.mss_converter.gaps import GapIndex, compare_exon_to_gaps
+from msspack.mss_converter.models import feature_from_row
 from msspack.utils import MSSPackError
 
 
@@ -288,6 +290,22 @@ class MssConverterTests(unittest.TestCase):
         self.assertEqual(gaps, [(3, 5), (9, 13)])
         self.assertIn("assembly_gap\t3..5", out)
         self.assertIn("assembly_gap\t9..13", out)
+
+    def test_indexed_gaps_preserve_segments_and_flags_at_every_boundary(self) -> None:
+        for gaps in ([], [(3, 5), (11, 14), (20, 24), (28, 30)]):
+            index = GapIndex.from_regions(gaps)
+            for start in range(1, 33):
+                for end in range(start, 33):
+                    for strand in ("+", "-"):
+                        feature = feature_from_row({
+                            "seq_id": "chr1", "type": "CDS", "ID": "cds",
+                            "start": start, "end": end, "strand": strand,
+                        })
+                        with self.subTest(gaps=gaps, start=start, end=end, strand=strand):
+                            self.assertEqual(
+                                compare_exon_to_gaps(feature, index, strand),
+                                compare_exon_to_gaps(feature, gaps, strand),
+                            )
 
     def test_build_gff_feature_indexes_splits_multiple_parents(self) -> None:
         shared = {

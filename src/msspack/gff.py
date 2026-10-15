@@ -13,6 +13,8 @@ _INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
 def _decode_attribute_component(value: str) -> str:
+    if "%" not in value and value.isascii():
+        return value
     if _INVALID_PERCENT_ESCAPE.search(value):
         raise ValueError(f"Invalid percent escape in GFF3 attribute: {value!r}")
     try:
@@ -98,14 +100,14 @@ def parse_attributes(text: str) -> dict[str, str]:
             raise ValueError("Invalid empty GFF3 attribute key")
         if key in attrs:
             raise ValueError(f"Duplicate GFF3 attribute key: {key}")
-        decoded_value = _decode_attribute_component(value.strip())
-        if any(character in decoded_value for character in ("\x00", "\r", "\n", "\t")):
-            raise ValueError(f"GFF3 attribute {key!r} contains unsupported control characters")
-        attrs[key] = (
+        decoded_value = (
             AttributeList(_decode_attribute_component(item) for item in value.strip().split(","))
             if key in {"Parent", "Alias", "Dbxref", "Ontology_term"}
-            else decoded_value
+            else _decode_attribute_component(value.strip())
         )
+        if any(character in decoded_value for character in ("\x00", "\r", "\n", "\t")):
+            raise ValueError(f"GFF3 attribute {key!r} contains unsupported control characters")
+        attrs[key] = decoded_value
     return attrs
 
 

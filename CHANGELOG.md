@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.8.13 - 2026-10-15
+
+- Index gap-normalization edits and cumulative offsets once per sequence, then
+  remap GFF boundaries with binary search while preserving clipping semantics.
+- Index assembly gaps once per contig so MSS exon/CDS rendering checks only
+  overlapping gaps.
+- Avoid redundant GFF3 attribute decoding and reuse parsed attributes during
+  coordinate deduplication without weakening validation or escaped list handling.
+- Add reproducible offline sequence benchmarks, performance review results, and
+  regressions for gap boundaries, both strands, and escaped attributes.
+
 ## 0.8.12 - 2026-10-13
 
 - Notify the central Dependabot controller after prepared updates finish CI.

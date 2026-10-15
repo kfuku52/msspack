@@ -11,7 +11,7 @@ from .coordinate_duplicates import (
     write_coordinate_duplicate_map,
 )
 from .fasta import iter_fasta
-from .gff import GFFRecord, child_ids, filter_parent_attribute, parse_attributes, repair_attributes
+from .gff import GFFRecord, child_ids, filter_parent_attribute, repair_attributes
 from .step_logging import write_id_list, write_step_log, write_step_metrics
 from .transcript_models import gene_model_ids
 from .utils import MSSPackError, atomic_text_writer, ensure_dir
@@ -164,7 +164,7 @@ def drop_duplicate_coordinate_genes(
                 continue
             record = GFFRecord.from_line(line)
             records.append(record)
-            attr = parse_attributes(fields[8])
+            attr = record.attributes
             rec_id = attr.get("ID")
             parent = attr.get("Parent")
             coord_key: tuple[str, int, int, str] | None = None

@@ -9,7 +9,7 @@ from Bio.Data import CodonTable
 from ..fasta import iter_fasta
 from ..utils import MSSPackError, atomic_text_writer
 from .features import convert_contig_features
-from .gaps import detect_gap_regions
+from .gaps import GapIndex, detect_gap_regions
 from .models import (
     FeatureRecord,
     build_gff_indexes,
@@ -142,7 +142,7 @@ def convert_gff_to_mss(options: ConversionOptions) -> ConversionSummary:
                 locus_tag_counter=locus_tag_counter,
                 annotation_lookup=annotation_lookup,
                 protein_lookup=protein_lookup,
-                gap_regions=gap_regions,
+                gap_regions=GapIndex.from_regions(gap_regions),
                 contig_sequence=sequence,
                 infer_boundary=options.infer_boundary,
                 start_codons=start_codons,

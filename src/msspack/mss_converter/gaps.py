@@ -1,12 +1,32 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, bisect_right
+from dataclasses import dataclass
 from typing import Protocol
 
 from .models import FeatureRecord
 from .render import render_gap_feature
 
-GapRegions = list[tuple[int, int]]
+
+@dataclass(frozen=True)
+class GapIndex:
+    """Search sorted, disjoint N runs without scanning an entire contig."""
+
+    starts: tuple[int, ...]
+    ends: tuple[int, ...]
+
+    @classmethod
+    def from_regions(cls, regions: list[tuple[int, int]]) -> GapIndex:
+        return cls(tuple(start for start, _ in regions), tuple(end for _, end in regions))
+
+    def overlapping(self, start: int, end: int) -> tuple[tuple[int, int], ...]:
+        left = bisect_left(self.ends, start)
+        right = bisect_right(self.starts, end)
+        return tuple(zip(self.starts[left:right], self.ends[left:right], strict=True))
+
+
+GapRegions = list[tuple[int, int]] | GapIndex
 GAP_PATTERN = re.compile("N+")
 
 
@@ -20,10 +40,10 @@ def detect_gap_regions(
     linkage_evidence: str,
     min_assembly_gap_size: int,
     gap_estimated_length: str,
-) -> tuple[str, GapRegions]:
+) -> tuple[str, list[tuple[int, int]]]:
     if not isinstance(sequence, str):
         sequence = str(sequence.seq)
-    gap_regions: GapRegions = [
+    gap_regions = [
         (match.start() + 1, match.end())
         for match in GAP_PATTERN.finditer(sequence)
     ]
@@ -55,13 +75,17 @@ def compare_exon_to_gaps(
     gap_count = 0
     exon_start = exon_feature.start
     exon_end = exon_feature.end
+    overlapping = (
+        gap_regions.overlapping(exon_start, exon_end)
+        if isinstance(gap_regions, GapIndex) else gap_regions
+    )
 
-    if any(start <= exon_start <= exon_end <= end for start, end in gap_regions):
+    if any(start <= exon_start <= exon_end <= end for start, end in overlapping):
         # There is no flanking sequence to split out. Retain this uncertain
         # segment and let the configured gap policy mark the enclosing feature.
         return [(exon_start, exon_end)], True, True, True
 
-    for gap_start, gap_end in gap_regions:
+    for gap_start, gap_end in overlapping:
         if gap_end < exon_start or exon_end < gap_start:
             continue
         gap_count += 1

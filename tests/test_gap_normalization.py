@@ -8,6 +8,32 @@ from msspack.utils import MSSPackError
 
 
 class GapNormalizationTests(unittest.TestCase):
+    def test_gapjust_maps_unsorted_features_across_expanding_and_shrinking_gaps(self) -> None:
+        # Three gaps of lengths 4, 1 and 6 become length 2. Include both gap
+        # boundaries, clipped suffixes, adjacent bases and a different contig.
+        coordinates = [23, 1, 22, 3, 4, 5, 6, 7, 8, 10, 11, 12, 16, 17, 18, 19]
+        expected = [18, 1, 17, 3, 4, 5, 5, 5, 6, 8, 9, 11, 15, 16, 17, 17]
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "input.fa").write_text(
+                ">chr1\nAAANNNNAAANAAAAANNNNNNA\n>chr2\nAAAA\n",
+            )
+            rows = [
+                f"chr1\t.\tregion\t{value}\t{value}\t.\t-\t.\tID=r{index}"
+                for index, value in enumerate(coordinates)
+            ]
+            rows.insert(3, "chr2\t.\tgene\t2\t4\t.\t+\t.\tID=unaffected")
+            (base / "input.gff3").write_text("\n".join(rows) + "\n")
+            normalize_gap_lengths(
+                fasta_path=base / "input.fa", output_fasta_path=base / "out.fa",
+                input_gff_path=base / "input.gff3", output_gff_path=base / "out.gff3",
+                log_path=base / "log", gap_len=2,
+            )
+            records = list(iter_gff_records(base / "out.gff3"))
+            unchanged = records.pop(3)
+            self.assertEqual((unchanged.seqid, unchanged.start, unchanged.end), ("chr2", 2, 4))
+            self.assertEqual([(r.start, r.end) for r in records], [(v, v) for v in expected])
+
     def test_gapjust_maps_boundaries_inside_gaps_and_after_multiple_edits(self) -> None:
         cases = (
             ("ATG" + "N" * 120 + "AAA", 100, [(1, 15), (110, 126)], [(1, 15), (103, 106)]),

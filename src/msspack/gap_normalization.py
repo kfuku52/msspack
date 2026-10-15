@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime
@@ -70,26 +71,31 @@ def _apply_gapjust_to_sequence(
     return "".join(rebuilt), justifications, num_justifications, min_original_gap_length, max_original_gap_length
 
 
-def _shift_coordinate(
-    value: int,
-    justifications: Iterable[GapJustification],
-    *,
-    is_end: bool = False,
-) -> int:
-    cumulative_offset = 0
-    for start, edit_len, original_length in sorted(justifications, key=lambda item: item[0]):
-        if value <= start:
-            break
-        if value <= start + original_length:
-            new_length = original_length + edit_len
+class _GapCoordinateMap:
+    """Index disjoint N-run edits once, then map each boundary in O(log gaps)."""
+
+    def __init__(self, justifications: Iterable[GapJustification]) -> None:
+        ordered = sorted(justifications, key=lambda item: item[0])
+        self.starts = [start for start, _, _ in ordered]
+        self.ends = [start + length for start, _, length in ordered]
+        self.new_lengths = [length + edit for _, edit, length in ordered]
+        self.offsets = [0]
+        for _, edit, _ in ordered:
+            self.offsets.append(self.offsets[-1] + edit)
+
+    def shift(self, value: int, *, is_end: bool = False) -> int:
+        index = bisect_left(self.starts, value) - 1
+        if index < 0:
+            return value
+        if value <= self.ends[index]:
+            start = self.starts[index]
+            new_length = self.new_lengths[index]
             if new_length == 0:
                 # Clip starts to the next base and ends to the preceding base.
-                return start + cumulative_offset + (0 if is_end else 1)
-            # A boundary within the retained Ns keeps its offset. A boundary in
-            # the removed suffix maps to the last N, never to an upstream base.
-            return start + cumulative_offset + min(value - start, new_length)
-        cumulative_offset += edit_len
-    return value + cumulative_offset
+                return start + self.offsets[index] + (0 if is_end else 1)
+            # Boundaries in a removed suffix map to the last retained N.
+            return start + self.offsets[index] + min(value - start, new_length)
+        return value + self.offsets[index + 1]
 
 
 def _apply_gapjust_to_gff(
@@ -99,14 +105,17 @@ def _apply_gapjust_to_gff(
     changed_starts = 0
     changed_ends = 0
     changed_genes = 0
+    coordinate_maps = {
+        seqid: _GapCoordinateMap(edits) for seqid, edits in justifications_by_seq.items() if edits
+    }
     for record in document.records:
-        justifications = justifications_by_seq.get(record.seqid)
-        if not justifications:
+        coordinate_map = coordinate_maps.get(record.seqid)
+        if coordinate_map is None:
             continue
         old_start = record.start
         old_end = record.end
-        record.start = _shift_coordinate(record.start, justifications)
-        record.end = _shift_coordinate(record.end, justifications, is_end=True)
+        record.start = coordinate_map.shift(record.start)
+        record.end = coordinate_map.shift(record.end, is_end=True)
         if record.start < 1 or record.end < record.start:
             raise MSSPackError(
                 f"Gap normalization would remove every base of {record.type} "

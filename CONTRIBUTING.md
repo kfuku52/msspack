@@ -149,6 +149,9 @@ Inspect `build-manifest.json` for stage reuse and validation results.
 
 Use [benchmark-performance](.agents/skills/benchmark-performance/SKILL.md) for
 performance work and `python scripts/benchmark_pack.py --help` for the harness.
+For repeatable offline sequence workloads and recorded comparisons, see
+[the performance review](docs/performance-review.md) and
+`python scripts/benchmark_sequence_hotspots.py --help`.
 Benchmark cleanup flags remove configured analysis outputs; never use them on
 valuable results. `python scripts/clean_artifacts.py --dry-run` previews repository
 cleanup, including BUSCO downloads. Neither cleanup nor benchmarking is needed

@@ -5,6 +5,7 @@ from pathlib import Path
 from msspack.coordinate_duplicates import read_coordinate_duplicate_map
 from msspack.fasta import reverse_complement
 from msspack.gff import (
+    child_ids,
     iter_gff_records,
     parse_attributes,
     read_gff_document,
@@ -290,6 +291,26 @@ class GffSortTests(unittest.TestCase):
     def test_attributes_reject_invalid_percent_escapes(self) -> None:
         with self.assertRaisesRegex(ValueError, "percent escape"):
             parse_attributes("ID=bad%ZZ")
+
+    def test_attributes_preserve_utf8_and_escaped_list_boundaries(self) -> None:
+        attrs = parse_attributes(
+            "ID=plain+id;Par%65nt=escaped%2Cid,plain+id;Alias=caf%C3%A9,café;Note=%252C",
+        )
+        self.assertEqual(attrs["ID"], "plain+id")
+        self.assertEqual(child_ids(attrs["Parent"]), ["escaped,id", "plain+id"])
+        self.assertEqual(child_ids(attrs["Alias"]), ["café", "café"])
+        self.assertEqual(attrs["Note"], "%2C")
+
+    def test_attributes_validate_every_list_member_and_decoded_key(self) -> None:
+        for attributes, message in (
+            ("ID=x;Parent=valid,bad%ZZ", "percent escape"),
+            ("ID=x;Alias=valid,bad%FF", "UTF-8 escape"),
+            ("ID=x;Dbxref=valid,bad%09", "control characters"),
+            ("ID=x;Parent=valid,bad\x00", "control characters"),
+            ("ID=x;I%44=duplicate", "Duplicate GFF3 attribute"),
+        ):
+            with self.subTest(attributes=attributes), self.assertRaisesRegex(ValueError, message):
+                parse_attributes(attributes)
 
     def test_dot_represents_an_empty_attribute_set(self) -> None:
         self.assertEqual(parse_attributes("."), {})
