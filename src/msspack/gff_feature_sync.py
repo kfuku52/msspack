@@ -210,11 +210,11 @@ def validate_parent_child_containment(
     for row in active:
         attrs = parse_attributes(row[8])
         feature_id = attrs.get("ID", "")
-        parents = tuple(child_ids(attrs.get("Parent")))
-        metadata[id(row)] = feature_id, parents
+        row_parent_ids = tuple(child_ids(attrs.get("Parent")))
+        metadata[id(row)] = feature_id, row_parent_ids
         if feature_id:
             by_id[feature_id].append(row)
-        for parent_id in parents:
+        for parent_id in row_parent_ids:
             children_by_parent[parent_id].append(row)
 
     issues: list[HierarchyIssue] = []

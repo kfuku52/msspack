@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.8.15 - 2026-10-15
+
+- Keep the optimized hierarchy validator compatible with minimum-supported
+  mypy 1.19 by using separate names for parent IDs and parent feature rows.
+
 ## 0.8.14 - 2026-10-15
 
 - Stream gap-normalized FASTA contigs instead of retaining the entire assembly;
