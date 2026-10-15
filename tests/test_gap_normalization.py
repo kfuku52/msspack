@@ -1,3 +1,4 @@
+import gzip
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,47 @@ from msspack.utils import MSSPackError
 
 
 class GapNormalizationTests(unittest.TestCase):
+    def test_streams_late_edits_with_canonical_prefix_and_suffix(self) -> None:
+        for compressed in (False, True):
+            for in_place in (False, True):
+                if compressed and in_place:
+                    continue
+                with self.subTest(gzip=compressed, in_place=in_place), tempfile.TemporaryDirectory() as tmp:
+                    base = Path(tmp)
+                    source = base / ("in.fa.gz" if compressed else "in.fa")
+                    original = ">first description\nacgt\nacgt\n>edited\nAAANNNNAAA\n>last\nttgg\n"
+                    if compressed:
+                        source.write_bytes(gzip.compress(original.encode()))
+                    else:
+                        source.write_text(original)
+                    target = source if in_place else base / "out.fa"
+                    normalize_gap_lengths(
+                        fasta_path=source, output_fasta_path=target, log_path=base / "log", gap_len=2,
+                    )
+                    self.assertEqual(target.read_text(),
+                                     ">first description\nacgtacgt\n>edited\nAAANNAAA\n>last\nttgg\n")
+
+    def test_no_edits_preserve_original_bytes_and_late_failure_preserves_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source, target = base / "in.fa", base / "out.fa"
+            original = ">first  description\nacg\ntt\n\n>second\nAAA\n"
+            source.write_text(original)
+            normalize_gap_lengths(
+                fasta_path=source, output_fasta_path=target, log_path=base / "log", gap_len=2,
+            )
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            source.write_text(">first\nAAANNNNAAA\n>second\nAAA\n>first\nCCC\n")
+            target.unlink()  # The no-edit result may be a hard link to the input.
+            target.write_text("previous result\n")
+            with self.assertRaisesRegex(ValueError, "Duplicate sequence IDs"):
+                normalize_gap_lengths(
+                    fasta_path=source, output_fasta_path=target, log_path=base / "log", gap_len=2,
+                    input_gff_path=base / "unused.gff", output_gff_path=base / "unused.out.gff",
+                )
+            self.assertEqual(target.read_text(), "previous result\n")
+            self.assertEqual(list(base.glob(".out.fa.*.tmp")), [])
+
     def test_gapjust_maps_unsorted_features_across_expanding_and_shrinking_gaps(self) -> None:
         # Three gaps of lengths 4, 1 and 6 become length 2. Include both gap
         # boundaries, clipped suffixes, adjacent bases and a different contig.

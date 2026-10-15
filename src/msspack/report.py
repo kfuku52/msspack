@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .busco_state import busco_results_available
-from .config import load_config
+from .config import MSSPackConfig, load_config
 from .output_state import locked_output
 from .pipeline_plots import run_pipeline_plots
 from .utils import MSSPackError, ensure_dir, write_text
@@ -525,12 +525,19 @@ def run_html_report(
     config = load_config(config_file)
     output_root = config.output_dir
     logs_dir = output_root / "logs"
-    manifest_path = output_root / "build-manifest.json"
     if not logs_dir.exists():
         raise MSSPackError(
             f"Build logs are missing under {logs_dir}. Run 'msspack pack --config {config_file}' first."
         )
     run_pipeline_plots(config_file, force=force)
+    return _write_html_report(config)
+
+
+def _write_html_report(config: MSSPackConfig) -> ReportArtifacts:
+    """Render under the caller's output lock after current plots are prepared."""
+    output_root = config.output_dir
+    logs_dir = output_root / "logs"
+    manifest_path = output_root / "build-manifest.json"
     payload = _read_manifest(manifest_path)
     artifacts = ReportArtifacts(
         root=ensure_dir(output_root / "report"),

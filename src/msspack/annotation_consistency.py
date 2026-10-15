@@ -10,8 +10,10 @@ import subprocess
 import tempfile
 import unicodedata
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 from .config_models import (
@@ -423,7 +425,10 @@ def _surface_normalize(value: str) -> str:
 
 
 def _canonical_tokens(value: str) -> frozenset[str]:
-    normalized = _surface_normalize(value)
+    return _canonical_tokens_from_surface(_surface_normalize(value))
+
+
+def _canonical_tokens_from_surface(normalized: str) -> frozenset[str]:
     for pattern, replacement in _PHRASE_ALIASES:
         normalized = pattern.sub(replacement, normalized)
     return frozenset(token for token in normalized.split() if token not in _GENERIC_NAME_TOKENS)
@@ -462,8 +467,18 @@ def classify_product_names(
 ) -> NameDecision:
     if _surface_normalize(left_product) == _surface_normalize(right_product):
         return NameDecision("exact", 1.0, "normalized_text_match")
-    left_tokens = _canonical_tokens(left_product)
-    right_tokens = _canonical_tokens(right_product)
+    return _classify_name_tokens(
+        _canonical_tokens(left_product), _canonical_tokens(right_product),
+        idf=idf, similarity_threshold=similarity_threshold,
+    )
+
+
+def _classify_name_tokens(
+    left_tokens: frozenset[str], right_tokens: frozenset[str], *,
+    idf: dict[str, float] | None,
+    similarity_threshold: float,
+    modifiers: Callable[[frozenset[str]], frozenset[str]] = _specific_modifiers,
+) -> NameDecision:
     if left_tokens and left_tokens == right_tokens:
         return NameDecision(
             "canonical_equivalent",
@@ -472,8 +487,8 @@ def classify_product_names(
         )
     weights = idf or {}
     similarity = _weighted_jaccard(left_tokens, right_tokens, weights)
-    left_modifiers = _specific_modifiers(left_tokens)
-    right_modifiers = _specific_modifiers(right_tokens)
+    left_modifiers = modifiers(left_tokens)
+    right_modifiers = modifiers(right_tokens)
     if left_modifiers and right_modifiers and left_modifiers != right_modifiers:
         return NameDecision("review", similarity, "specific_modifier_conflict")
     shared_tokens = left_tokens & right_tokens
@@ -484,6 +499,31 @@ def classify_product_names(
             "shared_family_name_with_granularity_difference",
         )
     return NameDecision("review", similarity, "incompatible_family_name_tokens")
+
+
+class _NameComparisonCache:
+    """Bound immutable name transformations to one audit, without caching decisions."""
+
+    def __init__(self) -> None:
+        normalize = lru_cache(maxsize=16384)(_surface_normalize)
+
+        def tokens(product: str) -> frozenset[str]:
+            return _canonical_tokens_from_surface(normalize(product))
+
+        self._normalize = normalize
+        self.tokens = lru_cache(maxsize=16384)(tokens)
+        self._modifiers = lru_cache(maxsize=16384)(_specific_modifiers)
+
+    def classify(
+        self, left: str, right: str, *,
+        idf: dict[str, float], similarity_threshold: float,
+    ) -> NameDecision:
+        if self._normalize(left) == self._normalize(right):
+            return NameDecision("exact", 1.0, "normalized_text_match")
+        return _classify_name_tokens(
+            self.tokens(left), self.tokens(right), idf=idf,
+            similarity_threshold=similarity_threshold, modifiers=self._modifiers,
+        )
 
 
 def _read_evidence(path: Path) -> dict[str, dict[str, str]]:
@@ -587,13 +627,16 @@ def _components(
     return id_to_family, families, accepted
 
 
-def _build_idf(evidence: dict[str, dict[str, str]]) -> dict[str, float]:
+def _build_idf(
+    evidence: dict[str, dict[str, str]], *,
+    tokens: Callable[[str], frozenset[str]] = _canonical_tokens,
+) -> dict[str, float]:
     document_frequency: Counter[str] = Counter()
     products = [
         row["assigned_product"] for row in evidence.values() if row["source"].casefold() != "none"
     ]
     for product in products:
-        document_frequency.update(_canonical_tokens(product))
+        document_frequency.update(tokens(product))
     total = len(products)
     return {
         token: math.log((total + 1) / (frequency + 1)) + 1.0
@@ -731,13 +774,15 @@ def audit_annotation_consistency(
         identifiers,
         evalue=consistency.evalue,
     )
-    idf = _build_idf(evidence)
+    name_cache = _NameComparisonCache()
+    idf = _build_idf(evidence, tokens=name_cache.tokens)
+    tiers = _tier_specs(consistency)
     decisions = {
         (edge.left_id, edge.right_id): (
             NameDecision("not_evaluable", None, "unannotated_pair")
             if evidence[edge.left_id]["source"].casefold() == "none"
             or evidence[edge.right_id]["source"].casefold() == "none"
-            else classify_product_names(
+            else name_cache.classify(
                 evidence[edge.left_id]["assigned_product"],
                 evidence[edge.right_id]["assigned_product"],
                 idf=idf,
@@ -755,7 +800,7 @@ def audit_annotation_consistency(
     summary_rows: list[dict[str, object]] = []
     family_row_by_id: dict[str, dict[str, object]] = {}
 
-    for tier in _tier_specs(consistency):
+    for tier in tiers:
         id_to_family, families, tier_edges = _components(identifiers, edges, tier)
         tier_results[tier.key] = (id_to_family, families, tier_edges)
         edges_by_family: dict[str, list[SimilarityEdge]] = defaultdict(list)
@@ -874,7 +919,7 @@ def audit_annotation_consistency(
     for edge in edges:
         key = (edge.left_id, edge.right_id)
         decision = decisions[key]
-        qualifies = {tier.key: _edge_passes(edge, tier) for tier in _tier_specs(consistency)}
+        qualifies = {tier.key: _edge_passes(edge, tier) for tier in tiers}
         if not qualifies["broad"]:
             continue
         left = evidence[edge.left_id]
@@ -1094,7 +1139,7 @@ def audit_annotation_consistency(
     _write_tsv(source_pair_output_path, SOURCE_PAIR_FIELDS, source_pair_rows)
 
     near_summary = next(row for row in summary_rows if row["tier"] == "near_identical")
-    family_spec = next(tier for tier in _tier_specs(consistency) if tier.key == "family")
+    family_spec = next(tier for tier in tiers if tier.key == "family")
     write_step_log(
         log_path=log_path,
         command="msspack functional-annotation consistency-audit",

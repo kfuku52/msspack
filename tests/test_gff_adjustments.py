@@ -4,9 +4,44 @@ from pathlib import Path
 
 from msspack.gff import iter_gff_records
 from msspack.gff_adjustments import apply_padding_to_gff, fix_gff_to_inframe
+from msspack.gff_feature_sync import validate_parent_child_containment
 
 
 class GffAdjustmentTests(unittest.TestCase):
+    def test_hierarchy_metadata_preserves_scopes_escaped_ids_and_removals(self) -> None:
+        rows = [line.split("\t") for line in (
+            "chr1\t.\tmRNA\t1\t9\t.\t+\t.\tID=tx%2Cone",
+            "chr1\t.\tCDS\t1\t12\t.\t+\t0\tID=cds;Parent=tx%2Cone",
+            "chr1\t.\tfive_prime_UTR\t5\t8\t.\t+\t.\tID=utr;Parent=tx%2Cone",
+            "chr1\t.\tstart_codon\t1\t2\t.\t+\t0\tParent=tx%2Cone",
+        )]
+        issues = validate_parent_child_containment(rows)
+        self.assertEqual(len(issues), 3)
+        self.assertEqual({issue.parent_id for issue in issues}, {"tx,one"})
+        self.assertEqual(validate_parent_child_containment(rows, scope_parent_ids={"other"}), [])
+        self.assertEqual(validate_parent_child_containment(rows, removed_row_ids={id(rows[1])}), [])
+        rows[1][4] = "9"
+        self.assertEqual(len(validate_parent_child_containment(rows)), 2)
+
+    def test_shared_model_scan_still_rejects_malformed_non_cds_rows(self) -> None:
+        for bad_row in (
+            "chr1\t.\texon\tbad\t9\t.\t+\t.\tID=e",
+            "chr1\t.\texon\t1\t9\t.\t+\t.",
+            "chr1\t.\texon\t1\t9\t.\t+\t.\tID=e\textra",
+        ):
+            with self.subTest(row=bad_row), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                (base / "in.gff").write_text(bad_row + "\n")
+                (base / "padding.log").write_text("")
+                (base / "out.gff").write_text("previous output\n")
+                with self.assertRaises(ValueError):
+                    apply_padding_to_gff(
+                        gff_path=base / "in.gff", padding_log_path=base / "padding.log",
+                        output_path=base / "out.gff", genes_with_stops_path=base / "stops",
+                        updated_genes_path=base / "updated",
+                    )
+                self.assertEqual((base / "out.gff").read_text(), "previous output\n")
+
     def test_exonless_utrs_survive_inframe_and_padding_adjustments(self) -> None:
         for strand in ("+", "-"):
             for phase in (0, 1):

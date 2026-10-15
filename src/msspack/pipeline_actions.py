@@ -278,6 +278,7 @@ def run_apply_padding_to_gff(
         updated_genes_path=updated_genes_path,
     )
     input_total = count_gff_gene_models(gff_path)
+    output_total = count_gff_gene_models(output_path)
     lines = [
         f"Number of genes with stops (new_num_stop>0): {len(summary['genes_with_stops']):,}",
         f"Number of updated genes (new_num_stop=0): {len(summary['updated_genes']):,}",
@@ -300,7 +301,7 @@ def run_apply_padding_to_gff(
         count_unit="genes",
         input_total=input_total,
         changed_total=len(summary["updated_genes"]),
-        output_total=count_gff_gene_models(output_path),
+        output_total=output_total,
         details=lines,
     )
     if metrics_path is not None:
@@ -310,7 +311,7 @@ def run_apply_padding_to_gff(
             count_unit="genes",
             input_total=input_total,
             changed_total=len(summary["updated_genes"]) + len(summary["genes_with_stops"]),
-            output_total=count_gff_gene_models(output_path),
+            output_total=output_total,
             details={
                 "genes_with_stops": len(summary["genes_with_stops"]),
                 "updated_genes": len(summary["updated_genes"]),

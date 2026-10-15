@@ -3,9 +3,26 @@ import unittest
 from pathlib import Path
 
 from msspack.annotation_table import build_annotation_table
+from msspack.utils import MSSPackError
 
 
 class AnnotationTableTests(unittest.TestCase):
+    def test_single_pass_still_rejects_inconsistent_cds_without_replacing_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "input.gff").write_text(
+                "chr1\t.\tCDS\t1\t9\t.\t-\t0\tParent=t1;product=protein\n"
+                "chr1\t.\tmRNA\t1\t9\t.\t+\t.\tID=t1\n"
+            )
+            target = base / "table.tsv"
+            target.write_text("previous table\n")
+            with self.assertRaisesRegex(MSSPackError, "Inconsistent CDS sequence/strand"):
+                build_annotation_table(
+                    gff_path=base / "input.gff", output_path=target,
+                    locus_tag_prefix="X", log_path=base / "log",
+                )
+            self.assertEqual(target.read_text(), "previous table\n")
+
     def test_root_transcripts_and_gene_direct_cds_have_annotation_rows(self) -> None:
         for parent_type in ("mRNA", "transcript", "gene"):
             with self.subTest(parent_type=parent_type), tempfile.TemporaryDirectory() as tmp:

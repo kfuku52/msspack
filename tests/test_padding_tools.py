@@ -2,10 +2,25 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from msspack.padding_tools import pad_fasta, write_spliced_cds_fasta
+from msspack.padding_tools import _count_internal_stop_codons, pad_fasta, write_spliced_cds_fasta
 
 
 class PaddingToolsTests(unittest.TestCase):
+    def test_stop_counts_preserve_code_frame_and_terminal_boundaries(self) -> None:
+        for sequence, code, expected in (
+            ("AATTAAAAA", 23, 1),  # Out-of-frame TTA overlaps the in-frame TAA.
+            ("TAATAA", 1, 1),
+            ("TAA", 1, 0),
+            ("TAAC", 1, 1),
+            ("atgtgaaaataa", 1, 1),
+            ("atgtgaaaataa", 4, 0),
+            ("TAATGATAA", 6, 1),
+            ("NNNTAGNNN", 1, 1),
+            ("", 1, 0),
+        ):
+            with self.subTest(sequence=sequence, code=code):
+                self.assertEqual(_count_internal_stop_codons(sequence, code), expected)
+
     def test_write_spliced_cds_fasta_handles_plus_and_minus_strands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

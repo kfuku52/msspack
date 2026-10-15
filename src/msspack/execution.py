@@ -112,10 +112,14 @@ def command_fingerprint(command: str) -> dict[str, object]:
             "executable": _fingerprint(Path(resolved)) if resolved else None}
 
 
-def _normalized_cache_key(cache_key: object | None) -> object | None:
+def _normalized_cache_key(
+    cache_key: object | None, *, implementation: str | None = None,
+) -> object | None:
     try:
         normalized: object = json.loads(json.dumps(
-            {"implementation": implementation_fingerprint(), "options": cache_key}, sort_keys=True,
+            {"implementation": (
+                implementation if implementation is not None else implementation_fingerprint()
+            ), "options": cache_key}, sort_keys=True,
         ))
         return normalized
     except (TypeError, ValueError) as exc:
@@ -167,6 +171,7 @@ def _write_cache_state(
     dependencies: list[Path],
     *,
     cache_key: object | None,
+    implementation: str | None = None,
 ) -> None:
     output_fingerprints = _fingerprints(outputs)
     dependency_fingerprints = _fingerprints(dependencies)
@@ -180,7 +185,7 @@ def _write_cache_state(
         "schema_version": CACHE_SCHEMA_VERSION,
         "outputs": output_fingerprints,
         "dependencies": dependency_fingerprints,
-        "cache_key": _normalized_cache_key(cache_key),
+        "cache_key": _normalized_cache_key(cache_key, implementation=implementation),
     }
     state_path = _cache_state_path(outputs)
     write_text(state_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -206,12 +211,15 @@ def run_if_needed(
         raise MSSPackError("Action dependencies are missing: " + ", ".join(missing))
     implementation_before = implementation_fingerprint()
     action()
-    if implementation_before != implementation_fingerprint():
+    implementation_after = implementation_fingerprint()
+    if implementation_before != implementation_after:
         raise MSSPackError("Implementation changed while the step was running; rerun the step")
     dependency_fingerprints_after = _fingerprints(dependencies)
     if dependency_fingerprints_before != dependency_fingerprints_after:
         raise MSSPackError("Action dependencies changed while the step was running; rerun the step")
-    _write_cache_state(outputs, dependencies, cache_key=cache_key)
+    _write_cache_state(
+        outputs, dependencies, cache_key=cache_key, implementation=implementation_after,
+    )
     return True
 
 

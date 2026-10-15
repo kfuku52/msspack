@@ -58,10 +58,15 @@ def gene_model_ids(records: Iterable[GFFRecord]) -> tuple[str, ...]:
 
 
 def build_transcript_models(gff_path: Path) -> list[TranscriptModel]:
+    return build_transcript_models_from_records(iter_gff_records(gff_path))
+
+
+def build_transcript_models_from_records(records: Iterable[GFFRecord]) -> list[TranscriptModel]:
+    """Build the same validated models from an existing, single-pass record stream."""
     parents: dict[str, GFFRecord] = {}
     order: dict[str, None] = {}
     cds_by_parent: dict[str, list[GFFRecord]] = defaultdict(list)
-    for record in iter_gff_records(gff_path):
+    for record in records:
         record_id = record.attributes.get("ID", "")
         if record.type in ("gene", "mRNA", "transcript") and record_id:
             parents[record_id] = record

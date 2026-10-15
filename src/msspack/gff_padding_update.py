@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
-from .gff import child_ids, parse_attributes
+from .gff import GFFRecord, child_ids, parse_attributes
 from .gff_feature_sync import (
     synchronize_transcript_children,
     validate_parent_child_containment,
 )
-from .transcript_models import build_transcript_models
+from .transcript_models import TranscriptModel, build_transcript_models_from_records
 from .utils import MSSPackError, write_text
 
 
@@ -56,6 +56,7 @@ def _group_gene_records(
     dict[str, str],
     list[list[str]],
     list[str],
+    list[TranscriptModel],
 ]:
     header_lines: list[str] = []
     fasta_lines: list[str] = []
@@ -80,8 +81,9 @@ def _group_gene_records(
                 header_lines.append(line)
                 continue
             fields = line.split("\t")
-            if len(fields) < 9:
-                continue
+            if len(fields) != 9:
+                # Match the strict model reader, including malformed non-CDS rows.
+                GFFRecord.from_line(line)
             attrs = parse_attributes(fields[8])
             feature_rows.append((fields, attrs))
 
@@ -130,7 +132,17 @@ def _group_gene_records(
     for gene_id, records in gene_dict.items():
         if gene_id not in ordered_gene_dict:
             ordered_gene_dict[gene_id] = records
-    return header_lines, ordered_gene_dict, transcript_to_gene, ungrouped_records, fasta_lines
+    models = build_transcript_models_from_records(
+        GFFRecord(
+            seqid=fields[0], source=fields[1], type=fields[2],
+            start=int(fields[3]), end=int(fields[4]), score=fields[5],
+            strand=fields[6], phase=fields[7], attributes_text=fields[8], attributes=attrs,
+        )
+        for fields, attrs in feature_rows
+    )
+    return (
+        header_lines, ordered_gene_dict, transcript_to_gene, ungrouped_records, fasta_lines, models,
+    )
 
 
 @dataclass
@@ -471,6 +483,7 @@ def apply_padding_to_gff(
         transcript_to_gene,
         ungrouped_records,
         fasta_lines,
+        models,
     ) = _group_gene_records(gff_path)
     genes_with_stops: list[str] = []
     updated_genes: list[str] = []
@@ -479,7 +492,6 @@ def apply_padding_to_gff(
     removed_feature_count = 0
     synchronized_features = 0
 
-    models = build_transcript_models(Path(gff_path))
     direct_group_counts: dict[str, int] = {}
     for model in models:
         if model.parent_id not in transcript_to_gene:

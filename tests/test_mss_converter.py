@@ -462,6 +462,45 @@ class MssConverterTests(unittest.TestCase):
             self.assertEqual(summary.overall_counts["mrna_emitted"], 1)
             self.assertEqual(summary.overall_counts.get("mrna_omitted", 0), 0)
 
+    def test_many_exons_and_utrs_remain_covered_on_both_strands(self) -> None:
+        for strand in ("+", "-"):
+            with self.subTest(strand=strand), tempfile.TemporaryDirectory() as tmp_dir:
+                base = Path(tmp_dir)
+                fasta, gff = base / "genome.fa", base / "annotation.gff3"
+                annotation, output = base / "annotation.tsv", base / "output.ann.txt"
+                fasta.write_text(">chr1\n" + "A" * 6000 + "\n", encoding="utf-8")
+                rows = [
+                    f"chr1\t.\tgene\t1\t6000\t.\t{strand}\t.\tID=g1",
+                    f"chr1\t.\tmRNA\t1\t6000\t.\t{strand}\t.\tID=t1;Parent=g1",
+                ]
+                intervals = []
+                for index in reversed(range(50)):
+                    start, end = index * 120 + 1, index * 120 + 90
+                    intervals.append((start, end))
+                    rows.extend([
+                        f"chr1\t.\texon\t{start}\t{end}\t.\t{strand}\t.\tParent=t1",
+                        f"chr1\t.\tfive_prime_UTR\t{start}\t{start+2}\t.\t{strand}\t.\tParent=t1",
+                        f"chr1\t.\tCDS\t{start+3}\t{end}\t.\t{strand}\t0\tParent=t1",
+                    ])
+                # An exon without CDS still participates in the mRNA location.
+                rows.append(f"chr1\t.\texon\t100\t105\t.\t{strand}\t.\tParent=t1")
+                intervals.append((100, 105))
+                gff.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                annotation.write_text("ID\tDescription\nt1\ttest protein\n", encoding="utf-8")
+                summary = convert_gff_to_mss(ConversionOptions(
+                    fasta_path=fasta, gff_path=gff, annotation_path=annotation,
+                    output_path=output, locus_tag_prefix="Many", organism_name="Test organism",
+                ))
+                location = "join(" + ",".join(f"{a}..{b}" for a, b in sorted(intervals)) + ")"
+                if strand == "-":
+                    location = "complement(" + location + ")"
+                text = output.read_text(encoding="utf-8")
+                self.assertIn(f"\tmRNA\t{location}\t", text)
+                self.assertNotIn("\texon\t", text)
+                self.assertNotIn("\t5'UTR\t", text)
+                self.assertEqual(summary.overall_counts["omitted_exon_features"], 51)
+                self.assertEqual(summary.overall_counts["omitted_utr_features"], 50)
+
     def test_retains_cds_only_mrna_without_exons(self) -> None:
         for with_gene in (True, False):
             for strand in ("+", "-"):

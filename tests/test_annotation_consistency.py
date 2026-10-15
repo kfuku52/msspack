@@ -8,6 +8,7 @@ from unittest.mock import patch
 from xml.etree import ElementTree
 
 from msspack.annotation_consistency import (
+    _NameComparisonCache,
     audit_annotation_consistency,
     classify_product_names,
     run_family_similarity_search,
@@ -27,6 +28,30 @@ from msspack.config_models import (
 
 
 class AnnotationConsistencyTests(unittest.TestCase):
+    def test_name_cache_preserves_decisions_across_weights_and_thresholds(self) -> None:
+        cache = _NameComparisonCache()
+        pairs = (
+            ("protein kinase", "serine threonine protein kinase"),
+            ("BTB/POZ domain-containing protein", "BTB domain-containing protein"),
+            ("ATP synthase subunit alpha", "ATP-synthase subunit alpha"),
+            ("cellulose synthase-like protein B4", "cellulose synthase-like protein H1"),
+            ("café protein", "caf&#233; protein"),
+        )
+        for weights in ({}, {"kinase": 1.0, "serine": 10.0, "threonine": 10.0}):
+            for threshold in (0.3, 0.6):
+                for left, right in pairs:
+                    with self.subTest(weights=weights, threshold=threshold, left=left):
+                        self.assertEqual(
+                            cache.classify(left, right, idf=weights, similarity_threshold=threshold),
+                            classify_product_names(
+                                left, right, idf=weights, similarity_threshold=threshold,
+                            ),
+                        )
+        self.assertEqual(cache.classify(*pairs[0], idf={}, similarity_threshold=0.3).relation,
+                         "compatible_granularity")
+        self.assertEqual(cache.classify(*pairs[0], idf={}, similarity_threshold=0.6).relation,
+                         "review")
+
     def test_classifies_safe_equivalents_granularity_and_specific_conflicts(self) -> None:
         exact = classify_product_names(
             "ATP synthase subunit alpha",

@@ -3,7 +3,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import msspack.execution as execution
 from msspack.build_manifest import ManifestRecorder
 from msspack.config import load_config
 from msspack.execution import (
@@ -15,6 +17,44 @@ from msspack.utils import MSSPackError
 
 
 class PipelineCacheTests(unittest.TestCase):
+    def test_source_change_during_action_rejects_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            helper, output = base / "helper.py", base / "output"
+            helper.write_text("value = 1\n")
+
+            def action() -> None:
+                output.write_text(helper.read_text())
+                helper.write_text("value = 2\n")
+
+            with patch("msspack.execution.__file__", str(base / "execution.py")):
+                with self.assertRaisesRegex(MSSPackError, "Implementation changed"):
+                    run_if_needed(outputs=[output], dependencies=[], action=action)
+                self.assertFalse(is_up_to_date([output], []))
+
+    def test_source_change_after_validation_does_not_retag_old_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            helper, output = base / "helper.py", base / "output"
+            helper.write_text("value = 1\n")
+            write_state = execution._write_cache_state
+
+            def delayed_write(*args, **kwargs):
+                helper.write_text("value = 2\n")
+                return write_state(*args, **kwargs)
+
+            with patch("msspack.execution.__file__", str(base / "execution.py")):
+                with patch("msspack.execution._write_cache_state", side_effect=delayed_write):
+                    run_if_needed(outputs=[output], dependencies=[],
+                                  action=lambda: output.write_text(helper.read_text()))
+                self.assertEqual(output.read_text(), "value = 1\n")
+                self.assertFalse(is_up_to_date([output], []))
+                self.assertTrue(run_if_needed(
+                    outputs=[output], dependencies=[],
+                    action=lambda: output.write_text(helper.read_text()),
+                ))
+                self.assertTrue(is_up_to_date([output], []))
+
     def test_cached_action_requires_a_declared_output(self) -> None:
         with self.assertRaisesRegex(MSSPackError, "at least one output"):
             run_if_needed(outputs=[], dependencies=[], action=lambda: None)

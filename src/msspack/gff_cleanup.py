@@ -11,7 +11,13 @@ from .coordinate_duplicates import (
     write_coordinate_duplicate_map,
 )
 from .fasta import iter_fasta
-from .gff import GFFRecord, child_ids, filter_parent_attribute, repair_attributes
+from .gff import (
+    GFFRecord,
+    child_ids,
+    descendant_removals,
+    filter_parent_attribute,
+    repair_attributes,
+)
 from .step_logging import write_id_list, write_step_log, write_step_metrics
 from .transcript_models import gene_model_ids
 from .utils import MSSPackError, atomic_text_writer, ensure_dir
@@ -206,17 +212,12 @@ def drop_duplicate_coordinate_genes(
     removed_gene_ids = [pair.removed_gene_id for pair in duplicate_pairs]
     input_model_total = len(gene_model_ids(records))
     to_remove = set(removed_gene_ids)
-    parents_by_id: dict[str, set[str]] = defaultdict(set)
-    for _, _, _, rec_id, parent in lines:
-        if rec_id and parent:
-            parents_by_id[rec_id].update(child_ids(parent))
-    changed = True
-    while changed:
-        changed = False
-        for rec_id, parents in parents_by_id.items():
-            if rec_id not in to_remove and parents and parents <= to_remove:
-                to_remove.add(rec_id)
-                changed = True
+    if to_remove:
+        parents_by_id: dict[str, set[str]] = defaultdict(set)
+        for _, _, _, rec_id, parent in lines:
+            if rec_id and parent:
+                parents_by_id[rec_id].update(child_ids(parent))
+        to_remove = descendant_removals(to_remove, parents_by_id.items())
 
     kept = 0
     ensure_dir(output_path.parent)

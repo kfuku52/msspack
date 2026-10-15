@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from collections import Counter
 from dataclasses import replace
 
@@ -748,6 +749,22 @@ def convert_contig_features(
             if used_misc_fallback:
                 event_counts["unknown_features"] += 1
 
+    coverage_cache: dict[
+        int, tuple[tuple[int, ...], tuple[tuple[int, int], ...]]
+    ] = {}
+
+    def represented_contains(mrna: FeatureRecord, descendant: FeatureRecord) -> bool:
+        key = id(mrna)
+        if key not in coverage_cache:
+            intervals = _covered_intervals(_location_features(mrna, parent_lookup))
+            coverage_cache[key] = tuple(start for start, _ in intervals), intervals
+        starts, intervals = coverage_cache[key]
+        index = bisect_right(starts, descendant.start) - 1
+        if index < 0:
+            return False
+        start, end = intervals[index]
+        return start <= descendant.start <= descendant.end <= end
+
     def render_descendants(
         parent_id: str,
         *,
@@ -785,12 +802,7 @@ def convert_contig_features(
                     descendant.type in EXON_TYPES
                     or (descendant.type in UTR_TYPES and not retain_utr_features)
                 )
-                and any(
-                    start <= descendant.start <= descendant.end <= end
-                    for start, end in _covered_intervals(
-                        _location_features(represented_by_mrna, parent_lookup)
-                    )
-                )
+                and represented_contains(represented_by_mrna, descendant)
             )
             if redundant:
                 key = "omitted_exon_features" if descendant.type in EXON_TYPES else "omitted_utr_features"

@@ -4,13 +4,16 @@ import re
 from bisect import bisect_left
 from collections import Counter
 from collections.abc import Iterable
+from contextlib import ExitStack
 from datetime import datetime
+from itertools import islice
 from pathlib import Path
+from typing import TextIO
 
 from .fasta import iter_fasta, write_fasta_record
 from .gff import GFFDocument, read_gff_document, write_gff_document
 from .step_logging import write_step_log, write_step_metrics
-from .utils import MSSPackError, atomic_text_writer, ensure_dir, link_or_copy
+from .utils import MSSPackError, atomic_text_writer, link_or_copy
 
 # Some of the gap-normalization logic below is carried forward from earlier
 # internal tooling used before msspack unified the MSS packaging workflow.
@@ -132,6 +135,14 @@ def _apply_gapjust_to_gff(
     return changed_starts, changed_ends, changed_genes
 
 
+def _write_unchanged_prefix(path: Path, handle: TextIO, count: int) -> None:
+    """Reread only the prefix preceding the first edited contig."""
+    for record in islice(iter_fasta(path), count):
+        write_fasta_record(
+            handle, identifier=record.id, description=record.description, sequence=record.sequence,
+        )
+
+
 def normalize_gap_lengths(
     *,
     fasta_path: Path,
@@ -175,42 +186,57 @@ def normalize_gap_lengths(
     min_original_gap_length: int | None = None
     max_original_gap_length = 0
     seen_ids: Counter[str] = Counter()
-    records: list[tuple[str, str, str]] = []
+    record_count = 0
 
-    for record in iter_fasta(fasta_path):
-        seen_ids[record.id] += 1
-        if seen_ids[record.id] > 1 and input_gff_path is not None:
-            shown = ",".join(sorted(seq_id for seq_id, count in seen_ids.items() if count > 1)[:10])
-            if sum(count > 1 for count in seen_ids.values()) > 10:
-                shown += ",..."
-            raise ValueError(
-                "Duplicate sequence IDs are not supported with GFF gapjust: " + shown
-            )
-        (
-            new_seq,
-            justifications,
-            record_num_justifications,
-            record_min_original_gap_length,
-            record_max_original_gap_length,
-        ) = _apply_gapjust_to_sequence(
-            record.sequence,
-            target_gap_length=gap_len,
-            gap_just_min=gap_just_min,
-            gap_just_max=gap_just_max,
-        )
-        records.append((record.id, record.description, new_seq))
-        if justifications:
-            justifications_by_seq[record.id] = justifications
-        num_justifications += record_num_justifications
-        if record_min_original_gap_length is not None:
-            if (min_original_gap_length is None) or (
-                record_min_original_gap_length < min_original_gap_length
-            ):
-                min_original_gap_length = record_min_original_gap_length
-            max_original_gap_length = max(
-                max_original_gap_length,
+    # Delay output creation until an edit is found. With no edits, retain the
+    # original bytes without writing a second genome. Otherwise keep only the
+    # current contig, rereading the unchanged prefix once in canonical wrapping.
+    with ExitStack() as stack:
+        output_handle: TextIO | None = None
+        for record in iter_fasta(fasta_path):
+            seen_ids[record.id] += 1
+            if seen_ids[record.id] > 1 and input_gff_path is not None:
+                shown = ",".join(sorted(
+                    seq_id for seq_id, count in seen_ids.items() if count > 1
+                )[:10])
+                if sum(count > 1 for count in seen_ids.values()) > 10:
+                    shown += ",..."
+                raise ValueError(
+                    "Duplicate sequence IDs are not supported with GFF gapjust: " + shown
+                )
+            record_count += 1
+            (
+                new_seq,
+                justifications,
+                record_num_justifications,
+                record_min_original_gap_length,
                 record_max_original_gap_length,
+            ) = _apply_gapjust_to_sequence(
+                record.sequence,
+                target_gap_length=gap_len,
+                gap_just_min=gap_just_min,
+                gap_just_max=gap_just_max,
             )
+            if justifications:
+                justifications_by_seq[record.id] = justifications
+                if output_handle is None:
+                    output_handle = stack.enter_context(atomic_text_writer(output_fasta_path))
+                    _write_unchanged_prefix(fasta_path, output_handle, record_count - 1)
+            if output_handle is not None:
+                write_fasta_record(
+                    output_handle, identifier=record.id,
+                    description=record.description, sequence=new_seq,
+                )
+            num_justifications += record_num_justifications
+            if record_min_original_gap_length is not None:
+                if (min_original_gap_length is None) or (
+                    record_min_original_gap_length < min_original_gap_length
+                ):
+                    min_original_gap_length = record_min_original_gap_length
+                max_original_gap_length = max(
+                    max_original_gap_length,
+                    record_max_original_gap_length,
+                )
 
     changed_sequences = len(justifications_by_seq)
     detail_lines = [f"Number of gap justifications: {num_justifications:,}"]
@@ -229,17 +255,6 @@ def normalize_gap_lengths(
     else:
         detail_lines.append("No gap edits were made.")
         link_or_copy(fasta_path, output_fasta_path)
-    if num_justifications:
-        ensure_dir(output_fasta_path.parent)
-        with atomic_text_writer(output_fasta_path) as handle:
-            for record_id, description, sequence in records:
-                write_fasta_record(
-                    handle,
-                    identifier=record_id,
-                    description=description,
-                    sequence=sequence,
-                )
-
     if input_gff_path is not None and output_gff_path is not None:
         document = read_gff_document(input_gff_path)
         detail_lines.append(f"Number of input GFF header lines: {len(document.header_lines):,}")
@@ -284,9 +299,9 @@ def normalize_gap_lengths(
         step="gapjust",
         started_at=started_at,
         count_unit="sequences",
-        input_total=len(records),
+        input_total=record_count,
         changed_total=changed_sequences,
-        output_total=len(records),
+        output_total=record_count,
         details=detail_lines,
     )
     if metrics_path is not None:
@@ -294,8 +309,8 @@ def normalize_gap_lengths(
             metrics_path=metrics_path,
             step="gapjust",
             count_unit="sequences",
-            input_total=len(records),
+            input_total=record_count,
             changed_total=changed_sequences,
-            output_total=len(records),
+            output_total=record_count,
             details=metrics_details,
         )

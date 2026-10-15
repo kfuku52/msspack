@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 
-from .gff import child_ids, iter_gff_records
+from .gff import GFFRecord, child_ids, iter_gff_records
 from .step_logging import write_step_log, write_step_metrics
-from .transcript_models import build_transcript_models
+from .transcript_models import build_transcript_models_from_records
 from .utils import atomic_text_writer, ensure_dir
 
 
@@ -25,7 +26,7 @@ def build_annotation_table(
     hypothetical_count = 0
     other_product_count = 0
 
-    for record in iter_gff_records(gff_path):
+    def collect_metadata(record: GFFRecord) -> None:
         if record.type == "gene":
             gene_id = record.attributes.get("ID")
             if gene_id:
@@ -35,7 +36,7 @@ def build_annotation_table(
             mrna_id = record.attributes.get("ID")
             parent_gene_ids = child_ids(record.attributes.get("Parent"))
             if not mrna_id:
-                continue
+                return
             transcript_ids.add(mrna_id)
             for parent_gene_id in parent_gene_ids or [mrna_id]:
                 gene_to_mrnas.setdefault(parent_gene_id, []).append(mrna_id)
@@ -50,7 +51,12 @@ def build_annotation_table(
                     if transcript_id:
                         transcript_to_product.setdefault(transcript_id, product)
 
-    for model in build_transcript_models(gff_path):
+    def records_with_metadata() -> Iterator[GFFRecord]:
+        for record in iter_gff_records(gff_path):
+            collect_metadata(record)
+            yield record
+
+    for model in build_transcript_models_from_records(records_with_metadata()):
         if model.parent_id in gene_ids and model.parent_id not in transcript_ids:
             gene_to_mrnas[model.parent_id].append(model.transcript_id)
             product = next((

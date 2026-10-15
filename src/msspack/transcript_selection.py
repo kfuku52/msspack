@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict
 
-from .gff import child_ids, filter_parent_attribute, parse_attributes
+from .gff import child_ids, descendant_removals, filter_parent_attribute, parse_attributes
 from .step_logging import write_id_list
 from .utils import ensure_dir, write_text
 
@@ -166,21 +166,12 @@ def select_one_mrna_per_gene(
     # candidate set may be removed.  Parent identifiers inferred from CDS/UTR
     # rows can also be gene identifiers and must never be treated as mRNAs.
     removed_transcript_ids = (declared_transcript_ids & candidates_seen) - selected
-    removed_ids = set(removed_transcript_ids)
-
     # Remove descendants only when every parent was removed. Shared features keep
     # their surviving Parent references.
-    changed = True
-    while changed:
-        changed = False
-        for item in items:
-            if not isinstance(item, _FeatureLine) or not item.feature_id or not item.parents:
-                continue
-            if item.feature_id in removed_ids:
-                continue
-            if all(parent in removed_ids for parent in item.parents):
-                removed_ids.add(item.feature_id)
-                changed = True
+    removed_ids = descendant_removals(
+        removed_transcript_ids,
+        ((item.feature_id, item.parents) for item in items if isinstance(item, _FeatureLine)),
+    )
 
     output_lines: list[str] = []
     for item in items:

@@ -231,6 +231,43 @@ def child_ids(value: str | None) -> list[str]:
     return [item for item in items if item]
 
 
+def descendant_removals(
+    removed_ids: set[str],
+    parent_rows: Iterable[tuple[str, Iterable[str]]],
+) -> set[str]:
+    """Expand removals when all parents of a row were removed, independent of order.
+
+    Repeated IDs retain per-row alternatives. Callers requiring the union of
+    parents across rows must group their parent sets before calling.
+    """
+    removed = set(removed_ids)
+    if not removed:
+        return removed
+    children: dict[str, list[int]] = defaultdict(list)
+    identifiers: list[str] = []
+    pending: list[int] = []
+    for identifier, parents in parent_rows:
+        if not identifier or identifier in removed:
+            continue
+        parent_ids = set(parents)
+        if not parent_ids:
+            continue
+        index = len(identifiers)
+        identifiers.append(identifier)
+        pending.append(len(parent_ids))
+        for parent_id in parent_ids:
+            children[parent_id].append(index)
+    queue = deque(removed)
+    while queue:
+        for index in children.get(queue.popleft(), ()):
+            pending[index] -= 1
+            identifier = identifiers[index]
+            if pending[index] == 0 and identifier not in removed:
+                removed.add(identifier)
+                queue.append(identifier)
+    return removed
+
+
 def attribute(record: GFFRecord, key: str, default: str = "") -> str:
     return record.attributes.get(key, default)
 

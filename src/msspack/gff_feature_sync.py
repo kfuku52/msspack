@@ -23,14 +23,6 @@ class HierarchyIssue:
     message: str
 
 
-def _row_id(row: list[str]) -> str:
-    return parse_attributes(row[8]).get("ID", "")
-
-
-def _row_parents(row: list[str]) -> list[str]:
-    return child_ids(parse_attributes(row[8]).get("Parent"))
-
-
 def _transcript_order(rows: Iterable[list[str]], strand: str) -> list[list[str]]:
     return sorted(rows, key=lambda row: (int(row[3]), int(row[4])), reverse=(strand == "-"))
 
@@ -213,15 +205,23 @@ def validate_parent_child_containment(
     removed = removed_row_ids or set()
     active = [row for row in rows if id(row) not in removed]
     by_id: dict[str, list[list[str]]] = defaultdict(list)
+    metadata: dict[int, tuple[str, tuple[str, ...]]] = {}
+    children_by_parent: dict[str, list[list[str]]] = defaultdict(list)
     for row in active:
-        feature_id = _row_id(row)
+        attrs = parse_attributes(row[8])
+        feature_id = attrs.get("ID", "")
+        parents = tuple(child_ids(attrs.get("Parent")))
+        metadata[id(row)] = feature_id, parents
         if feature_id:
             by_id[feature_id].append(row)
+        for parent_id in parents:
+            children_by_parent[parent_id].append(row)
 
     issues: list[HierarchyIssue] = []
     for child in active:
-        child_id = _row_id(child) or f"{child[2]}:{child[0]}:{child[3]}-{child[4]}"
-        for parent_id in _row_parents(child):
+        feature_id, parent_ids = metadata[id(child)]
+        child_id = feature_id or f"{child[2]}:{child[0]}:{child[3]}-{child[4]}"
+        for parent_id in parent_ids:
             if scope_parent_ids is not None and parent_id not in scope_parent_ids:
                 continue
             parents = by_id.get(parent_id)
@@ -245,10 +245,6 @@ def validate_parent_child_containment(
                 )
             )
 
-    children_by_parent: dict[str, list[list[str]]] = defaultdict(list)
-    for child in active:
-        for parent_id in _row_parents(child):
-            children_by_parent[parent_id].append(child)
     for parent_id, children in children_by_parent.items():
         if scope_parent_ids is not None and parent_id not in scope_parent_ids:
             continue
@@ -278,7 +274,7 @@ def validate_parent_child_containment(
                 ):
                     issues.append(
                         HierarchyIssue(
-                            child_id=_row_id(codon) or codon_type,
+                            child_id=metadata[id(codon)][0] or codon_type,
                             parent_id=parent_id,
                             message=f"{codon_type} under {parent_id} is outside its CDS rows",
                         )
@@ -291,7 +287,7 @@ def validate_parent_child_containment(
             ):
                 issues.append(
                     HierarchyIssue(
-                        child_id=_row_id(utr) or utr[2],
+                        child_id=metadata[id(utr)][0] or utr[2],
                         parent_id=parent_id,
                         message=f"{utr[2]} under {parent_id} overlaps a CDS row",
                     )

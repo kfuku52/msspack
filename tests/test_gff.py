@@ -21,6 +21,25 @@ from msspack.utils import MSSPackError
 
 
 class GffSortTests(unittest.TestCase):
+    def test_duplicate_cleanup_unions_parents_of_repeated_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "in.gff").write_text(
+                "chr1\t.\tgene\t1\t9\t.\t+\t.\tID=keep\n"
+                "chr1\t.\tgene\t1\t9\t.\t+\t.\tID=drop\n"
+                "chr1\t.\tCDS\t1\t3\t.\t+\t0\tID=shared;Parent=drop\n"
+                "chr1\t.\tCDS\t4\t9\t.\t+\t0\tID=shared;Parent=keep\n"
+                "chr1\t.\tregion\t4\t9\t.\t+\t.\tID=child;Parent=shared\n"
+            )
+            drop_duplicate_coordinate_genes(
+                input_path=base / "in.gff", output_path=base / "out.gff",
+                log_path=base / "log", selection_policy="first",
+            )
+            output = (base / "out.gff").read_text()
+            self.assertNotIn("ID=drop", output)
+            self.assertIn("ID=shared;Parent=keep\n", output)
+            self.assertIn("ID=child;Parent=shared\n", output)
+
     def test_duplicate_selection_applies_initial_cds_phase_on_both_strands(self) -> None:
         for strand in ("+", "-"):
             for phase in (1, 2):

@@ -12,13 +12,27 @@ from msspack.cli import main
 from msspack.databases import DatabaseStatus
 from msspack.demo import write_demo_dataset
 from msspack.pipeline import PipelineOutputs
-from msspack.pipeline_plots import PipelinePlotArtifacts
+from msspack.pipeline_plots import PipelinePlotArtifacts, run_pipeline_plots
 from msspack.report import ReportArtifacts
 from msspack.utils import MSSPackError
 from msspack.workflow import _invalidate_compute_cache, run_all
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_full_demo_reuses_prepared_plots_for_html_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = write_demo_dataset(Path(tmp) / "demo") / "config.toml"
+            with patch("msspack.workflow.run_pipeline_plots", wraps=run_pipeline_plots) as plots:
+                with patch("msspack.report.run_pipeline_plots",
+                           side_effect=AssertionError("plots were already prepared")):
+                    artifacts = run_all(config, run_busco=False, validate=False)
+            plots.assert_called_once()
+            self.assertTrue(artifacts.plots.gene_flow_svg.is_file())
+            self.assertTrue(artifacts.report.index_html.is_file())
+            self.assertIn("pipeline-gene-flow.sankey.svg", artifacts.report.index_html.read_text())
+            manifest = json.loads(artifacts.pipeline.manifest_path.read_text())
+            self.assertEqual(manifest["run"]["status"], "completed")
+
     def test_run_all_orders_full_workflow_and_preserves_databases_on_force(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -98,7 +112,7 @@ class WorkflowTests(unittest.TestCase):
             ), patch(
                 "msspack.workflow.write_database_manifest",
             ), patch(
-                "msspack.workflow.run_html_report",
+                "msspack.workflow._write_html_report",
                 side_effect=lambda *_args, **_kwargs: calls.append("report") or report,
             ):
                 artifacts = run_all(

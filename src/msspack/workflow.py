@@ -18,7 +18,7 @@ from .doctor import doctor_succeeded, render_doctor_report, run_doctor
 from .output_state import output_directory_lock
 from .pipeline import PipelineOutputs, run_pipeline
 from .pipeline_plots import PipelinePlotArtifacts, run_pipeline_plots
-from .report import ReportArtifacts, run_html_report
+from .report import ReportArtifacts, _write_html_report
 from .utils import MSSPackError, write_text
 
 
@@ -219,7 +219,7 @@ def run_all(
                 database_status = collect_database_status(config)
                 write_database_manifest(config)
                 report_artifacts = (
-                    run_html_report(config_file, force=False) if write_report else None
+                    _write_html_report(config) if write_report else None
                 )
                 duration_seconds = time.perf_counter() - started
                 _update_run_manifest(

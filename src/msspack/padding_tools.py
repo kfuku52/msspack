@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -44,17 +46,23 @@ def _resolve_codon_table(genetic_code: str | int) -> _CodonTableLike:
     return cast(_CodonTableLike, CodonTable.unambiguous_dna_by_id[code])
 
 
+@cache
+def _stop_codon_pattern(stop_codons: tuple[str, ...]) -> re.Pattern[str]:
+    # Look ahead so an out-of-frame match cannot hide an overlapping stop.
+    return re.compile("(?=(?:" + "|".join(map(re.escape, stop_codons)) + "))")
+
+
 def _count_internal_stop_codons(seq: str, genetic_code: str | int) -> int:
-    stop_codons = set(_resolve_codon_table(genetic_code).stop_codons)
+    stop_codons = tuple(sorted(_resolve_codon_table(genetic_code).stop_codons))
     seq_upper = seq.upper()
     internal_stop_limit = len(seq_upper) - 3
-    if internal_stop_limit <= 0:
+    if internal_stop_limit <= 0 or not stop_codons:
         return 0
-    count = 0
-    for pos in range(0, internal_stop_limit, 3):
-        if seq_upper[pos : pos + 3] in stop_codons:
-            count += 1
-    return count
+    return sum(
+        match.start() % 3 == 0
+        for match in _stop_codon_pattern(stop_codons).finditer(seq_upper)
+        if match.start() < internal_stop_limit
+    )
 
 
 def _get_padding_candidates(

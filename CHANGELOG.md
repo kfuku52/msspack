@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.8.14 - 2026-10-15
+
+- Stream gap-normalized FASTA contigs instead of retaining the entire assembly;
+  retain original bytes when no edits are needed and reread an unchanged prefix
+  only when the first edit occurs later in the input.
+- Count internal stops with cached genetic-code patterns and reuse parsed GFF
+  metadata/models for containment, annotation tables, and padding updates.
+- Index transcript coverage once for exon/UTR rendering, cache product-name
+  transformations within each consistency audit, and propagate descendant
+  removals through a parent graph while preserving shared-parent policies.
+- Reuse gene counts, verified implementation fingerprints, and prepared plots
+  instead of recomputing them; preserve cache mutation detection and standalone
+  report refresh behavior.
+- Add offline performance workloads and regressions for streaming, alternate
+  genetic codes, mixed strands, deep/shared hierarchies, and cache integrity.
+
 ## 0.8.13 - 2026-10-15
 
 - Index gap-normalization edits and cumulative offsets once per sequence, then

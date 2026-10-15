@@ -26,6 +26,39 @@ chr1	src	three_prime_UTR	361	380	.	+	.	ID=Gene1-T2.utr3b;Parent=Gene1-T2
 
 
 class SelectOneMrnaTests(unittest.TestCase):
+    def test_child_first_deep_hierarchy_preserves_shared_children_and_unreachable_cycles(self) -> None:
+        rows = [
+            f"chr1\t.\tregion\t3\t8\t.\t+\t.\tID=child{i};Parent="
+            + (f"child{i-1}" if i else "drop")
+            for i in reversed(range(2000))
+        ]
+        rows += [
+            "chr1\t.\tgene\t1\t9\t.\t+\t.\tID=g",
+            "chr1\t.\tmRNA\t1\t9\t.\t+\t.\tID=keep;Parent=g",
+            "chr1\t.\tCDS\t1\t9\t.\t+\t0\tParent=keep",
+            "chr1\t.\tmRNA\t2\t8\t.\t+\t.\tID=drop;Parent=g",
+            "chr1\t.\tCDS\t3\t8\t.\t+\t0\tParent=drop",
+            "chr1\t.\tregion\t3\t8\t.\t+\t.\tID=shared;Parent=child1999,keep",
+            "chr1\t.\tregion\t3\t8\t.\t+\t.\tID=cycle1;Parent=cycle2",
+            "chr1\t.\tregion\t3\t8\t.\t+\t.\tID=cycle2;Parent=cycle1",
+            "chr1\t.\tregion\t3\t8\t.\t+\t.\tID=repeated;Parent=drop",
+            "chr1\t.\tregion\t3\t8\t.\t+\t.\tID=repeated;Parent=keep",
+            "chr1\t.\tregion\t3\t8\t.\t+\t.\tID=repeat_child;Parent=repeated",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            source, target = Path(tmp) / "in.gff", Path(tmp) / "out.gff"
+            source.write_text("\n".join(rows) + "\n")
+            summary = select_one_mrna_per_gene(input_gff_path=source, output_gff_path=target)
+            output = target.read_text()
+            self.assertEqual(summary["removed_mrnas"], 1)
+            self.assertNotIn("ID=child", output)
+            self.assertNotIn("ID=drop", output)
+            self.assertIn("ID=shared;Parent=keep\n", output)
+            self.assertIn("ID=cycle1;Parent=cycle2", output)
+            self.assertIn("ID=cycle2;Parent=cycle1", output)
+            self.assertNotIn("ID=repeated", output)
+            self.assertNotIn("ID=repeat_child", output)
+
     def test_coordinate_tie_break_uses_parent_span_in_any_row_order(self) -> None:
         rows = [
             "chr1\t.\tgene\t1\t100\t.\t+\t.\tID=g1",
