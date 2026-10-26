@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.16 - 2026-10-26
+
+- Consolidate configuration tests at the TOML loading boundary and remove
+  duplicate internal validation and cache tests, retaining input-integrity,
+  mutation, and persisted-data regressions.
+
 ## 0.8.15 - 2026-10-15
 
 - Keep the optimized hierarchy validator compatible with minimum-supported

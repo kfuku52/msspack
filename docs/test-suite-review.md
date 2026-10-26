@@ -43,3 +43,23 @@ not make them duplicates.
 The normal suite changes from 257 to 216 test methods; table cases are still
 executed as subtests. No runtime improvement is claimed from these single runs.
 The three external-tool tests remain opt-in and are skipped in normal discovery.
+
+## Validation-boundary follow-up (2026-10-26)
+
+Reduce tests that duplicate internal validation or constrain implementation choices.
+Production behavior and expected fixture outputs are unchanged.
+
+| Area | Decision and remaining protection |
+| --- | --- |
+| Configuration | Consolidate 19 methods into four tests through `load_config`, using the existing minimal TOML fixture. Keep defaults, explicit nested settings, path resolution, immediate release, and representative invalid input cases. Drop the repeated scalar-type matrix across all three annotation schemas and exact diagnostic wording/error precedence. Field-specific errors still identify rejected settings. |
+| Internal settings | Remove direct invalid `DatabaseLockSettings` and functional-annotation validator tests. Check nonfinite numbers, positive lock intervals, and the heartbeat/stale relationship at the TOML boundary. Keep actual lock contention, timeout, recovery, and filesystem-race tests. |
+| Cache | Remove the empty-output declaration test for an internal caller invariant and the basic freshness test duplicated by the integration and transitive-source regressions. Keep failed actions, missing dependencies, setting changes, and source changes during execution. |
+
+Validation after coordinate mutation, external file loading, and reuse of persisted
+data remains covered: these operations can invalidate earlier guarantees. Tests
+for sequence semantics, atomic publication, database corruption, and external-tool
+results remain in place.
+
+The suite changes from 296 to 277 test methods. Invalid configuration variants run
+as subtests; method counts are not a coverage measure. The three opt-in external
+tests are unchanged.

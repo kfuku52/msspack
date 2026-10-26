@@ -2,7 +2,6 @@ import tempfile
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from math import inf, nan
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,16 +13,6 @@ from msspack.database_lock import (
 
 
 class DatabaseLockTests(unittest.TestCase):
-    def test_settings_reject_nonfinite_and_unsafe_stale_intervals(self) -> None:
-        for value in (nan, inf):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                DatabaseLockSettings(poll_seconds=value).validate()
-        with self.assertRaises(ValueError):
-            DatabaseLockSettings(
-                heartbeat_seconds=60,
-                stale_seconds=60,
-            ).validate()
-
     def test_disappearing_path_is_treated_as_absent(self) -> None:
         path = Path("/does/not/matter")
         with patch("msspack.database_lock.os.path.lexists", return_value=True), patch.object(

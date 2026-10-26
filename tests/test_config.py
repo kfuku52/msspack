@@ -1,314 +1,116 @@
 import tempfile
 import unittest
-from math import inf, nan
 from pathlib import Path
 from unittest.mock import patch
 
-from msspack.config import ConfigError, DatabasesConfig, PipelineConfig, load_config
-from msspack.config_loading import (
-    _validate_raw_config,
-    load_functional_annotation_config,
-    load_pipeline_config,
-)
-from msspack.config_models import SampleConfig
-from msspack.config_validation import (
-    ensure_collection_date,
-    validate_databases_config,
-    validate_functional_annotation_config,
-    validate_pipeline_config,
-    validate_sample_config,
-)
+from msspack.config import ConfigError, load_config
 
 
 class ConfigTests(unittest.TestCase):
-    def test_locus_tag_cannot_include_posix_or_windows_paths(self) -> None:
-        for value in ("/tmp/victim", "../victim", "subdir/tag", r"..\victim",
-                      r"C:\victim", "C:victim", r"\\server\share\tag"):
-            with self.subTest(value=value), self.assertRaisesRegex(ConfigError, "sample.locus_tag"):
-                validate_sample_config(SampleConfig(value, 6, "Test organism"))
-        for value in ("Fix", "Test_123", "Test-demo", "Test.v1"):
-            with self.subTest(value=value):
-                validate_sample_config(SampleConfig(value, 6, "Test organism"))
-
-    def test_raw_config_scalar_validation_preserves_types_and_error_messages(self) -> None:
-        schemas = (
-            ("functional_annotation", "threads", "min_identity", "enabled"),
-            ("functional_annotation.taxonomy", "target_taxon_id", "distant_specificity_identity", "enabled"),
-            ("functional_annotation.consistency", "source_pair_min_pairs", "family_identity", "enabled"),
-        )
-        for section, integer_key, numeric_key, boolean_key in schemas:
-            cases = (
-                (integer_key, 3, None),
-                (integer_key, True, "must be int, got bool"),
-                (integer_key, 3.0, "must be int, got float"),
-                (numeric_key, 3, None),
-                (numeric_key, 3.0, None),
-                (numeric_key, False, "must be int or float, got bool"),
-                (numeric_key, "3", "must be int or float, got str"),
-                (numeric_key, nan, "must be finite"),
-                (numeric_key, inf, "must be finite"),
-                (numeric_key, -inf, "must be finite"),
-                (boolean_key, False, None),
-                (boolean_key, 0, "must be bool, got int"),
-                (boolean_key, inf, "must be finite"),
-            )
-            for key, value, error in cases:
-                with self.subTest(section=section, key=key, value=value):
-                    raw = {key: value}
-                    for part in reversed(section.split(".")):
-                        raw = {part: raw}
-                    if error is None:
-                        _validate_raw_config(raw)
-                    else:
-                        with self.assertRaises(ConfigError) as caught:
-                            _validate_raw_config(raw)
-                        self.assertEqual(str(caught.exception), f"Config value '{section}.{key}' {error}")
-
-    def test_raw_config_reports_unknown_keys_before_invalid_values(self) -> None:
-        for section in ("functional_annotation", "functional_annotation.taxonomy",
-                        "functional_annotation.consistency"):
-            with self.subTest(section=section):
-                raw = {"enabled": inf, "zzz": 1, "aaa": 2}
-                for part in reversed(section.split(".")):
-                    raw = {part: raw}
-                with self.assertRaises(ConfigError) as caught:
-                    _validate_raw_config(raw)
-                self.assertEqual(
-                    str(caught.exception),
-                    f"Unknown config key(s): {section}.aaa, {section}.zzz",
-                )
-
-    def test_collection_date_accepts_an_iso_date_range(self) -> None:
-        ensure_collection_date(
-            "2020-06-10/2020-10-14",
-            "sample.collection_date",
-        )
-
-    def test_collection_date_rejects_a_reversed_range(self) -> None:
-        with self.assertRaises(ConfigError):
-            ensure_collection_date(
-                "2020-10-14/2020-06-10",
-                "sample.collection_date",
-            )
-
-    def test_loads_and_validates_nested_annotation_consistency_config(self) -> None:
-        raw = {
-            "functional_annotation": {
-                "enabled": True,
-                "consistency": {
-                    "enabled": True,
-                    "harmonize_safe_equivalents": True,
-                    "auto_resolve_conflicts": False,
-                    "family_identity": 72.0,
-                    "source_pair_min_pairs": 7,
-                },
-            }
-        }
-
-        _validate_raw_config(raw)
-        config = load_functional_annotation_config(raw["functional_annotation"])
-        validate_functional_annotation_config(config)
-
-        self.assertTrue(config.consistency.enabled)
-        self.assertTrue(config.consistency.harmonize_safe_equivalents)
-        self.assertFalse(config.consistency.auto_resolve_conflicts)
-        self.assertEqual(config.consistency.family_identity, 72.0)
-        self.assertEqual(config.consistency.source_pair_min_pairs, 7)
-
-    def test_loads_and_validates_annotation_taxonomy_config(self) -> None:
-        raw = {
-            "functional_annotation": {
-                "taxonomy": {
-                    "enabled": True,
-                    "target_taxon_id": 45172,
-                    "resolve_scientific_name": False,
-                    "offline": True,
-                    "busco_crosscheck": False,
-                    "strict": True,
-                    "distant_specificity_identity": 55.0,
-                },
-            }
-        }
-
-        _validate_raw_config(raw)
-        config = load_functional_annotation_config(raw["functional_annotation"])
-        validate_functional_annotation_config(config)
-
-        self.assertEqual(config.taxonomy.target_taxon_id, 45172)
-        self.assertFalse(config.taxonomy.resolve_scientific_name)
-        self.assertTrue(config.taxonomy.offline)
-        self.assertFalse(config.taxonomy.busco_crosscheck)
-        self.assertTrue(config.taxonomy.strict)
-        self.assertEqual(config.taxonomy.distant_specificity_identity, 55.0)
-
-    def test_rejects_unknown_annotation_taxonomy_key(self) -> None:
-        with self.assertRaises(ConfigError):
-            _validate_raw_config(
-                {
-                    "functional_annotation": {
-                        "taxonomy": {"unknown_taxonomy_option": True},
-                    }
-                }
-            )
-
-    def test_rejects_unknown_annotation_consistency_key(self) -> None:
-        with self.assertRaises(ConfigError):
-            _validate_raw_config(
-                {
-                    "functional_annotation": {
-                        "consistency": {"unknown_threshold": 1},
-                    }
-                }
-            )
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        self.config_path = self.base / "msspack.toml"
+        fixture = Path(__file__).parent / "fixtures" / "minimal_pack" / "config.toml"
+        self.original = fixture.read_text(encoding="utf-8")
+        self.config_path.write_text(self.original, encoding="utf-8")
 
     def test_load_config_populates_defaults_and_resolves_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            base = Path(tmp_dir)
-            config_path = base / "msspack.toml"
-            config_path.write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "Demo"',
-                        "",
-                        "[inputs]",
-                        'fasta = "input.fa"',
-                        'gff = "input.gff3"',
-                        "",
-                        "[sample]",
-                        'locus_tag = "Demo"',
-                        'scientific_name = "Demo species"',
-                        "",
-                        "[submission]",
-                        'hold_date = "20261231"',
-                        'bioproject = "PRJDB1"',
-                        'biosample = "SAMD1"',
-                        "",
-                        "[submitter]",
-                        'ab_name = ["Fukushima,K."]',
-                        'contact = "Kenji Fukushima"',
-                        'institute = "NIG"',
-                        'department = "Lab"',
-                        'country = "Japan"',
-                        'state = "Shizuoka"',
-                        'city = "Mishima"',
-                        'street = "1111 Yata"',
-                        'zip = "411-8540"',
-                        'phone = "81-00-0000-0000"',
-                        'email = "x@example.org"',
-                        "",
-                        "[reference]",
-                        'title = "Demo sequencing"',
-                        'ab_name = ["Fukushima,K."]',
-                        "year = 2026",
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+        self.config_path.write_text(
+            self.original.replace("run_gapjust = false\n", "")
+            .replace("locus_tag_digits = 6\n", "")
+            .replace('datatype = "WGS"\n', ""),
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
 
-            config = load_config(config_path)
+        self.assertEqual(config.project.name, "Fixture")
+        self.assertEqual(config.sample.locus_tag_digits, 6)
+        self.assertEqual(config.submission.datatype, "WGS")
+        self.assertEqual(config.submission.hold_date, "20271231")
+        self.assertTrue(config.pipeline.run_gapjust)
+        self.assertEqual(config.pipeline.coordinate_duplicate_policy, "longest_valid_cds")
+        self.assertEqual(config.plots.coordinate_duplicate_limit, 50)
+        self.assertEqual(config.tools.java, "java")
+        self.assertEqual(config.busco.command, "busco")
+        self.assertTrue(config.busco.auto_lineage)
+        self.assertTrue(config.busco.run_cds)
+        self.assertFalse(config.busco.run_genome)
+        self.assertEqual(config.busco.cds_mode, "transcriptome")
+        self.assertFalse(config.functional_annotation.enabled)
+        self.assertTrue(config.functional_annotation.swissprot_enabled)
+        self.assertTrue(config.functional_annotation.pfam_enabled)
+        self.assertEqual(config.fasta_path, (self.base / "input.fa").resolve())
+        self.assertEqual(config.gff_path, (self.base / "input.gff3").resolve())
+        self.assertEqual(config.output_dir, (self.base / "build" / "Fixture").resolve())
+        self.assertEqual(config.database_dir, (self.base / "msspack_db").resolve())
+        self.assertEqual(config.busco_database_dir, (self.base / "msspack_db" / "busco").resolve())
 
-            self.assertEqual(config.project.name, "Demo")
-            self.assertEqual(config.sample.locus_tag_digits, 6)
-            self.assertEqual(config.submission.datatype, "WGS")
-            self.assertEqual(config.submission.hold_date, "20261231")
-            self.assertTrue(config.pipeline.run_gapjust)
-            self.assertEqual(
-                config.pipeline.coordinate_duplicate_policy,
-                "longest_valid_cds",
-            )
-            self.assertEqual(config.plots.coordinate_duplicate_limit, 50)
-            self.assertEqual(config.tools.java, "java")
-            self.assertEqual(config.busco.command, "busco")
-            self.assertTrue(config.busco.auto_lineage)
-            self.assertTrue(config.busco.run_cds)
-            self.assertFalse(config.busco.run_genome)
-            self.assertEqual(config.busco.cds_mode, "transcriptome")
-            self.assertFalse(config.functional_annotation.enabled)
-            self.assertTrue(config.functional_annotation.swissprot_enabled)
-            self.assertTrue(config.functional_annotation.pfam_enabled)
-            self.assertEqual(config.fasta_path, (base / "input.fa").resolve())
-            self.assertEqual(config.gff_path, (base / "input.gff3").resolve())
-            self.assertEqual(config.output_dir, (base / "build" / "Demo").resolve())
-            self.assertEqual(config.database_dir, (base / "msspack_db").resolve())
-            self.assertEqual(
-                config.busco_database_dir,
-                (base / "msspack_db" / "busco").resolve(),
-            )
+        shared_root = self.base / "shared-databases"
+        with patch.dict("os.environ", {"MSSPACK_DB_DIR": str(shared_root)}):
+            self.assertEqual(config.database_dir, shared_root)
+            self.assertEqual(config.busco_database_dir, shared_root / "busco")
 
-            shared_root = base / "shared-databases"
-            with patch.dict("os.environ", {"MSSPACK_DB_DIR": str(shared_root)}):
-                self.assertEqual(config.database_dir, shared_root)
-                self.assertEqual(
-                    config.busco_database_dir,
-                    shared_root / "busco",
-                )
+    def test_load_config_preserves_explicit_settings(self) -> None:
+        text = self.original.replace('locus_tag = "Fix"', 'locus_tag = "Test_123-demo.v1"')
+        text = text.replace(
+            'collection_date = "2026-01-02"',
+            'collection_date = "2020-06-10/2020-10-14"',
+        ).replace("run_gapjust = false", 'run_gapjust = false\ncoordinate_duplicate_policy = "first"')
+        self.config_path.write_text(
+            text + """
+[plots]
+coordinate_duplicate_limit = 125
+[functional_annotation]
+enabled = true
+threads = 3
+min_identity = 30
+[functional_annotation.consistency]
+enabled = true
+harmonize_safe_equivalents = true
+auto_resolve_conflicts = false
+family_identity = 72.0
+source_pair_min_pairs = 7
+[functional_annotation.taxonomy]
+enabled = true
+target_taxon_id = 45172
+resolve_scientific_name = false
+offline = true
+busco_crosscheck = false
+strict = true
+distant_specificity_identity = 55.0
+""",
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
+
+        self.assertEqual(config.sample.locus_tag, "Test_123-demo.v1")
+        self.assertEqual(config.sample.collection_date, "2020-06-10/2020-10-14")
+        self.assertEqual(config.pipeline.coordinate_duplicate_policy, "first")
+        self.assertEqual(config.plots.coordinate_duplicate_limit, 125)
+        annotation = config.functional_annotation
+        self.assertTrue(annotation.enabled)
+        self.assertEqual(annotation.threads, 3)
+        self.assertEqual(annotation.min_identity, 30.0)
+        self.assertTrue(annotation.consistency.enabled)
+        self.assertTrue(annotation.consistency.harmonize_safe_equivalents)
+        self.assertFalse(annotation.consistency.auto_resolve_conflicts)
+        self.assertEqual(annotation.consistency.family_identity, 72.0)
+        self.assertEqual(annotation.consistency.source_pair_min_pairs, 7)
+        self.assertTrue(annotation.taxonomy.enabled)
+        self.assertEqual(annotation.taxonomy.target_taxon_id, 45172)
+        self.assertFalse(annotation.taxonomy.resolve_scientific_name)
+        self.assertTrue(annotation.taxonomy.offline)
+        self.assertFalse(annotation.taxonomy.busco_crosscheck)
+        self.assertTrue(annotation.taxonomy.strict)
+        self.assertEqual(annotation.taxonomy.distant_specificity_identity, 55.0)
 
     def test_load_config_allows_omitting_hold_date_for_immediate_release(self) -> None:
-        fixture = Path(__file__).parent / "fixtures" / "minimal_pack" / "config.toml"
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "msspack.toml"
-            config_path.write_text(
-                fixture.read_text(encoding="utf-8").replace('hold_date = "20271231"\n', ""),
-                encoding="utf-8",
-            )
-
-            config = load_config(config_path)
-
-        self.assertEqual(config.submission.hold_date, "")
-
-    def test_coordinate_duplicate_plot_limit_is_configurable(self) -> None:
-        raw = {"plots": {"coordinate_duplicate_limit": 125}}
-
-        _validate_raw_config(raw)
-
-        from msspack.config_loading import load_plots_config
-        from msspack.config_validation import validate_plots_config
-
-        plots = load_plots_config(raw["plots"])
-        validate_plots_config(plots)
-        self.assertEqual(plots.coordinate_duplicate_limit, 125)
-
-    def test_coordinate_duplicate_plot_limit_must_be_positive(self) -> None:
-        from msspack.config import PlotsConfig
-        from msspack.config_validation import validate_plots_config
-
-        with self.assertRaises(ConfigError):
-            validate_plots_config(PlotsConfig(coordinate_duplicate_limit=0))
-
-    def test_coordinate_duplicate_selection_policy_is_configurable(self) -> None:
-        raw = {"pipeline": {"coordinate_duplicate_policy": "first"}}
-
-        _validate_raw_config(raw)
-        pipeline = load_pipeline_config(raw["pipeline"])
-        validate_pipeline_config(pipeline)
-
-        self.assertEqual(pipeline.coordinate_duplicate_policy, "first")
-
-    def test_coordinate_duplicate_selection_policy_rejects_unknown_value(
-        self,
-    ) -> None:
-        with self.assertRaises(ConfigError):
-            validate_pipeline_config(PipelineConfig(coordinate_duplicate_policy="unsupported"))
-
-    def test_database_lock_settings_must_be_positive(self) -> None:
-        with self.assertRaises(ConfigError):
-            validate_databases_config(DatabasesConfig(lock_poll_seconds=0))
-
-    def test_database_lock_settings_must_be_finite(self) -> None:
-        for value in (nan, inf):
-            with self.subTest(value=value), self.assertRaises(ConfigError):
-                validate_databases_config(DatabasesConfig(lock_poll_seconds=value))
-
-    def test_database_lock_stale_interval_must_exceed_heartbeat(self) -> None:
-        with self.assertRaises(ConfigError):
-            validate_databases_config(
-                DatabasesConfig(
-                    lock_heartbeat_seconds=60,
-                    lock_stale_seconds=60,
-                )
-            )
+        self.config_path.write_text(
+            self.original.replace('hold_date = "20271231"\n', ""), encoding="utf-8",
+        )
+        self.assertEqual(load_config(self.config_path).submission.hold_date, "")
 
     def test_load_config_rejects_invalid_settings(self) -> None:
         cases = (
@@ -318,13 +120,34 @@ class ConfigTests(unittest.TestCase):
                 "project",
             ),
             ("", '\n[busco]\nauto_lineage = false\nlineage_dataset = ""\n', "lineage_dataset"),
+            ('locus_tag = "Fix"', "locus_tag = '../victim'", "sample.locus_tag"),
+            ('locus_tag = "Fix"', r"locus_tag = '..\victim'", "sample.locus_tag"),
+            ('locus_tag = "Fix"', "locus_tag = 'C:victim'", "sample.locus_tag"),
             ('hold_date = "20271231"', 'hold_date = "2026-12-31"', "hold_date"),
             ('hold_date = "20271231"', 'hold_date = "20271399"', "hold_date"),
             ('collection_date = "2026-01-02"', 'collection_date = "2026/01/01"', "collection_date"),
             (
+                'collection_date = "2026-01-02"',
+                'collection_date = "2020-10-14/2020-06-10"',
+                "collection_date",
+            ),
+            (
                 'feature_with_gap = "misc_feature"',
                 'feature_with_gap = "bad-value"',
                 "feature_with_gap",
+            ),
+            (
+                "run_gapjust = false",
+                'run_gapjust = false\ncoordinate_duplicate_policy = "unsupported"',
+                "coordinate_duplicate_policy",
+            ),
+            ("", "\n[plots]\ncoordinate_duplicate_limit = 0\n", "plots.coordinate_duplicate_limit"),
+            ("", "\n[databases]\nlock_poll_seconds = 0\n", "databases.lock_poll_seconds"),
+            ("", "\n[databases]\nlock_poll_seconds = nan\n", "databases.lock_poll_seconds"),
+            ("", "\n[databases]\nlock_poll_seconds = inf\n", "databases.lock_poll_seconds"),
+            (
+                "", "\n[databases]\nlock_heartbeat_seconds = 60\nlock_stale_seconds = 60\n",
+                "databases.lock_stale_seconds",
             ),
             ('genome_coverage = "10x"', 'genome_coverage = "tenfold"', "genome_coverage"),
             ("run_gapjust = false", 'run_gapjust = "false"', "pipeline.run_gapjust"),
@@ -344,17 +167,45 @@ class ConfigTests(unittest.TestCase):
                 'title = """Fixture genome\nsequencing"""',
                 "control characters",
             ),
+            ("", "\n[functional_annotation]\nthreads = true\n", "functional_annotation.threads"),
+            ("", "\n[functional_annotation]\nthreads = 3.0\n", "functional_annotation.threads"),
+            ("", "\n[functional_annotation]\nmin_identity = false\n", "functional_annotation.min_identity"),
+            ("", '\n[functional_annotation]\nmin_identity = "3"\n', "functional_annotation.min_identity"),
+            ("", "\n[functional_annotation]\nenabled = 0\n", "functional_annotation.enabled"),
+            ("", "\n[functional_annotation]\nevalue = nan\n", "functional_annotation.evalue"),
+            ("", "\n[functional_annotation]\nevalue = inf\n", "functional_annotation.evalue"),
+            ("", "\n[functional_annotation]\nevalue = -inf\n", "functional_annotation.evalue"),
+            (
+                "", "\n[functional_annotation.taxonomy]\ntarget_taxon_id = true\n",
+                "functional_annotation.taxonomy.target_taxon_id",
+            ),
+            (
+                "", "\n[functional_annotation.taxonomy]\ndistant_specificity_identity = nan\n",
+                "functional_annotation.taxonomy.distant_specificity_identity",
+            ),
+            (
+                "", "\n[functional_annotation.consistency]\nfamily_identity = false\n",
+                "functional_annotation.consistency.family_identity",
+            ),
+            (
+                "", "\n[functional_annotation.consistency]\nfamily_identity = inf\n",
+                "functional_annotation.consistency.family_identity",
+            ),
+            (
+                "", "\n[functional_annotation.taxonomy]\nunknown_taxonomy_option = true\n",
+                "functional_annotation.taxonomy.unknown_taxonomy_option",
+            ),
+            (
+                "", "\n[functional_annotation.consistency]\nunknown_threshold = 1\n",
+                "functional_annotation.consistency.unknown_threshold",
+            ),
         )
-        fixture = Path(__file__).parent / "fixtures" / "minimal_pack" / "config.toml"
-        original = fixture.read_text(encoding="utf-8")
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config_path = Path(tmp_dir) / "msspack.toml"
-            for old, new, message in cases:
-                with self.subTest(setting=message, value=new):
-                    text = original.replace(old, new) if old else original + new
-                    config_path.write_text(text, encoding="utf-8")
-                    with self.assertRaisesRegex(ConfigError, message):
-                        load_config(config_path)
+        for old, new, message in cases:
+            with self.subTest(setting=message, value=new):
+                text = self.original.replace(old, new) if old else self.original + new
+                self.config_path.write_text(text, encoding="utf-8")
+                with self.assertRaisesRegex(ConfigError, message):
+                    load_config(self.config_path)
 
 
 if __name__ == "__main__":

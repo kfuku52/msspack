@@ -55,10 +55,6 @@ class PipelineCacheTests(unittest.TestCase):
                 ))
                 self.assertTrue(is_up_to_date([output], []))
 
-    def test_cached_action_requires_a_declared_output(self) -> None:
-        with self.assertRaisesRegex(MSSPackError, "at least one output"):
-            run_if_needed(outputs=[], dependencies=[], action=lambda: None)
-
     def test_manifest_write_preserves_out_of_band_sections(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)
@@ -96,35 +92,6 @@ class PipelineCacheTests(unittest.TestCase):
         self.assertIn("plots", payload)
         self.assertIn("busco", payload)
         self.assertEqual(payload["plots"]["pipeline"]["gene_flow_pdf"], "/tmp/flow.pdf")
-
-    def test_run_if_needed_skips_when_outputs_are_fresh(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            base = Path(tmp_dir)
-            dep = base / "dep.txt"
-            out = base / "out.txt"
-            dep.write_text("dep", encoding="utf-8")
-
-            calls = {"count": 0}
-
-            def action() -> None:
-                calls["count"] += 1
-                out.write_text(f"out-{calls['count']}", encoding="utf-8")
-
-            self.assertTrue(
-                run_if_needed(outputs=[out], dependencies=[dep], action=action)
-            )
-            self.assertEqual(calls["count"], 1)
-
-            self.assertFalse(
-                run_if_needed(outputs=[out], dependencies=[dep], action=action)
-            )
-            self.assertEqual(calls["count"], 1)
-
-            dep.write_text("changed", encoding="utf-8")
-            self.assertTrue(
-                run_if_needed(outputs=[out], dependencies=[dep], action=action)
-            )
-            self.assertEqual(calls["count"], 2)
 
     def test_failed_action_never_creates_a_reusable_cache_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

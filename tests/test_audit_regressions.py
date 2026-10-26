@@ -7,14 +7,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from msspack.annotation_taxonomy import discover_busco_summary_paths
 from msspack.busco_state import busco_results_available
 from msspack.config import ConfigError, load_config
-from msspack.config_validation import validate_functional_annotation_config
 from msspack.doctor import _input_checks
 from msspack.execution import run_if_needed
 from msspack.fasta import iter_fasta, reverse_complement
@@ -517,18 +515,6 @@ with (Path(__file__).parent / 'captured.jsonl').open('a') as handle:
             prepare_update(ann_path=ann, fasta_path=self.base / "input.fa", mapping_path=mapping,
                            output_dir=self.base / "update")
         self.assertFalse((self.base / "update").exists())
-
-    def test_nonfinite_config_rejected_in_toml_and_library(self) -> None:
-        original = self.config.read_text()
-        annotation = load_config(self.config).functional_annotation
-        for field in ("evalue", "min_bitscore", "swissprot_weight", "pfam_max_i_evalue", "cdd_evalue"):
-            for number in ("nan", "inf", "-inf"):
-                with self.subTest(field=field, number=number):
-                    self.config.write_text(original + f"\n[functional_annotation]\n{field} = {number}\n")
-                    with self.assertRaisesRegex(MSSPackError, "finite"):
-                        load_config(self.config)
-                    with self.assertRaisesRegex(MSSPackError, "finite"):
-                        validate_functional_annotation_config(replace(annotation, **{field: float(number)}))
 
     def test_semicolon_repair_precedes_doctor_and_gap_normalization(self) -> None:
         gff = self.base / "input.gff3"
