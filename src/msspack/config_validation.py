@@ -13,6 +13,7 @@ from .config_models import (
     DatabasesConfig,
     FunctionalAnnotationConfig,
     MSSPackConfig,
+    OrganelleConfig,
     PipelineConfig,
     PlotsConfig,
     ProjectConfig,
@@ -144,6 +145,32 @@ def validate_submission_config(submission: SubmissionConfig) -> None:
     ensure_nonempty(submission.bioproject, "submission.bioproject")
     ensure_nonempty(submission.biosample, "submission.biosample")
     ensure_nonempty(submission.datatype, "submission.datatype")
+
+
+def validate_organelle_configs(organelles: list[OrganelleConfig]) -> None:
+    names: set[str] = set()
+    for item in organelles:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,15}", item.name):
+            raise ConfigError("organelle.name must be 1-16 letters/digits/underscores, starting with a letter")
+        if item.name in names:
+            raise ConfigError(f"Duplicate organelle name: {item.name}")
+        names.add(item.name)
+        ensure_choice(item.organelle, "organelle.organelle", {"mitochondrion", "plastid", "plastid:chloroplast"})
+        if bool(item.fasta) == bool(item.genbank) or (item.genbank and item.gff):
+            raise ConfigError("Each organelle requires either fasta (with optional gff) or genbank")
+        if item.genetic_code:
+            try:
+                code = int(item.genetic_code)
+            except ValueError as exc:
+                raise ConfigError("organelle.genetic_code must be an NCBI table number") from exc
+            if code not in CodonTable.unambiguous_dna_by_id:
+                raise ConfigError(f"Unknown organelle genetic code: {code}")
+        if item.gff and not item.genetic_code:
+            raise ConfigError("organelle.genetic_code is required for GFF input")
+        for value in item.topology.values():
+            ensure_choice(value, "organelle.topology", {"linear", "circular"})
+        for value in item.completeness.values():
+            ensure_choice(value, "organelle.completeness", {"complete", "partial", "unknown"})
 
 
 def validate_submitter_config(submitter: SubmitterConfig) -> None:
@@ -423,6 +450,7 @@ def validate_config(config: MSSPackConfig) -> None:
     validate_project_config(config.project)
     validate_sample_config(config.sample)
     validate_submission_config(config.submission)
+    validate_organelle_configs(config.organelles)
     validate_submitter_config(config.submitter)
     validate_reference_config(config.reference)
     validate_st_comment_config(config.st_comment)

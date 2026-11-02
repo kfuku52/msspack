@@ -382,6 +382,22 @@ converter is implemented in `src/msspack/mss_converter/`.
 See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for license and attribution
 details.
 
+### Organelle genomes
+
+Prepare and review organelle annotations with external tools such as Chloe or
+PMGA, then supply their annotated GenBank or FASTA/GFF output through optional
+`[[organelles]]` inputs. msspack converts those annotations into a separate MISC
+submission alongside the nuclear files and validates the submission format.
+`msspack organelles --config config.toml` prepares only the organelle submission,
+preserving completed nuclear analysis. Annotation tools and their databases are
+managed separately. The report stacks organelle CDS/RNA feature flows below the
+nuclear **Pipeline gene flow** chart, with one panel per organelle input.
+Optional `assessment_json` inputs add externally calculated functional classes
+and reference-gene recovery panels; missing assessments remain explicitly unavailable.
+External per-CDS Swiss-Prot evidence adds hit/no-hit counts to the Sankey;
+unsearched CDS are **not assessed**, and RNA is **not applicable**.
+See the [organelle input and submission guide](docs/organelles.md).
+
 ## License
 
 `msspack` is distributed under the MIT License. See [`LICENSE`](LICENSE).

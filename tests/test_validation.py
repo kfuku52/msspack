@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from msspack.config import ToolsConfig
-from msspack.utils import MSSPackError
+from msspack.utils import CommandExecutionError, MSSPackError
 from msspack.validation import (
     ValidationArtifacts,
     ValidationOptions,
@@ -17,6 +17,76 @@ from msspack.validation import (
 
 
 class ValidationTests(unittest.TestCase):
+    def test_only_nonoverlapping_declared_trans_splicing_warnings_are_reviewable(self) -> None:
+        for enabled, overlap, accepted in ((True, False, True), (False, False, False), (True, True, False)):
+            with self.subTest(enabled=enabled, overlap=overlap), tempfile.TemporaryDirectory() as tmp_dir:
+                base = Path(tmp_dir)
+                artifacts = ValidationArtifacts(base / "a.ann", base / "a.fa", base / "logs", base / "validation")
+                location = "join(complement(1..6),4..9)" if overlap else "join(complement(1..3),7..9)"
+                artifacts.ann_path.write_text(
+                    "ctg1\tsource\t1..9\torganism\tTest organism\n"
+                    f"\tCDS\t{location}\tproduct\ttest protein\n\t\t\ttrans_splicing\t\n")
+                artifacts.fasta_path.write_text(">ctg1\nATGATGATG\n")
+                installation = SimpleNamespace(version="6.80", root=base / "tool")
+                installation.root.mkdir()
+                options = ValidationOptions(None, "1G", False, run_transchecker=False,
+                                            review_trans_splicing_overlaps=enabled)
+
+                def warning_parser(*args: object, **kwargs: object) -> None:
+                    Path(str(kwargs["log_path"])).write_text(
+                        "JP0082:WAR:LOC:ANN:Line [2]: Location is possibly overlapped.\n"
+                        "jParser (Ver. 6.80) finished.\n")
+                    raise CommandExecutionError(2, ["parser"])
+
+                with patch("msspack.validation.require_installed", return_value={"parser": installation}), patch(
+                    "msspack.validation.run_parser", side_effect=warning_parser,
+                ):
+                    if accepted:
+                        run_validation(options=options, artifacts=artifacts)
+                    else:
+                        with self.assertRaises(CommandExecutionError):
+                            run_validation(options=options, artifacts=artifacts)
+                summary = load_validation_summary(artifacts.validation_summary)
+                assert summary is not None
+                self.assertEqual(summary.status, "passed" if accepted else "failed")
+                self.assertEqual(summary.checks[0].warning_count, 1)
+                if accepted:
+                    self.assertIn("warnings retained", summary.checks[0].message or "")
+
+    def test_exception_translations_are_accounted_for_without_hiding_missing_normal_cds(self) -> None:
+        for emitted_location, accepted in (("1..3", True), ("4..6", False)):
+            with self.subTest(location=emitted_location), tempfile.TemporaryDirectory() as tmp_dir:
+                base = Path(tmp_dir)
+                artifacts = ValidationArtifacts(base / "a.ann", base / "a.fa", base / "logs", base / "validation")
+                artifacts.ann_path.write_text(
+                    "ctg1\tsource\t1..6\torganism\tTest organism\n"
+                    "\tCDS\t1..3\tproduct\tnormal\n"
+                    "\tCDS\t4..6\tproduct\tedited\n"
+                    "\t\t\texception\tRNA editing\n\t\t\ttranslation\tM\n")
+                artifacts.fasta_path.write_text(">ctg1\nATGACG\n")
+                installation = SimpleNamespace(version="2.26", root=base / "tool")
+                installation.root.mkdir()
+                options = ValidationOptions(None, "1G", False, run_parser=False)
+
+                def fake_transchecker(*args: object, location: str = emitted_location, **kwargs: object) -> None:
+                    Path(str(kwargs["log_path"])).write_text("finished\n")
+                    for key in ("aa_out", "nuc_out"):
+                        Path(str(kwargs[key])).write_text(f">ctg1.1 {location}\nM\n")
+
+                with patch("msspack.validation.require_installed", return_value={"transchecker": installation}), patch(
+                    "msspack.validation.run_transchecker", side_effect=fake_transchecker,
+                ):
+                    if accepted:
+                        run_validation(options=options, artifacts=artifacts)
+                    else:
+                        with self.assertRaisesRegex(MSSPackError, "non-exception CDS locations"):
+                            run_validation(options=options, artifacts=artifacts)
+                summary = load_validation_summary(artifacts.validation_summary)
+                assert summary is not None
+                self.assertEqual(summary.status, "passed" if accepted else "failed")
+                assert summary.checks[1].record_counts is not None
+                self.assertEqual(summary.checks[1].record_counts["exception_cds"], 1)
+
     def test_run_validation_writes_structured_pass_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

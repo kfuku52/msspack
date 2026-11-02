@@ -21,6 +21,19 @@ class InputsConfig:
 
 
 @dataclass
+class OrganelleConfig:
+    name: str
+    organelle: str
+    fasta: str = ""
+    gff: str = ""
+    genbank: str = ""
+    genetic_code: str = ""
+    topology: dict[str, str] = field(default_factory=dict)
+    completeness: dict[str, str] = field(default_factory=dict)
+    assessment_json: str = ""
+
+
+@dataclass
 class SampleConfig:
     locus_tag: str
     locus_tag_digits: int
@@ -232,6 +245,7 @@ class MSSPackConfig:
     st_comment: StCommentConfig
     pipeline: PipelineConfig
     tools: ToolsConfig
+    organelles: list[OrganelleConfig] = field(default_factory=list)
     plots: PlotsConfig = field(default_factory=PlotsConfig)
     databases: DatabasesConfig = field(default_factory=DatabasesConfig)
     busco: BuscoConfig = field(default_factory=BuscoConfig)

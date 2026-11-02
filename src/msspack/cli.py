@@ -13,6 +13,7 @@ from .ddbj_tools import DDBJ_LICENSE_URL, install_component, list_installed
 from .demo import write_demo_dataset
 from .doctor import doctor_succeeded, render_doctor_report, run_doctor
 from .internal_cli import add_internal_parser, handle_internal
+from .organelles import prepare_organelles
 from .pipeline import run_pipeline
 from .pipeline_plots import run_pipeline_plots, summarize_pipeline_plots
 from .report import run_html_report
@@ -80,6 +81,15 @@ def _build_parser() -> argparse.ArgumentParser:
     pack_parser = subparsers.add_parser("pack", help="build MSS submission files")
     pack_parser.add_argument("--config", required=True, help="config TOML")
     pack_parser.add_argument("--no-validate", action="store_true")
+
+    organelle_parser = subparsers.add_parser(
+        "organelles", help="convert external organelle annotations into a separate MISC submission",
+        description="Convert externally annotated GenBank or FASTA/GFF inputs into MSS files and validate them. "
+        "Run and review organelle annotation tools separately; this command does not predict genes.",
+    )
+    organelle_parser.add_argument("--config", required=True, help="config TOML with [[organelles]]")
+    organelle_parser.add_argument("--no-validate", action="store_true")
+    organelle_parser.add_argument("--nuclear-annotation", help="check locus tags against an existing nuclear MSS file")
 
     run_parser = subparsers.add_parser(
         "run",
@@ -271,6 +281,16 @@ def _handle_pack(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_organelles(args: argparse.Namespace) -> int:
+    outputs = prepare_organelles(args.config, validate=not args.no_validate,
+                                nuclear_annotation=args.nuclear_annotation)
+    print(outputs.ann_path)
+    print(outputs.fasta_path)
+    print(outputs.summary_path)
+    print(outputs.report_path)
+    return 0
+
+
 def _handle_run(args: argparse.Namespace) -> int:
     artifacts = run_all(
         args.config,
@@ -384,6 +404,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "doctor": _handle_doctor,
         "tools": _handle_tools,
         "pack": _handle_pack,
+        "organelles": _handle_organelles,
         "run": _handle_run,
         "db": _handle_db,
         "plot": _handle_plot,

@@ -73,6 +73,7 @@ class ManifestRecorder:
     started_perf: float = field(default_factory=time.perf_counter, repr=False)
     stages: list[StageRecord] = field(default_factory=list)
     validation: dict[str, object] = field(default_factory=dict)
+    organelles: dict[str, object] = field(default_factory=dict)
     status: str = "running"
     error: str | None = None
 
@@ -208,6 +209,7 @@ class ManifestRecorder:
                 "reused": stages_reused,
             },
             "validation": self.validation,
+            "organelles": {"enabled": bool(self.config.organelles), **self.organelles},
         }
         for key, value in existing_payload.items():
             payload.setdefault(key, value)

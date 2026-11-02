@@ -190,3 +190,19 @@ download_path = ""
 offline = false
 force = false
 opt_out_run_stats = true
+
+# Optional externally annotated organelle inputs, submitted separately as MISC.
+# Run annotators such as Chloe/PMGA outside msspack. See docs/organelles.md.
+# [[organelles]]
+# name = "mt"
+# organelle = "mitochondrion"
+# genbank = "/absolute/path/to/annotated_mitochondrion.gb"
+# topology = { ctg1 = "circular", ctg2 = "linear" }
+# completeness = { ctg1 = "complete", ctg2 = "partial" }
+# assessment_json = "/absolute/path/to/external_mitochondrion_assessment.json"
+#
+# [[organelles]]
+# name = "pt"
+# organelle = "plastid:chloroplast"
+# genbank = "/absolute/path/to/annotated_plastid.gb"
+# completeness = { ctg1 = "complete" }

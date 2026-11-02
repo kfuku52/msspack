@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import math
 from dataclasses import dataclass
@@ -99,6 +101,11 @@ _SANKEY_NODE_PRIORITY = {
     "annotation_cdd": 4,
     "annotation_existing": 5,
     "annotation_none": 6,
+    # Organelle CDS status paths precede RNA, preserving feature-type alignment.
+    "org_swissprot_hit": 0,
+    "org_swissprot_no_hit": 1,
+    "org_swissprot_not_evaluated": 2,
+    "org_annotation_RNA": 3,
 }
 SANKEY_GENE_SET_METRICS = {
     "duplicate_removed_genes": "duplicate_removed_genes",
@@ -820,12 +827,13 @@ def write_gene_flow_tsv(
     output_path: Path,
 ) -> Path:
     node_map = {node.id: node for node in nodes}
-    lines = ["source\ttarget\tcount\tsource_label\ttarget_label\tsource_stage\ttarget_stage"]
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
+    writer.writerow(["source", "target", "count", "source_label", "target_label", "source_stage", "target_stage"])
     for link in links:
         source = node_map[link.source]
         target = node_map[link.target]
-        lines.append(
-            "\t".join(
+        writer.writerow(
                 [
                     source.id,
                     target.id,
@@ -835,9 +843,8 @@ def write_gene_flow_tsv(
                     stage_labels[source.stage],
                     stage_labels[target.stage],
                 ]
-            )
         )
-    return write_text(output_path, "\n".join(lines) + "\n")
+    return write_text(output_path, stream.getvalue())
 
 
 def write_event_counts_tsv(events: list[EventCount], output_path: Path) -> Path:
@@ -1576,6 +1583,8 @@ def write_sankey_svg(
     busco_summaries: tuple[SankeyBuscoSummary, ...] = (),
     annotation_consistency: AnnotationConsistencySummary | None = None,
     validation_summary: ValidationSummary | None = None,
+    title: str = "Stage-wise pipeline gene flow",
+    subtitle: str = "Ribbon widths are proportional to gene counts; node values are genes.",
 ) -> Path:
     laid_out_nodes, laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
     consistency_nodes = _consistency_pie_nodes(annotation_consistency)
@@ -1592,8 +1601,8 @@ def write_sankey_svg(
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_width}" height="{svg_height}" viewBox="0 0 {width:.2f} {height:.2f}">',
         f"<style>text{{font-family:Helvetica,Arial,sans-serif;font-size:{SVG_FONT_SIZE};fill:#111827}} .title{{font-weight:700}} .subtitle{{fill:#4b5563}} .stage{{font-weight:700;fill:#334155}} .count{{fill:#475569}} .busco-title,.busco-label,.consistency-title,.summary-pie-title,.validation-title,.validation-tool{{font-weight:700;fill:#334155}} .busco-legend,.busco-value,.consistency-note,.summary-pie-note,.summary-pie-legend,.validation-detail{{fill:#475569}} .validation-status{{font-size:7pt;font-weight:700}}</style>",
         '<rect width="100%" height="100%" fill="white"/>',
-        '<text x="16" y="16" class="title">Stage-wise pipeline gene flow</text>',
-        '<text x="16" y="31" class="subtitle">Ribbon widths are proportional to gene counts; node values are genes.</text>',
+        f'<text x="16" y="16" class="title">{escape(title)}</text>',
+        f'<text x="16" y="31" class="subtitle">{escape(subtitle)}</text>',
     ]
     total_stages = len(stage_labels)
     for index, label in enumerate(stage_labels):
@@ -2311,6 +2320,8 @@ def write_sankey_pdf(
     busco_summaries: tuple[SankeyBuscoSummary, ...] = (),
     annotation_consistency: AnnotationConsistencySummary | None = None,
     validation_summary: ValidationSummary | None = None,
+    title: str = "Stage-wise pipeline gene flow",
+    subtitle: str = "Ribbon widths are proportional to gene counts; node values are genes.",
 ) -> Path:
     laid_out_nodes, laid_out_links, meta = _sankey_layout(stage_labels, nodes, links)
     consistency_nodes = _consistency_pie_nodes(annotation_consistency)
@@ -2327,7 +2338,7 @@ def write_sankey_pdf(
             page_height=height,
             x=16,
             y_top=16,
-            text="Stage-wise pipeline gene flow",
+            text=title,
             font="F2",
             size=CHART_FONT_SIZE_PT,
             color=TEXT_RGB,
@@ -2336,7 +2347,7 @@ def write_sankey_pdf(
             page_height=height,
             x=16,
             y_top=31,
-            text="Ribbon widths are proportional to gene counts; node values are genes.",
+            text=subtitle,
             font="F1",
             size=CHART_FONT_SIZE_PT,
             color=MUTED_RGB,
@@ -2508,7 +2519,10 @@ def _format_axis_tick(value: float) -> str:
     return f"{int(value):,}" if value.is_integer() else f"{value:,.1f}"
 
 
-def write_event_counts_svg(events: list[EventCount], output_path: Path) -> Path:
+def write_event_counts_svg(
+    events: list[EventCount], output_path: Path, *,
+    title: str = "Pipeline event counts", subtitle: str = EVENT_COUNTS_SUBTITLE,
+) -> Path:
     width, height, left, top, bar_height, row_gap, bar_width = _event_chart_geometry(events)
     max_count = max((event.count for event in events), default=0)
     axis_max = _nice_axis_max(max_count)
@@ -2518,8 +2532,8 @@ def write_event_counts_svg(events: list[EventCount], output_path: Path) -> Path:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width / PDF_POINTS_PER_INCH:g}in" height="{height / PDF_POINTS_PER_INCH:g}in" viewBox="0 0 {width:.2f} {height:.2f}">',
         f"<style>text{{font-family:Helvetica,Arial,sans-serif;fill:#111827}} .title{{font-size:{SVG_FONT_SIZE};font-weight:700}} .subtitle{{font-size:{SVG_FONT_SIZE};fill:#4b5563}} .label{{font-size:{SVG_FONT_SIZE};font-weight:700}} .unit{{font-size:{SVG_FONT_SIZE};fill:#64748b}} .value{{font-size:{SVG_FONT_SIZE};fill:#334155}} .tick{{font-size:{SVG_FONT_SIZE};fill:#6b7280}}</style>",
         '<rect width="100%" height="100%" fill="white"/>',
-        '<text x="16" y="16" class="title">Pipeline event counts</text>',
-        f'<text x="16" y="31" class="subtitle">{EVENT_COUNTS_SUBTITLE}</text>',
+        f'<text x="16" y="16" class="title">{escape(title)}</text>',
+        f'<text x="16" y="31" class="subtitle">{escape(subtitle)}</text>',
     ]
     for tick in _event_ticks(axis_max):
         x = left + bar_width * tick / axis_max
@@ -2560,7 +2574,10 @@ def write_event_counts_svg(events: list[EventCount], output_path: Path) -> Path:
     return write_text(output_path, "\n".join(parts) + "\n")
 
 
-def write_event_counts_pdf(events: list[EventCount], output_path: Path) -> Path:
+def write_event_counts_pdf(
+    events: list[EventCount], output_path: Path, *,
+    title: str = "Pipeline event counts", subtitle: str = EVENT_COUNTS_SUBTITLE,
+) -> Path:
     width, height, left, top, bar_height, row_gap, bar_width = _event_chart_geometry(events)
     max_count = max((event.count for event in events), default=0)
     axis_max = _nice_axis_max(max_count)
@@ -2572,7 +2589,7 @@ def write_event_counts_pdf(events: list[EventCount], output_path: Path) -> Path:
             page_height=height,
             x=16,
             y_top=16,
-            text="Pipeline event counts",
+            text=title,
             font="F2",
             size=CHART_FONT_SIZE_PT,
             color=TEXT_RGB,
@@ -2581,7 +2598,7 @@ def write_event_counts_pdf(events: list[EventCount], output_path: Path) -> Path:
             page_height=height,
             x=16,
             y_top=31,
-            text=EVENT_COUNTS_SUBTITLE,
+            text=subtitle,
             font="F1",
             size=CHART_FONT_SIZE_PT,
             color=MUTED_RGB,
@@ -2674,6 +2691,7 @@ def update_plot_manifest(
     coordinate_duplicate_summary: dict[str, object],
     annotation_consistency: AnnotationConsistencySummary | None = None,
     validation_summary: ValidationSummary | None = None,
+    organelle_gene_flows: list[dict[str, object]] | None = None,
 ) -> None:
     if manifest_path.exists():
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2723,6 +2741,8 @@ def update_plot_manifest(
                 check.component: check.to_dict() for check in validation_summary.checks
             },
         }
+    if organelle_gene_flows:
+        pipeline_payload["organelle_gene_flows"] = organelle_gene_flows
     plots["pipeline"] = pipeline_payload
     payload["plots"] = plots
     write_text(manifest_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")

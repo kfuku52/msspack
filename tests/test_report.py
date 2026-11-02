@@ -19,6 +19,22 @@ def _write_minimal_config(base: Path) -> Path:
 
 
 class ReportTests(unittest.TestCase):
+    def test_gene_flow_stacks_nuclear_then_each_organelle_before_other_plots(self):
+        from msspack.report import _render_pipeline_plots
+
+        html = _render_pipeline_plots(Path("/tmp/report"), {"plots": {"pipeline": {
+            "gene_flow_svg": "/tmp/plots/nuclear.svg", "event_counts_svg": "/tmp/plots/events.svg",
+            "organelle_gene_flows": [
+                {"title": "Mitochondrion (mt)", "svg": "/tmp/plots/mt.svg"},
+                {"title": "Plastid (pt)", "svg": "/tmp/plots/pt.svg"},
+            ],
+        }}})
+        self.assertEqual(html.count("<h3>Pipeline gene flow</h3>"), 1)
+        self.assertLess(html.index("Nuclear genome"), html.index("Mitochondrion (mt)"))
+        self.assertLess(html.index("Mitochondrion (mt)"), html.index("Plastid (pt)"))
+        self.assertLess(html.index("Plastid (pt)"), html.index("Pipeline event counts"))
+        self.assertIn("Each panel uses its own scale", html)
+
     def test_validation_section_uses_newest_available_summary(self) -> None:
         from msspack.report import _render_validation_section
 

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.8.17 - 2026-11-03
+
+- Accept externally annotated organelle GenBank or FASTA/GFF inputs and prepare
+  a separate MISC submission alongside nuclear WGS files, with sequence/feature
+  audits, locus-tag collision checks and atomic publication. Annotation tools
+  remain external; msspack does not predict organelle genes or RNA editing.
+- Stack organelle CDS/RNA gene-flow panels below the nuclear flow, and import
+  external functional classes, reference-gene recovery and per-CDS Swiss-Prot
+  evidence without changing supplied gene models or product names.
+- Account explicitly for supplied exception translations omitted by transChecker,
+  checking exact coverage of the remaining CDS. Retain reviewed JP0082 warnings
+  only for declared trans-splicing models with disjoint genomic intervals;
+  ordinary validation remains strict.
+
 ## 0.8.16 - 2026-10-26
 
 - Consolidate configuration tests at the TOML loading boundary and remove

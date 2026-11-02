@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
+
+from Bio.SeqFeature import Location
 
 from .config import MSSPackConfig, load_config
 from .ddbj_tools import ToolInstallation, require_installed, run_parser, run_transchecker
@@ -17,7 +20,7 @@ from .execution import (
     run_named_jobs,
 )
 from .step_logging import count_fasta_records
-from .utils import MSSPackError, ensure_dir, write_text
+from .utils import CommandExecutionError, MSSPackError, ensure_dir, write_text
 
 ValidationStatus = Literal["passed", "failed", "not_run"]
 VALIDATION_COMPONENTS = ("parser", "transchecker")
@@ -201,6 +204,7 @@ class ValidationOptions:
     java_cmd: str = "java"
     run_parser: bool = True
     run_transchecker: bool = True
+    review_trans_splicing_overlaps: bool = False
 
     @classmethod
     def from_config(cls, config: MSSPackConfig | None) -> ValidationOptions:
@@ -307,7 +311,7 @@ def _diagnostic_counts(log_path: Path) -> tuple[int, int]:
     for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
         if re.search(r"(?:^|:)WAR(?=:)|\[\s*WARN(?:ING)?\s*\]", line, re.IGNORECASE):
             warnings += 1
-        if re.search(r"(?:^|:)ERR(?=:)|\[\s*ERROR\s*\]", line, re.IGNORECASE):
+        if re.search(r"(?:^|:)(?:ERR|ER\d)(?=:)|\[\s*ERROR\s*\]", line, re.IGNORECASE):
             errors += 1
     return warnings, errors
 
@@ -320,6 +324,85 @@ def _count_mss_cds_features(ann_path: Path) -> int:
             if len(fields) >= 2 and fields[0] == "" and fields[1] == "CDS":
                 count += 1
     return count
+
+
+def _mss_cds_catalog(ann_path: Path) -> list[tuple[str, str, dict[str, str]]]:
+    """Keep entry/location identity for CDS skipped by the official exception policy."""
+    catalog: list[tuple[str, str, dict[str, str]]] = []
+    entry = ""
+    active: dict[str, str] | None = None
+    with ann_path.open(encoding="utf-8") as handle:
+        for line in handle:
+            fields = line.rstrip("\r\n").split("\t")
+            if len(fields) < 3:
+                continue
+            fields += [""] * (5 - len(fields))
+            if fields[0] and fields[0] != "COMMON":
+                entry = fields[0]
+            if fields[1]:
+                active = None
+                if fields[1] == "CDS":
+                    active = {}
+                    catalog.append((entry, fields[2], active))
+            if active is not None and fields[3]:
+                active[fields[3]] = fields[4]
+    return catalog
+
+
+def _translated_locations(path: Path) -> Counter[tuple[str, str]]:
+    locations: Counter[tuple[str, str]] = Counter()
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.startswith(">"):
+                continue
+            fields = line[1:].strip().split(maxsplit=1)
+            if len(fields) != 2 or "." not in fields[0]:
+                raise MSSPackError(f"Unrecognizable transChecker record identity: {line.strip()}")
+            entry, number = fields[0].rsplit(".", 1)
+            if not number.isdigit():
+                raise MSSPackError(f"Unrecognizable transChecker record identity: {line.strip()}")
+            locations[(entry, re.sub(r"\s+", "", fields[1]))] += 1
+    return locations
+
+
+def _review_trans_splicing_warnings(ann_path: Path, log_path: Path) -> bool:
+    """Prove JP0082 is a non-monotonic trans-splicing path, not overlapping DNA."""
+    log = log_path.read_text(encoding="utf-8")
+    diagnostics = [line for line in log.splitlines() if re.match(r"JP\d+:", line)]
+    if not diagnostics or not re.search(r"jParser .* finished", log):
+        return False
+    warnings, errors = _diagnostic_counts(log_path)
+    if errors or warnings != len(diagnostics):
+        return False
+    annotation = ann_path.read_text(encoding="utf-8").splitlines()
+    for line in diagnostics:
+        match = re.match(r"JP0082:WAR:LOC:ANN:Line \[(\d+)\]:", line)
+        if not match:
+            return False
+        index = int(match[1]) - 1
+        if not 0 <= index < len(annotation):
+            return False
+        fields = annotation[index].split("\t")
+        if len(fields) < 5 or fields[1] != "CDS":
+            return False
+        qualifiers = {fields[3]}
+        for following in annotation[index + 1:]:
+            columns = following.split("\t")
+            if len(columns) < 4 or columns[0] or columns[1]:
+                break
+            qualifiers.add(columns[3])
+        if "trans_splicing" not in qualifiers:
+            return False
+        try:
+            location = Location.fromstring(fields[2])
+            intervals = sorted((int(part.start), int(part.end)) for part in location.parts)
+        except (ValueError, TypeError, AttributeError):
+            return False
+        if (len(intervals) < 2 or any(part.ref or part.ref_db for part in location.parts)
+                or any(start >= end for start, end in intervals)
+                or any(left[1] > right[0] for left, right in zip(intervals, intervals[1:], strict=False))):
+            return False
+    return True
 
 
 def _write_check_result(path: Path, result: ValidationCheckResult) -> Path:
@@ -368,15 +451,25 @@ def _run_parser_with_result(
     artifacts: ValidationArtifacts,
     options: ValidationOptions,
 ) -> None:
+    review_message: str | None = None
     try:
-        run_parser(
-            installation,
-            ann_path=artifacts.ann_path,
-            fasta_path=artifacts.fasta_path,
-            heap=options.heap,
-            java_cmd=options.java_cmd,
-            log_path=artifacts.parser_log,
-        )
+        try:
+            run_parser(
+                installation,
+                ann_path=artifacts.ann_path,
+                fasta_path=artifacts.fasta_path,
+                heap=options.heap,
+                java_cmd=options.java_cmd,
+                log_path=artifacts.parser_log,
+            )
+        except CommandExecutionError as exc:
+            if not (exc.returncode == 2 and options.review_trans_splicing_overlaps
+                    and _review_trans_splicing_warnings(artifacts.ann_path, artifacts.parser_log)):
+                raise
+            review_message = (
+                "JP0082 warnings retained: all affected CDS declare trans_splicing and their "
+                "genomic intervals do not overlap. Curator/biological review is still required."
+            )
     except Exception as exc:
         _write_check_result(
             artifacts.parser_result,
@@ -396,6 +489,7 @@ def _run_parser_with_result(
             installation=installation,
             status="passed",
             log_path=artifacts.parser_log,
+            message=review_message,
         ),
     )
 
@@ -423,6 +517,9 @@ def _run_transchecker_with_result(
             log_path=artifacts.transchecker_log,
         )
         expected_records = _count_mss_cds_features(artifacts.ann_path)
+        catalog = _mss_cds_catalog(artifacts.ann_path)
+        exceptions = [row for row in catalog if row[2].get("exception") and row[2].get("translation")]
+        computed_records = expected_records - len(exceptions)
         aa_records = count_fasta_records(artifacts.aa_fasta)
         nuc_records = count_fasta_records(artifacts.nuc_fasta)
         record_counts = {
@@ -430,12 +527,24 @@ def _run_transchecker_with_result(
             "aa_fasta": aa_records,
             "nuc_fasta": nuc_records,
         }
-        if aa_records != expected_records or nuc_records != expected_records:
+        if exceptions:
+            record_counts.update(exception_cds=len(exceptions), expected_translated_cds=computed_records)
+        if aa_records != computed_records or nuc_records != computed_records:
             raise MSSPackError(
                 "transChecker output record counts do not match the final annotation: "
                 f"annotation CDS={expected_records}, AA={aa_records}, "
                 f"nucleotide={nuc_records}"
             )
+        if exceptions:
+            # transChecker deliberately omits supplied translations with /exception.
+            # Require exact coverage of every remaining entry/location, not just a lower count.
+            expected_locations = Counter(
+                (entry, re.sub(r"\s+", "", location)) for entry, location, qualifiers in catalog
+                if not (qualifiers.get("exception") and qualifiers.get("translation"))
+            )
+            if (_translated_locations(artifacts.aa_fasta) != expected_locations
+                    or _translated_locations(artifacts.nuc_fasta) != expected_locations):
+                raise MSSPackError("transChecker outputs do not cover the non-exception CDS locations exactly")
     except Exception as exc:
         _write_check_result(
             artifacts.transchecker_result,
@@ -606,6 +715,7 @@ def _build_validation_jobs(
             ),
             cache_key={
                 "component": "parser",
+                "review_trans_splicing_overlaps": options.review_trans_splicing_overlaps,
                 "heap": options.heap,
                 "java": command_fingerprint(options.java_cmd),
             },

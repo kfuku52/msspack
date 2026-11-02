@@ -11,6 +11,7 @@ from typing import Any
 
 from .busco_state import busco_results_available
 from .config import MSSPackConfig, load_config
+from .organelle_assessment import render_assessment_html
 from .output_state import locked_output
 from .pipeline_plots import run_pipeline_plots
 from .utils import MSSPackError, ensure_dir, write_text
@@ -411,14 +412,27 @@ def _render_pipeline_plots(report_root: Path, payload: dict[str, Any]) -> str:
     pipeline = plots.get("pipeline")
     if not isinstance(pipeline, dict):
         return ""
-    blocks = [
-        _render_plot_block(
+    organelles = pipeline.get("organelle_gene_flows", [])
+    gene_flow = _render_plot_block(
             report_root,
-            "Pipeline gene flow",
+            "Nuclear genome" if organelles else "Pipeline gene flow",
             pipeline.get("gene_flow_svg"),
             pipeline.get("gene_flow_pdf"),
             pipeline.get("gene_flow_tsv"),
-        ),
+        )
+    if organelles:
+        for flow in organelles:
+            gene_flow += _render_plot_block(
+                report_root, str(flow["title"]), flow.get("svg"), flow.get("pdf"), flow.get("tsv"),
+            )
+            if isinstance(flow.get("assessment"), dict):
+                gene_flow += render_assessment_html(flow["assessment"], report_root)
+        gene_flow = ('<section class="pipeline-gene-flows"><h3>Pipeline gene flow</h3>'
+                     '<p class="muted">Nuclear: genes. Organelles: supplied CDS/RNA features, '
+                     'without double-counting gene rows. Each panel uses its own scale.</p>'
+                     + gene_flow + '</section>')
+    blocks = [
+        gene_flow,
         _render_plot_block(
             report_root,
             "Pipeline event counts",
@@ -544,6 +558,14 @@ def _write_html_report(config: MSSPackConfig) -> ReportArtifacts:
         index_html=output_root / "report" / "index.html",
     )
     html = _render_html(artifacts.root, payload, logs_dir)
+    if config.organelles:
+        html = html.replace(
+            "</body>",
+            '<section><h2>Organelle MISC submission</h2>'
+            '<p><a href="../organelles/final/index.html">Organelle sequences, annotations, '
+            'and DDBJ validation</a>. Prepared separately from the nuclear submission.</p>'
+            '</section></body>',
+        )
     write_text(artifacts.index_html, html)
     _update_report_manifest(manifest_path, artifacts)
     return artifacts

@@ -93,7 +93,7 @@ python -m mypy src
 MSSPACK_RUN_DDBJ_EXTERNAL=0 MSSPACK_RUN_BUSCO_EXTERNAL=0 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Expect successful exit codes; full discovery normally skips the three opt-in
+Expect successful exit codes; full discovery normally skips the four opt-in
 external-tool tests. The explicit flags prevent inherited shell settings from
 starting downloads. Any other skip needs explanation. Lint/type checks use the
 active Python environment, avoiding tools from a different environment on PATH.

@@ -13,6 +13,7 @@ from .config_models import (
     FunctionalAnnotationConsistencyConfig,
     FunctionalAnnotationTaxonomyConfig,
     InputsConfig,
+    OrganelleConfig,
     PipelineConfig,
     PlotsConfig,
     ProjectConfig,
@@ -222,10 +223,13 @@ def _validate_value_type(value: Any, expected: ExpectedType, key_path: str) -> N
 
 
 def _validate_raw_config(data: dict[str, Any]) -> None:
-    unknown_sections = sorted(set(data) - set(SECTION_TYPES))
+    unknown_sections = sorted(set(data) - set(SECTION_TYPES) - {"organelles"})
     if unknown_sections:
         raise ConfigError(f"Unknown config section(s): {', '.join(unknown_sections)}")
     for section_name, values in data.items():
+        if section_name == "organelles":
+            _validate_organelle_tables(values)
+            continue
         if not isinstance(values, dict):
             raise ConfigError(f"Section '{section_name}' must be a table/object")
         schema = SECTION_TYPES[section_name]
@@ -270,6 +274,30 @@ def _validate_raw_config(data: dict[str, Any]) -> None:
                 raise ConfigError(
                     f"Config value '{section_name}.{key}' must not contain control characters"
                 )
+
+
+def _validate_organelle_tables(value: object) -> None:
+    if not isinstance(value, list):
+        raise ConfigError("Config 'organelles' must be an array of tables ([[organelles]])")
+    schema: dict[str, ExpectedType] = {
+        "name": str, "organelle": str, "fasta": str, "gff": str, "genbank": str,
+        "genetic_code": str, "topology": dict, "completeness": dict, "assessment_json": str,
+    }
+    for index, table in enumerate(value):
+        if not isinstance(table, dict):
+            raise ConfigError(f"organelles[{index}] must be a table")
+        unknown = set(table) - set(schema)
+        if unknown:
+            raise ConfigError(f"Unknown organelle config key(s): {', '.join(sorted(unknown))}")
+        for key, item in table.items():
+            _validate_value_type(item, schema[key], f"organelles[{index}].{key}")
+            strings = [item]
+            if isinstance(item, dict):
+                if not all(isinstance(k, str) and isinstance(v, str) for k, v in item.items()):
+                    raise ConfigError(f"organelles[{index}].{key} must map sequence IDs to strings")
+                strings = [*item.keys(), *item.values()]
+            if any(isinstance(s, str) and any(c in s for c in "\x00\r\n\t") for s in strings):
+                raise ConfigError(f"organelles[{index}].{key} must not contain control characters")
 
 
 def require(mapping: dict[str, Any], key: str, section: str) -> Any:
@@ -609,6 +637,7 @@ def load_sections(data: dict[str, Any]) -> dict[str, Any]:
         "pipeline": load_pipeline_config(section(data, "pipeline")),
         "plots": load_plots_config(section(data, "plots")),
         "tools": load_tools_config(section(data, "tools")),
+        "organelles": [OrganelleConfig(**item) for item in data.get("organelles", [])],
         "databases": load_databases_config(section(data, "databases")),
         "busco": load_busco_config(section(data, "busco")),
         "functional_annotation": load_functional_annotation_config(

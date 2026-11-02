@@ -21,6 +21,7 @@ from .coordinate_duplicate_plots import (
     write_coordinate_duplicate_svg,
 )
 from .execution import module_origin, run_if_needed
+from .organelle_plots import prepare_organelle_gene_flows
 from .output_state import locked_output
 from .pipeline_plot_data import (
     collect_pipeline_plot_data,
@@ -325,6 +326,7 @@ def run_pipeline_plots(
                 artifacts.source_consistency_pdf,
             ),
         )
+    organelle_flows = prepare_organelle_gene_flows(config, force=force)
     update_plot_manifest(
         manifest_path,
         artifacts=artifacts,
@@ -333,6 +335,7 @@ def run_pipeline_plots(
         coordinate_duplicate_summary=duplicate_summary,
         annotation_consistency=bundle.annotation_consistency,
         validation_summary=bundle.validation_summary,
+        organelle_gene_flows=organelle_flows,
     )
     return artifacts
 

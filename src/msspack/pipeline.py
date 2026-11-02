@@ -34,6 +34,7 @@ from .gff_cleanup import (
     fix_gff_semicolons_file,
     trim_gff_to_fasta_bounds,
 )
+from .organelles import prepare_organelles
 from .output_state import locked_output, publish_submission
 from .padding_tools import write_padding_log_for_gff
 from .pipeline_actions import (
@@ -1257,6 +1258,13 @@ def run_pipeline(config_file: str | Path, *, validate: bool = True) -> PipelineO
             manifest.validation["outputs"] = {
                 key: str(value).replace(str(work_final), str(published))
                 for key, value in validation_outputs.items()
+            }
+        if config.organelles:
+            organelles = prepare_organelles(config_file, validate=validate,
+                                            nuclear_annotation=outputs.ann_path)
+            manifest.organelles = {
+                "annotation": str(organelles.ann_path), "fasta": str(organelles.fasta_path),
+                "summary": str(organelles.summary_path), "report": str(organelles.report_path),
             }
         manifest.mark_completed()
         return outputs

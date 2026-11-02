@@ -6,6 +6,7 @@ from pathlib import Path
 from msspack.busco import run_busco_comparison
 from msspack.ddbj_tools import install_component, run_parser, run_transchecker
 from msspack.mss_converter import ConversionOptions, convert_gff_to_mss
+from msspack.organelles import prepare_organelles
 from msspack.utils import MSSPackError
 
 
@@ -30,6 +31,58 @@ def _validation_fixture(base: Path) -> tuple[Path, Path]:
     "set MSSPACK_RUN_DDBJ_EXTERNAL=1 to run official DDBJ tools",
 )
 class ExternalDdbjTests(unittest.TestCase):
+    def test_official_tools_accept_separate_organelle_misc_pair(self) -> None:
+        from Bio import SeqIO
+        from Bio.Seq import Seq
+        from Bio.SeqFeature import SeqFeature, SimpleLocation
+        from Bio.SeqRecord import SeqRecord
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            fixture = Path(__file__).parent / "fixtures" / "minimal_pack"
+            cache = base / "cache"
+            install_component("parser", cache_dir=cache)
+            install_component("transchecker", cache_dir=cache)
+            config_text = (fixture / "config.toml").read_text().replace(
+                "validate_with_parser = false", "validate_with_parser = true",
+            ).replace("validate_with_transchecker = false", "validate_with_transchecker = true")
+            config_text = config_text.replace("[tools]", f'[tools]\ncache_dir = "{cache.as_posix()}"')
+            for name, topology, organelle in (("mt", "circular", "mitochondrion"),
+                                               ("pt", "linear", "plastid:chloroplast")):
+                record = SeqRecord(Seq("ATG" + "AAA" * 38 + "TAA"), id="ctg1")
+                record.annotations.update(molecule_type="DNA", topology=topology)
+                location = SimpleLocation(0, len(record), strand=1)
+                record.features = [
+                    SeqFeature(location, type="gene", qualifiers={"gene": ["test"]}),
+                    SeqFeature(location, type="CDS", qualifiers={"gene": ["test"],
+                               "product": ["hypothetical protein"], "transl_table": ["1"]}),
+                ]
+                records = [record]
+                if name == "mt":
+                    edited = SeqRecord(Seq("ACG" + "AAA" * 38 + "TAA"), id="edited")
+                    edited.annotations.update(molecule_type="DNA", topology=topology)
+                    edited.features = [SeqFeature(location, type="CDS", qualifiers={
+                        "gene": ["edited"], "product": ["hypothetical protein"],
+                        "transl_table": ["1"], "exception": ["RNA editing"],
+                        "translation": ["M" + "K" * 38],
+                    })]
+                    records.append(edited)
+                SeqIO.write(records, base / f"{name}.gb", "genbank")
+                config_text += (f'\n[[organelles]]\nname="{name}"\norganelle="{organelle}"\n'
+                                f'genbank="{name}.gb"\ncompleteness={{ctg1="complete"}}\n')
+            config = base / "config.toml"
+            config.write_text(config_text)
+            artifacts = prepare_organelles(config)
+            from msspack.validation import load_validation_summary
+            summary = load_validation_summary(artifacts.final / "ddbj-validation-summary.json")
+            assert summary is not None
+            self.assertEqual(summary.status, "passed")
+            self.assertTrue(all(check.warning_count == 0 for check in summary.checks))
+            self.assertEqual(summary.checks[1].record_counts, {
+                "annotation_cds": 3, "aa_fasta": 2, "nuc_fasta": 2,
+                "exception_cds": 1, "expected_translated_cds": 2,
+            })
+
     def test_official_parser_and_transchecker_accept_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

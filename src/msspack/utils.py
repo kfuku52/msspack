@@ -18,6 +18,14 @@ class MSSPackError(RuntimeError):
     """Base exception for msspack errors."""
 
 
+class CommandExecutionError(MSSPackError):
+    """A completed command's exit status, without parsing human-readable errors."""
+
+    def __init__(self, returncode: int, command: Sequence[str]) -> None:
+        self.returncode = returncode
+        super().__init__(f"Command failed with exit code {returncode}: {shell_join(command)}")
+
+
 def default_cache_dir() -> Path:
     if platform.system() == "Darwin":
         return Path.home() / "Library" / "Caches" / "msspack"
@@ -85,9 +93,7 @@ def run_command(
             except FileNotFoundError as exc:
                 raise MSSPackError(f"Command not found: {command[0]}") from exc
         if result.returncode != 0:
-            raise MSSPackError(
-                f"Command failed with exit code {result.returncode}: {shell_join(command)}"
-            )
+            raise CommandExecutionError(result.returncode, command)
         return
 
     try:
@@ -101,9 +107,7 @@ def run_command(
     except FileNotFoundError as exc:
         raise MSSPackError(f"Command not found: {command[0]}") from exc
     if result.returncode != 0:
-        raise MSSPackError(
-            f"Command failed with exit code {result.returncode}: {shell_join(command)}"
-        )
+        raise CommandExecutionError(result.returncode, command)
 
 
 def copy_or_decompress(source: Path, destination: Path) -> Path:
