@@ -187,8 +187,8 @@ def write_organelle_assessment(
     if categories:
         events = [EventCount(category, category if len(category) <= 36 else category[:33] + "...", count, "CDS features", COLORS[i % len(COLORS)])
                   for i, (category, count) in enumerate(sorted(categories.items(), key=lambda p: (-p[1], p[0])))]
-        for writer, path in [(write_event_counts_svg, functional_svg), (write_event_counts_pdf, functional_pdf)]:
-            writer(events, path, title=title, subtitle="Classes from external annotation evidence; no genes predicted here.")
+        for write_chart, path in [(write_event_counts_svg, functional_svg), (write_event_counts_pdf, functional_pdf)]:
+            write_chart(events, path, title=title, subtitle="Classes from external annotation evidence; no genes predicted here.")
     else:
         _status_chart(functional_svg, functional_pdf, title, "No annotated CDS supplied; functional classes are not assessed.")
     content = (external or {}).get("gene_content")
@@ -200,8 +200,8 @@ def write_organelle_assessment(
     if content:
         events = [EventCount(state, label, counts[state], "reference marker genes", color) for state, (label, color) in STATES.items()]
         title = f"{item.name}: complete reference-gene models " + (f"{score:.1f}%" if score is not None else "NOT ASSESSED")
-        for writer, path in [(write_event_counts_svg, completeness_svg), (write_event_counts_pdf, completeness_pdf)]:
-            writer(events, path, title=title, subtitle=f"Reference set: {len(markers)} genes. This is not assembly completeness.")
+        for write_chart, path in [(write_event_counts_svg, completeness_svg), (write_event_counts_pdf, completeness_pdf)]:
+            write_chart(events, path, title=title, subtitle=f"Reference set: {len(markers)} genes. This is not assembly completeness.")
     else:
         _status_chart(completeness_svg, completeness_pdf, f"{item.name}: reference gene set NOT ASSESSED",
                       "No external marker assessment supplied; score is unavailable.")
@@ -248,13 +248,14 @@ def render_assessment_html(data: dict[str, Any], root: Path) -> str:
                  f"({data['state_counts'].get('complete', 0) + data['state_counts'].get('fragmented', 0)}/{data['marker_count']})."
                  if detected is not None else "Marker detection percentage is not assessed.")
     panel = data.get("marker_set")
-    description = html.escape(panel["definition"] + " [" + panel["id"] + ", " + panel["version"] + "]") if panel else "No reference set supplied."
+    description: str = html.escape(panel["definition"] + " [" + panel["id"] + ", " + panel["version"] + "]") if panel else "No reference set supplied."
     rows = "".join('<tr>' + ''.join('<td>' + html.escape(str(value)) + '</td>' for value in
                    (marker["gene"], marker["status"], ', '.join(m["locus_tag"] for m in marker.get("matches", [])), marker["evidence"])) + '</tr>'
                    for marker in data["markers"])
     links = ' | '.join('<a href="' + html.escape(os.path.relpath(path(key), root)) + '">' + label + '</a>'
                        for key, label in [("functional_pdf", "Functions PDF"), ("gene_content_pdf", "Gene-content PDF"), ("gene_content_tsv", "Per-gene TSV")])
     swiss = data.get("swissprot", {})
+    swiss_html: str
     if swiss.get("database"):
         counts = swiss["state_counts"]
         swiss_html = ('<p>Swiss-Prot: ' + str(counts["hit"]) + ' hit, ' + str(counts["no_hit"]) + ' no qualifying hit, '
@@ -265,11 +266,12 @@ def render_assessment_html(data: dict[str, Any], root: Path) -> str:
         swiss_html = '<p>Swiss-Prot: not assessed. Supplied gene/product labels do not establish Swiss-Prot matches.</p>'
     if data.get("swissprot_tsv"):
         links += ' | <a href="' + html.escape(os.path.relpath(path("swissprot_tsv"), root)) + '">Swiss-Prot CDS evidence TSV</a>'
+    method: str = data.get("method") or "External functional classification and gene-content evaluation were not supplied."
     return ('<section class="organelle-assessment"><h4>Functional annotation and reference gene-set recovery</h4>'
             + swiss_html + charts + '<p>' + links + '</p><p>Complete reference-gene models: <strong>' + label + '</strong>. '
             'This does not establish complete assembly structure or validated mature proteins.</p><p>' + description + '</p>'
             + '<p>' + html.escape(detection) + '</p>'
-            + '<p>' + html.escape(data.get("method") or "External functional classification and gene-content evaluation were not supplied.") + '</p>'
+            + '<p>' + html.escape(method) + '</p>'
             + ''.join('<p>' + html.escape(str(note)) + '</p>' for note in data.get("limitations", []))
             + '<details><summary>Reference genes and evidence</summary><table><tr><th>Gene</th><th>Status</th><th>Matched loci</th><th>Evidence</th></tr>'
             + rows + '</table></details></section>')

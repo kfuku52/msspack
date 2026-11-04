@@ -66,9 +66,9 @@ def _attach_gff(records: list[SeqRecord], path: Path) -> None:
         parents = child_ids(row.attributes.get("Parent"))
         if len(parents) > 1:
             raise MSSPackError("Multi-parent organelle GFF features require annotated GenBank")
-        for parent in parents:
-            if parent not in ids:
-                raise MSSPackError(f"Missing organelle GFF parent: {parent}")
+        for parent_key in parents:
+            if parent_key not in ids:
+                raise MSSPackError(f"Missing organelle GFF parent: {parent_key}")
         key = row.attributes.get("ID", f"row{index}")
         if row.type == "CDS" and parents:
             # GFF3 CDS rows sharing a transcript form one ordered coding feature.

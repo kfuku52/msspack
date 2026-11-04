@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.18 - 2026-11-04
+
+- Keep organelle input and assessment helpers compatible with minimum-supported
+  mypy 1.19 by separating parent IDs, feature records, chart functions and CSV
+  writers, and declaring the validated HTML text types.
+
 ## 0.8.17 - 2026-11-03
 
 - Accept externally annotated organelle GenBank or FASTA/GFF inputs and prepare
