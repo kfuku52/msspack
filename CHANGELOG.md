@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.8.19 - 2026-11-19
+
+- Write advisory submission reviews for coverage, CDS locations and lengths,
+  and tRNA gene/product mismatches. Review existing MSS annotations with
+  `msspack review-submission`.
+- Support reviewed paired contig exclusion, locus-tag numbering prefixes,
+  and optional omission of mRNAs fully represented by a single CDS. Accept
+  unknown sequencing depth and normalize product names with stray spaces.
+- Configure organelle-specific assembly comments, sequence titles, exon and
+  intron omission, and reviewed tRNA qualifier overrides with a feature audit.
+- Index organelle genes by locus tag and reuse parent associations during
+  MSS rendering.
+
 ## 0.8.18 - 2026-11-04
 
 - Keep organelle input and assessment helpers compatible with minimum-supported

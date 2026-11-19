@@ -171,6 +171,10 @@ features are omitted by default. Set `pipeline.retain_utr_features = true` (or
 annotations without a representing mRNA are retained. Conversion metrics count
 emitted mRNAs and redundant exon/UTR omissions.
 
+For submissions where the curator requests CDS-only representation, set
+`pipeline.omit_redundant_mrna = true`. This omits mRNAs represented in full
+by a single surviving CDS. See [submission review options](docs/usage.md#submission-review).
+
 rRNA, tRNA, tmRNA, ncRNA, repeat, regulatory, mobile-element, peptide, and other
 recognized GFF3 annotations are retained and mapped to DDBJ-supported INSDC feature
 keys. Pseudogenes are encoded as DDBJ-compatible `misc_feature` records with
@@ -327,8 +331,9 @@ annotation then includes the DDBJ `DATE/hold_date` row.
 In `[sample]`, set the optional `tissue_type` and `isolation_source` values when they
 apply, using values consistent with the linked BioSample. They are emitted as source
 feature qualifiers on every submitted sequence. In `[st_comment]`, specify
-`genome_coverage` as a positive number followed by `x`, such as `297x`. A legacy
-uppercase suffix such as `297X` is accepted but rendered as the DDBJ-preferred `297x`.
+`genome_coverage` as a positive number followed by `x`, such as `297x`, or
+`"Unknown"` when depth is unavailable. A legacy uppercase suffix such as `297X`
+is rendered as the DDBJ-preferred `297x`.
 
 - Functional annotation can combine Swiss-Prot, an optional close-reference proteome,
   UniRef90, Pfam, and CDD. Similarity searches precede the domain fallbacks. Set

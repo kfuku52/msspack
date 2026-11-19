@@ -102,6 +102,141 @@ genbank = "linear.gb"
         self.assertIn("pt_ctg1\tsource\t", annotation)
         self.assertEqual(len(json.loads(result.summary_path.read_text())["records"]), 2)
 
+    def test_per_organelle_st_comment_definition_and_feature_omissions(self) -> None:
+        mito = self.genbank(topology="linear")
+        plastid = self.genbank("plastid.gb")
+        for path, kind, location in (
+            (mito, "exon", SimpleLocation(0, 30, strand=1)),
+            (plastid, "intron", SimpleLocation(50, 70, strand=1)),
+        ):
+            record = SeqIO.read(path, "genbank")
+            record.features.append(SeqFeature(location, type=kind))
+            SeqIO.write(record, path, "genbank")
+        self.configure('''[[organelles]]
+name = "mt"
+organelle = "mitochondrion"
+genbank = "annotated.gb"
+ff_definition = { ctg1 = "@@[organism]@@ mitochondrial DNA region" }
+omit_features = ["exon"]
+[organelles.st_comment]
+assembly_method = "Mito Assembler v. 1.0"
+assembly_name = "Fixture_1.0"
+genome_coverage = "Unknown"
+sequencing_technology = "PacBio Revio"
+
+[[organelles]]
+name = "pt"
+organelle = "plastid:chloroplast"
+genbank = "plastid.gb"
+completeness = { ctg1 = "complete" }
+ff_definition = { ctg1 = "@@[organism]@@ chloroplast DNA, complete sequence" }
+omit_features = ["intron"]
+[organelles.st_comment]
+assembly_method = "Plastid Assembler v. 2.0"
+assembly_name = "Fixture_1.0"
+genome_coverage = "80X"
+sequencing_technology = "PacBio Revio"
+''')
+        result = prepare_organelles(self.config, validate=False)
+        annotation = result.ann_path.read_text()
+        common, entries = annotation.split("mt_ctg1\tsource", 1)
+        mt, pt = entries.split("pt_ctg1\tTOPOLOGY", 1)
+        self.assertNotIn("ST_COMMENT", common)
+        self.assertIn("ff_definition\t@@[organism]@@ mitochondrial DNA region\n", mt)
+        self.assertIn("Assembly Method\tMito Assembler v. 1.0\n", mt)
+        self.assertIn("Genome Coverage\tUnknown\n", mt)
+        self.assertNotIn("\texon\t", mt)
+        self.assertIn("ff_definition\t@@[organism]@@ chloroplast DNA, complete sequence\n", pt)
+        self.assertIn("Assembly Method\tPlastid Assembler v. 2.0\n", pt)
+        self.assertIn("Genome Coverage\t80x\n", pt)
+        self.assertNotIn("\tintron\t", pt)
+        self.assertEqual(annotation.count("\tCDS\t1..30\t"), 2)
+        with result.fasta_path.open() as handle:
+            records = list(SeqIO.parse(handle, "fasta"))
+        for output, source in zip(records, (mito, plastid), strict=True):
+            self.assertEqual(
+                str(output.seq).removesuffix("//"), str(SeqIO.read(source, "genbank").seq),
+            )
+        summary = json.loads(result.summary_path.read_text())
+        self.assertEqual(
+            [record["omitted_feature_counts"] for record in summary["records"]],
+            [{"exon": 1}, {"intron": 1}],
+        )
+        self.assertEqual(summary["submission_review_warning_count"], 2)
+        self.assertIn("short_cds\tmt_ctg1", (result.final / "submission-review.tsv").read_text())
+
+    def test_reviewed_trna_overrides_change_only_selected_qualifiers(self) -> None:
+        source = self.genbank()
+        record = SeqIO.read(source, "genbank")
+        for index, tag in enumerate(("Demo_mt000010", "Demo_mt000011", "Demo_mt000012")):
+            location = SimpleLocation(40 + 50 * index, 90 + 50 * index, strand=-1)
+            record.features.extend([
+                SeqFeature(location, type="gene", qualifiers={"gene": ["trnI-CAU"], "locus_tag": [tag]}),
+                SeqFeature(location, type="tRNA", qualifiers={"product": ["tRNA-Met"], "note": [tag]}),
+            ])
+        SeqIO.write(record, source, "genbank")
+        self.configure('''[[organelles]]
+name = "mt"
+organelle = "mitochondrion"
+genbank = "annotated.gb"
+''')
+        baseline = prepare_organelles(self.config, validate=False)
+        before = json.loads((baseline.final / "feature-audit.json").read_text())
+        fasta = baseline.fasta_path.read_bytes()
+        genbank = source.read_bytes()
+        with self.config.open("a") as handle:
+            handle.write('''[organelles.trna_overrides]
+Demo_mt000010 = { gene = "trnI-CAU", product = "tRNA-Ile" }
+Demo_mt000011 = { gene = "trnM-CAU", product = "tRNA-Met" }
+''')
+        result = prepare_organelles(self.config, validate=False)
+        after = json.loads((result.final / "feature-audit.json").read_text())
+        for old in before:
+            qualifiers = old["output_qualifiers"]
+            tag = qualifiers.get("locus_tag", [""])[0]
+            if tag in {"Demo_mt000010", "Demo_mt000011"}:
+                old["trna_qualifiers_before_override"] = {key: qualifiers[key] for key in ("gene", "product")}
+                if tag == "Demo_mt000010":
+                    qualifiers["product"] = ["tRNA-Ile"]
+                else:
+                    qualifiers["gene"] = ["trnM-CAU"]
+        self.assertEqual(after, before)
+        self.assertEqual(result.fasta_path.read_bytes(), fasta)
+        self.assertEqual(source.read_bytes(), genbank)
+        annotation = result.ann_path.read_text()
+        self.assertIn("\ttRNA\tcomplement(41..90)\tproduct\ttRNA-Ile\n", annotation)
+        self.assertIn("\tgene\ttrnM-CAU\n", annotation)
+        review = (result.final / "submission-review.tsv").read_text()
+        mismatches = [row for row in review.splitlines() if "trna_gene_product_mismatch" in row]
+        self.assertEqual(len(mismatches), 1)
+        self.assertIn("Demo_mt000012", mismatches[0])
+
+    def test_trna_overrides_reject_invalid_pairs_and_missing_or_ambiguous_tags(self) -> None:
+        source = self.genbank()
+        record = SeqIO.read(source, "genbank")
+        record.features.extend(
+            SeqFeature(SimpleLocation(40, 90, strand=1), type="tRNA",
+                       qualifiers={"locus_tag": ["Demo_mt000010"], "gene": ["trnI-CAU"], "product": ["tRNA-Met"]})
+            for _ in range(2)
+        )
+        SeqIO.write(record, source, "genbank")
+        for tag, override, error, message in (
+            ("Demo_mt000010", '{ gene = "trnI-CAU" }', ConfigError, "exactly 'gene' and 'product'"),
+            ("Demo_mt000010", '{ gene = "trnI-CAU", product = "tRNA-Met" }', ConfigError, "same recognized"),
+            ("Demo_mt000011", '{ gene = "trnI-CAU", product = "tRNA-Ile" }', MSSPackError, "No input tRNA"),
+            ("Demo_mt000010", '{ gene = "trnI-CAU", product = "tRNA-Ile" }', MSSPackError, "Ambiguous organelle"),
+        ):
+            with self.subTest(tag=tag, override=override):
+                self.configure(f'''[[organelles]]
+name = "mt"
+organelle = "mitochondrion"
+genbank = "annotated.gb"
+[organelles.trna_overrides]
+{tag} = {override}
+''')
+                with self.assertRaisesRegex(error, message):
+                    prepare_organelles(self.config, validate=False)
+
     def test_source_only_is_explicitly_reported_and_topology_is_not_guessed(self) -> None:
         (self.root / "org.fa").write_text(">ctg1 circular=true\naCGTacgtN\n")
         self.configure('''[[organelles]]
@@ -232,6 +367,24 @@ genbank = "annotated.gb"
                 if line.split("\t")[3] == "locus_tag"]
         self.assertEqual(len(tags), 2)
         self.assertEqual(len(set(tags)), 2)
+
+    def test_inherited_locus_tag_must_identify_a_unique_gene(self) -> None:
+        path = self.genbank()
+        record = SeqIO.read(path, "genbank")
+        record.features[0].qualifiers["locus_tag"] = ["Fix_shared"]
+        record.features.append(SeqFeature(
+            SimpleLocation(100, 130, strand=1),
+            type="gene",
+            qualifiers={"gene": ["different"], "locus_tag": ["Fix_shared"]},
+        ))
+        SeqIO.write(record, path, "genbank")
+        self.configure('''[[organelles]]
+name = "mt"
+organelle = "mitochondrion"
+genbank = "annotated.gb"
+''')
+        with self.assertRaisesRegex(MSSPackError, "Ambiguous organelle gene locus_tag: ctg1/Fix_shared"):
+            prepare_organelles(self.config, validate=False)
 
     def test_nuclear_locus_tag_collision_prevents_publication(self) -> None:
         path = self.genbank()

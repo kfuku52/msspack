@@ -3,11 +3,37 @@ import unittest
 from pathlib import Path
 
 from msspack.gff import child_ids, iter_gff_records
-from msspack.pipeline_actions import copy_input_fasta, pad_locus_tags
+from msspack.pipeline_actions import copy_input_fasta, copy_input_gff, pad_locus_tags
 from msspack.utils import MSSPackError
 
 
 class PipelineActionTests(unittest.TestCase):
+    def test_contig_exclusion_rejects_parent_links_to_the_removed_contig(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            source = base / "input.gff"
+            source.write_text(
+                "remove\tsrc\tgene\t1\t30\t.\t+\t.\tID=g%2C1\n"
+                "keep\tsrc\tmRNA\t1\t30\t.\t+\t.\tID=t1;Parent=g%2C1\n"
+            )
+            with self.assertRaisesRegex(MSSPackError, "retained contigs: g,1"):
+                copy_input_gff(input_path=source, output_path=base / "out.gff",
+                               log_path=base / "copy.log", exclude_contigs=frozenset({"remove"}))
+            self.assertFalse((base / "out.gff").exists())
+
+    def test_numbered_locus_padding_rejects_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            source = base / "input.gff"
+            source.write_text(
+                "ctg\tsrc\tgene\t1\t9\t.\t+\t.\tID=g1\n"
+                "ctg\tsrc\tgene\t11\t20\t.\t+\t.\tID=Fix_g00001\n"
+            )
+            with self.assertRaisesRegex(MSSPackError, "maps both"):
+                pad_locus_tags(source, base / "out.gff", "Fix", 5,
+                               log_path=base / "pad.log", number_prefix="g")
+            self.assertFalse((base / "out.gff").exists())
+
     def test_locus_padding_changes_identifiers_and_references_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             base = Path(tmp_dir)

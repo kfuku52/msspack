@@ -18,6 +18,13 @@ class ProjectConfig:
 class InputsConfig:
     fasta: str
     gff: str
+    exclude_contigs: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TrnaOverride:
+    gene: str
+    product: str
 
 
 @dataclass
@@ -31,6 +38,10 @@ class OrganelleConfig:
     topology: dict[str, str] = field(default_factory=dict)
     completeness: dict[str, str] = field(default_factory=dict)
     assessment_json: str = ""
+    st_comment: StCommentConfig | None = None
+    ff_definition: dict[str, str] = field(default_factory=dict)
+    omit_features: list[str] = field(default_factory=list)
+    trna_overrides: dict[str, TrnaOverride] = field(default_factory=dict)
 
 
 @dataclass
@@ -47,6 +58,7 @@ class SampleConfig:
     genetic_code: str = "1"
     tissue_type: str = ""
     isolation_source: str = ""
+    locus_tag_number_prefix: str = ""
 
 
 @dataclass
@@ -109,6 +121,7 @@ class PipelineConfig:
     validate_with_parser: bool = True
     validate_with_transchecker: bool = True
     validate_in_parallel: bool = True
+    omit_redundant_mrna: bool = False
 
 
 @dataclass

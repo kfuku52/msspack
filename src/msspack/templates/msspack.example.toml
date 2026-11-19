@@ -8,10 +8,14 @@ output_dir = "build/MySubmission"
 [inputs]
 fasta = "/absolute/path/to/reference.fa"
 gff = "/absolute/path/to/annotation.gff"
+# Exact sequence IDs approved for exclusion from both FASTA and GFF.
+# exclude_contigs = ["contig_to_exclude"]
 
 [sample]
 locus_tag = "MyTag"
 locus_tag_digits = 6
+# Pad IDs with a label before the number, e.g. g1 -> MyTag_g000001.
+# locus_tag_number_prefix = "g"
 scientific_name = "Genus species"
 strain = ""
 isolate = ""
@@ -56,12 +60,14 @@ status = "Unpublished"
 tagset_id = "Genome-Assembly-Data"
 assembly_method = "Assembler 1.0"
 assembly_name = "MyAssembly_1.0"
-genome_coverage = "100x"
+genome_coverage = "100x" # Use "Unknown" if sequencing depth is unavailable.
 sequencing_technology = "Sequencer"
 
 [pipeline]
 # mRNA locations retain UTR sequence; independent UTR features are optional.
 retain_utr_features = false
+# Enable only when the submission should omit mRNAs fully represented by their CDS.
+omit_redundant_mrna = false
 run_gapjust = true
 gap_assembly = "unknown"
 infer_complete = true
@@ -199,10 +205,21 @@ opt_out_run_stats = true
 # genbank = "/absolute/path/to/annotated_mitochondrion.gb"
 # topology = { ctg1 = "circular", ctg2 = "linear" }
 # completeness = { ctg1 = "complete", ctg2 = "partial" }
+# ff_definition = { ctg2 = "@@[organism]@@ mitochondrial DNA region" }
+# omit_features = ["exon"]
 # assessment_json = "/absolute/path/to/external_mitochondrion_assessment.json"
+# [organelles.st_comment]
+# assembly_method = "Organelle Assembler v. 1.0"
+# assembly_name = "MyAssembly_1.0"
+# genome_coverage = "Unknown"
+# sequencing_technology = "Sequencer"
+# [organelles.trna_overrides]
+# Demo_mt000001 = { gene = "trnI-CAU", product = "tRNA-Ile" }
 #
 # [[organelles]]
 # name = "pt"
 # organelle = "plastid:chloroplast"
 # genbank = "/absolute/path/to/annotated_plastid.gb"
 # completeness = { ctg1 = "complete" }
+# ff_definition = { ctg1 = "@@[organism]@@ chloroplast DNA, complete sequence" }
+# omit_features = ["intron"]

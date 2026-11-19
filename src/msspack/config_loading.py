@@ -23,6 +23,7 @@ from .config_models import (
     SubmissionConfig,
     SubmitterConfig,
     ToolsConfig,
+    TrnaOverride,
 )
 
 ExpectedType = type[Any] | tuple[type[Any], ...]
@@ -30,10 +31,11 @@ ExpectedType = type[Any] | tuple[type[Any], ...]
 
 SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
     "project": {"name": str, "output_dir": str},
-    "inputs": {"fasta": str, "gff": str},
+    "inputs": {"fasta": str, "gff": str, "exclude_contigs": list},
     "sample": {
         "locus_tag": str,
         "locus_tag_digits": int,
+        "locus_tag_number_prefix": str,
         "scientific_name": str,
         "strain": str,
         "isolate": str,
@@ -81,6 +83,7 @@ SECTION_TYPES: dict[str, dict[str, ExpectedType]] = {
     },
     "pipeline": {
         "retain_utr_features": bool,
+        "omit_redundant_mrna": bool,
         "run_gapjust": bool,
         "gapjust_gap_len": int,
         "gapjust_min": int,
@@ -282,6 +285,7 @@ def _validate_organelle_tables(value: object) -> None:
     schema: dict[str, ExpectedType] = {
         "name": str, "organelle": str, "fasta": str, "gff": str, "genbank": str,
         "genetic_code": str, "topology": dict, "completeness": dict, "assessment_json": str,
+        "st_comment": dict, "ff_definition": dict, "omit_features": list, "trna_overrides": dict,
     }
     for index, table in enumerate(value):
         if not isinstance(table, dict):
@@ -290,14 +294,29 @@ def _validate_organelle_tables(value: object) -> None:
         if unknown:
             raise ConfigError(f"Unknown organelle config key(s): {', '.join(sorted(unknown))}")
         for key, item in table.items():
-            _validate_value_type(item, schema[key], f"organelles[{index}].{key}")
+            key_path = f"organelles[{index}].{key}"
+            _validate_value_type(item, schema[key], key_path)
+            if key == "trna_overrides":
+                for tag, override in item.items():
+                    path = f"{key_path}.{tag}"
+                    if not isinstance(override, dict) or set(override) != {"gene", "product"}:
+                        raise ConfigError(f"{path} must contain exactly 'gene' and 'product'")
+                    for field, value in override.items():
+                        _validate_value_type(value, str, f"{path}.{field}")
+                continue
             strings = [item]
             if isinstance(item, dict):
                 if not all(isinstance(k, str) and isinstance(v, str) for k, v in item.items()):
-                    raise ConfigError(f"organelles[{index}].{key} must map sequence IDs to strings")
+                    raise ConfigError(f"{key_path} must map keys to strings")
+                if key == "st_comment" and (unknown := set(item) - set(SECTION_TYPES["st_comment"])):
+                    raise ConfigError(f"Unknown {key_path} key(s): {', '.join(sorted(unknown))}")
                 strings = [*item.keys(), *item.values()]
+            elif isinstance(item, list):
+                if not all(isinstance(v, str) for v in item):
+                    raise ConfigError(f"{key_path} must contain only strings")
+                strings = item
             if any(isinstance(s, str) and any(c in s for c in "\x00\r\n\t") for s in strings):
-                raise ConfigError(f"organelles[{index}].{key} must not contain control characters")
+                raise ConfigError(f"{key_path} must not contain control characters")
 
 
 def require(mapping: dict[str, Any], key: str, section: str) -> Any:
@@ -332,6 +351,7 @@ def load_inputs_config(data: dict[str, Any]) -> InputsConfig:
     return InputsConfig(
         fasta=str(require(data, "fasta", "inputs")),
         gff=str(require(data, "gff", "inputs")),
+        exclude_contigs=list(data.get("exclude_contigs", [])),
     )
 
 
@@ -339,6 +359,7 @@ def load_sample_config(data: dict[str, Any]) -> SampleConfig:
     return SampleConfig(
         locus_tag=str(require(data, "locus_tag", "sample")),
         locus_tag_digits=int(data.get("locus_tag_digits", 6)),
+        locus_tag_number_prefix=str(data.get("locus_tag_number_prefix", "")),
         scientific_name=str(require(data, "scientific_name", "sample")),
         strain=str(data.get("strain", "")),
         isolate=str(data.get("isolate", "")),
@@ -398,9 +419,21 @@ def load_st_comment_config(data: dict[str, Any]) -> StCommentConfig:
     )
 
 
+def load_organelle_config(data: dict[str, Any]) -> OrganelleConfig:
+    values = data.copy()
+    if "st_comment" in values:
+        values["st_comment"] = load_st_comment_config(values["st_comment"])
+    if "trna_overrides" in values:
+        values["trna_overrides"] = {
+            tag: TrnaOverride(**override) for tag, override in values["trna_overrides"].items()
+        }
+    return OrganelleConfig(**values)
+
+
 def load_pipeline_config(data: dict[str, Any]) -> PipelineConfig:
     return PipelineConfig(
         retain_utr_features=bool(data.get("retain_utr_features", False)),
+        omit_redundant_mrna=bool(data.get("omit_redundant_mrna", False)),
         run_gapjust=bool(data.get("run_gapjust", True)),
         gapjust_gap_len=int(data.get("gapjust_gap_len", 100)),
         gapjust_min=int(data.get("gapjust_min", 80)),
@@ -637,7 +670,7 @@ def load_sections(data: dict[str, Any]) -> dict[str, Any]:
         "pipeline": load_pipeline_config(section(data, "pipeline")),
         "plots": load_plots_config(section(data, "plots")),
         "tools": load_tools_config(section(data, "tools")),
-        "organelles": [OrganelleConfig(**item) for item in data.get("organelles", [])],
+        "organelles": [load_organelle_config(item) for item in data.get("organelles", [])],
         "databases": load_databases_config(section(data, "databases")),
         "busco": load_busco_config(section(data, "busco")),
         "functional_annotation": load_functional_annotation_config(

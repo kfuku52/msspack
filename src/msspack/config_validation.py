@@ -25,6 +25,7 @@ from .config_models import (
     ToolsConfig,
 )
 from .coordinate_duplicates import COORDINATE_DUPLICATE_POLICIES
+from .trna_annotations import trna_amino_acids
 
 HOLD_DATE_RE = re.compile(r"^\d{8}$")
 GENOME_COVERAGE_RE = re.compile(r"^(?P<coverage>\d+(?:\.\d+)?)[xX]$")
@@ -103,14 +104,16 @@ def ensure_string_list(values: list[str], key: str) -> None:
 
 
 def normalize_genome_coverage(value: str) -> str:
-    """Validate and return DDBJ genome coverage with a lowercase ``x`` suffix."""
+    """Return DDBJ's numeric coverage format or its explicit unknown value."""
     if not value:
         return ""
+    if value.strip().casefold() == "unknown":
+        return "Unknown"
     match = GENOME_COVERAGE_RE.fullmatch(value.strip())
     if match is None or float(match.group("coverage")) <= 0:
         raise ConfigError(
             "Config value 'st_comment.genome_coverage' must be a positive number "
-            "followed by 'x', for example 30x"
+            "followed by 'x' (for example 30x), or 'Unknown'"
         )
     return f"{match.group('coverage')}x"
 
@@ -127,6 +130,10 @@ def validate_sample_config(sample: SampleConfig) -> None:
             "without path separators or ':'"
         )
     ensure_positive(sample.locus_tag_digits, "sample.locus_tag_digits")
+    if sample.locus_tag_number_prefix and not re.fullmatch(
+        r"[A-Za-z]+", sample.locus_tag_number_prefix
+    ):
+        raise ConfigError("Config value 'sample.locus_tag_number_prefix' must contain only letters")
     ensure_nonempty(sample.scientific_name, "sample.scientific_name")
     ensure_collection_date(sample.collection_date, "sample.collection_date")
     try:
@@ -171,6 +178,23 @@ def validate_organelle_configs(organelles: list[OrganelleConfig]) -> None:
             ensure_choice(value, "organelle.topology", {"linear", "circular"})
         for value in item.completeness.values():
             ensure_choice(value, "organelle.completeness", {"complete", "partial", "unknown"})
+        for value in item.ff_definition.values():
+            ensure_nonempty(value, "organelle.ff_definition")
+        if set(item.omit_features) - {"exon", "intron"}:
+            raise ConfigError("organelle.omit_features supports only exon and intron")
+        for tag, override in item.trna_overrides.items():
+            key = f"organelle {item.name}.trna_overrides.{tag}"
+            ensure_nonempty(tag, key)
+            ensure_nonempty(override.gene, f"{key}.gene")
+            ensure_nonempty(override.product, f"{key}.product")
+            amino_acids = trna_amino_acids(override.gene, override.product)
+            if amino_acids is None or amino_acids[0] != amino_acids[1]:
+                raise ConfigError(f"{key}: gene and product must name the same recognized tRNA amino acid")
+        if item.st_comment is not None:
+            validate_st_comment_config(item.st_comment)
+            for field in ("assembly_method", "assembly_name", "genome_coverage",
+                          "sequencing_technology"):
+                ensure_nonempty(getattr(item.st_comment, field), f"organelle.st_comment.{field}")
 
 
 def validate_submitter_config(submitter: SubmitterConfig) -> None:
@@ -448,6 +472,11 @@ def validate_functional_annotation_config(annotation: FunctionalAnnotationConfig
 
 def validate_config(config: MSSPackConfig) -> None:
     validate_project_config(config.project)
+    excluded = config.inputs.exclude_contigs
+    if len(excluded) != len(set(excluded)) or any(
+        not seqid or any(c.isspace() or c == ">" for c in seqid) for seqid in excluded
+    ):
+        raise ConfigError("'inputs.exclude_contigs' must contain unique, nonempty sequence IDs")
     validate_sample_config(config.sample)
     validate_submission_config(config.submission)
     validate_organelle_configs(config.organelles)

@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import gzip
 import re
+from collections import Counter
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
 from .config import MSSPackConfig
-from .fasta import iter_fasta_handle
+from .fasta import iter_fasta_handle, write_fasta_record
 from .fasta_steps import remove_trailing_ns_fasta, write_mss_fasta
 from .gap_normalization import normalize_gap_lengths
-from .gff import parse_attributes, sort_gff_file_precise
+from .gff import child_ids, parse_attributes, repair_attributes, sort_gff_file_precise
 from .gff_adjustments import apply_padding_to_gff, fix_gff_to_inframe
 from .mss_converter import ConversionOptions, convert_gff_to_mss, format_event_summary
 from .mss_postprocess import convert_cds_features_to_misc
@@ -26,8 +28,9 @@ from .step_logging import (
     write_step_metrics,
 )
 from .submission_render import render_final_annotation
+from .submission_review import omit_redundant_mrna
 from .transcript_selection import select_one_mrna_per_gene
-from .utils import MSSPackError, copy_or_decompress, link_or_copy, write_text
+from .utils import MSSPackError, atomic_text_writer, copy_or_decompress, link_or_copy, write_text
 
 
 def run_gapjust(
@@ -93,53 +96,138 @@ def copy_input_fasta(
     output_path: Path,
     log_path: Path,
     metrics_path: Path | None = None,
+    exclude_contigs: frozenset[str] = frozenset(),
 ) -> None:
     started_at = datetime.now()
     seen_ids: set[str] = set()
     duplicate_ids: set[str] = set()
     empty_ids: list[str] = []
+    excluded_bases: dict[str, int] = {}
     opener = gzip.open if input_path.suffix == ".gz" else Path.open
-    with opener(input_path, "rt", encoding="utf-8") as input_handle:
+    writer = atomic_text_writer(output_path) if exclude_contigs else nullcontext()
+    with opener(input_path, "rt", encoding="utf-8") as input_handle, writer as output_handle:
         for record in iter_fasta_handle(input_handle):
             if record.id in seen_ids:
                 duplicate_ids.add(record.id)
             seen_ids.add(record.id)
             if not record.sequence:
                 empty_ids.append(record.id)
-    if not seen_ids:
-        raise MSSPackError("FASTA input does not contain any sequence records")
-    if duplicate_ids:
-        raise MSSPackError(
-            "Duplicate FASTA sequence IDs are not supported: "
-            + ", ".join(sorted(duplicate_ids)[:10])
-        )
-    if empty_ids:
-        raise MSSPackError(
-            "FASTA records must contain sequence data: " + ", ".join(empty_ids[:10])
-        )
-    copy_or_decompress(input_path, output_path)
-    output_total = len(seen_ids)
+            if record.id in exclude_contigs:
+                excluded_bases[record.id] = len(record.sequence)
+            elif output_handle is not None:
+                write_fasta_record(output_handle, identifier=record.id, sequence=record.sequence,
+                                   description=record.description)
+        if not seen_ids:
+            raise MSSPackError("FASTA input does not contain any sequence records")
+        if duplicate_ids:
+            raise MSSPackError(
+                "Duplicate FASTA sequence IDs are not supported: "
+                + ", ".join(sorted(duplicate_ids)[:10])
+            )
+        if empty_ids:
+            raise MSSPackError(
+                "FASTA records must contain sequence data: " + ", ".join(empty_ids[:10])
+            )
+        if missing := exclude_contigs - seen_ids:
+            raise MSSPackError("Excluded contigs absent from FASTA: " + ", ".join(sorted(missing)))
+        if not seen_ids - exclude_contigs:
+            raise MSSPackError("Contig exclusion would remove every FASTA record")
+    if not exclude_contigs:
+        copy_or_decompress(input_path, output_path)
+    output_total = len(seen_ids) - len(excluded_bases)
+    detail_lines = [f"Source file: {input_path}"]
+    details: dict[str, object] = {"source_file": str(input_path)}
+    if exclude_contigs:
+        total_bases = sum(excluded_bases.values())
+        details.update(excluded_contigs=excluded_bases, excluded_bases=total_bases)
+        detail_lines.append(f"Excluded {len(excluded_bases):,} contigs ({total_bases:,} bp)")
+        detail_lines.extend(f"Excluded contig: {seqid} ({bp:,} bp)"
+                            for seqid, bp in excluded_bases.items())
     write_step_log(
         log_path=log_path,
         command=f"msspack pipeline copy-input-fasta --input {input_path} --output {output_path}",
         step="copy-input-fasta",
         started_at=started_at,
         count_unit="sequences",
-        input_total=output_total,
-        changed_total=0,
+        input_total=len(seen_ids),
+        changed_total=len(excluded_bases),
         output_total=output_total,
-        details=[f"Source file: {input_path}"],
+        details=detail_lines,
     )
     if metrics_path is not None:
         write_step_metrics(
             metrics_path=metrics_path,
             step="copy-input-fasta",
             count_unit="sequences",
-            input_total=output_total,
-            changed_total=0,
+            input_total=len(seen_ids),
+            changed_total=len(excluded_bases),
             output_total=output_total,
-            details={"source_file": str(input_path)},
+            details=details,
         )
+
+
+def _copy_gff_excluding_contigs(
+    input_path: Path, output_path: Path, excluded: frozenset[str],
+) -> tuple[int, Counter[str]]:
+    opener = gzip.open if input_path.suffix == ".gz" else Path.open
+    removed: Counter[str] = Counter()
+    removed_ids: set[str] = set()
+    retained = 0
+    in_fasta = False
+    keep_sequence = False
+    wrote_fasta_directive = False
+    with opener(input_path, "rt", encoding="utf-8") as src, atomic_text_writer(output_path) as dst:
+        for line in src:
+            if in_fasta:
+                if line.startswith(">"):
+                    header = line[1:].split()
+                    if not header:
+                        raise MSSPackError("Embedded GFF FASTA header has no sequence ID")
+                    keep_sequence = header[0] not in excluded
+                    if keep_sequence and not wrote_fasta_directive:
+                        dst.write("##FASTA\n")
+                        wrote_fasta_directive = True
+                if keep_sequence:
+                    dst.write(line)
+                continue
+            if line.rstrip() == "##FASTA":
+                in_fasta = True
+                continue
+            if line.startswith(("##sequence-region ", "##sequence-region\t")):
+                directive = line.split()
+                if len(directive) > 1 and directive[1] in excluded:
+                    continue
+            elif not line.startswith("#") and line.strip():
+                fields = line.rstrip("\r\n").split("\t")
+                if len(fields) != 9:
+                    raise MSSPackError("Expected nine GFF columns when filtering contigs")
+                seqid = fields[0]
+                if seqid in excluded:
+                    removed[seqid] += 1
+                    if identifier := parse_attributes(repair_attributes(fields[8])[0]).get("ID"):
+                        removed_ids.add(identifier)
+                    continue
+                retained += 1
+            dst.write(line)
+        if removed_ids:
+            src.seek(0)
+            for line in src:
+                if line.rstrip() == "##FASTA":
+                    break
+                if line.startswith("#") or not line.strip():
+                    continue
+                fields = line.rstrip("\r\n").split("\t")
+                if fields[0] in excluded:
+                    continue
+                attrs = parse_attributes(repair_attributes(fields[8])[0])
+                if conflicts := removed_ids.intersection(
+                    [attrs.get("ID", ""), *child_ids(attrs.get("Parent"))]
+                ):
+                    raise MSSPackError(
+                        "Excluded GFF feature IDs are also defined or referenced on retained "
+                        "contigs: " + ", ".join(sorted(conflicts))
+                    )
+    return retained, removed
 
 
 def copy_input_gff(
@@ -148,30 +236,41 @@ def copy_input_gff(
     output_path: Path,
     log_path: Path,
     metrics_path: Path | None = None,
+    exclude_contigs: frozenset[str] = frozenset(),
 ) -> None:
     started_at = datetime.now()
-    copy_or_decompress(input_path, output_path)
-    output_total = count_gff_feature_records(output_path)
+    detail_lines = [f"Source file: {input_path}"]
+    details: dict[str, object] = {"source_file": str(input_path)}
+    removed_total = 0
+    if exclude_contigs:
+        output_total, removed = _copy_gff_excluding_contigs(input_path, output_path, exclude_contigs)
+        removed_total = sum(removed.values())
+        details["excluded_gff_features"] = {seqid: removed[seqid] for seqid in sorted(exclude_contigs)}
+        detail_lines.extend(f"Excluded GFF features on {seqid}: {removed[seqid]:,}"
+                            for seqid in sorted(exclude_contigs))
+    else:
+        copy_or_decompress(input_path, output_path)
+        output_total = count_gff_feature_records(output_path)
     write_step_log(
         log_path=log_path,
         command=f"msspack pipeline copy-input-gff --input {input_path} --output {output_path}",
         step="copy-input-gff",
         started_at=started_at,
         count_unit="GFF features",
-        input_total=output_total,
-        changed_total=0,
+        input_total=output_total + removed_total,
+        changed_total=removed_total,
         output_total=output_total,
-        details=[f"Source file: {input_path}"],
+        details=detail_lines,
     )
     if metrics_path is not None:
         write_step_metrics(
             metrics_path=metrics_path,
             step="copy-input-gff",
             count_unit="GFF features",
-            input_total=output_total,
-            changed_total=0,
+            input_total=output_total + removed_total,
+            changed_total=removed_total,
             output_total=output_total,
-            details={"source_file": str(input_path)},
+            details=details,
         )
 
 
@@ -474,9 +573,15 @@ def pad_locus_tags(
     *,
     log_path: Path,
     metrics_path: Path | None = None,
+    number_prefix: str = "",
 ) -> None:
     started_at = datetime.now()
     pattern = re.compile(rf"\b{re.escape(prefix)}_(\d+)\b")
+    labeled_number = (
+        re.compile(rf"^(?:{re.escape(prefix)}_)?{re.escape(number_prefix)}(\d+)(?=$|[.-])")
+        if number_prefix else None
+    )
+    padded_id_owners: dict[str, str] = {}
     text = input_path.read_text(encoding="utf-8")
     trailing_newline = text.endswith("\n")
     replacements = 0
@@ -486,6 +591,11 @@ def pad_locus_tags(
         nonlocal replacements
         replacements += 1
         return f"{prefix}_{int(match.group(1)):0{digits}d}"
+
+    def repl_labeled(match: re.Match[str]) -> str:
+        nonlocal replacements
+        replacements += 1
+        return f"{prefix}_{number_prefix}{int(match.group(1)):0{digits}d}"
 
     output_lines: list[str] = []
     in_fasta = False
@@ -506,6 +616,16 @@ def pad_locus_tags(
                         for token in tokens:
                             decoded = parse_attributes("ID=" + token).get("ID", "")
                             padded = pattern.sub(repl, decoded)
+                            if labeled_number is not None:
+                                if labeled_number.match(padded):
+                                    padded = labeled_number.sub(repl_labeled, padded)
+                                if decoded_key == "ID" and padded:
+                                    previous = padded_id_owners.setdefault(padded, decoded)
+                                    if previous != decoded:
+                                        raise MSSPackError(
+                                            f"Locus-tag padding maps both {previous!r} and "
+                                            f"{decoded!r} to {padded!r}"
+                                        )
                             updated_tokens.append(
                                 quote(padded, safe=".:_-") if padded != decoded else token
                             )
@@ -724,14 +844,20 @@ def render_final_annotation_with_log(
     output_path: Path,
     log_path: Path,
     metrics_path: Path | None = None,
+    omit_redundant_mrna_features: bool = False,
 ) -> None:
     started_at = datetime.now()
     body = body_path.read_text(encoding="utf-8")
+    body_rows = count_nonempty_lines(body)
+    normalized_rows = len(re.findall(r"(^\t\t\t)country(\t)", body, flags=re.MULTILINE))
+    omitted = 0
+    if omit_redundant_mrna_features:
+        body, omitted = omit_redundant_mrna(body)
     final_text = render_final_annotation(header, body)
     write_text(output_path, final_text)
     header_rows = count_nonempty_lines(header)
-    body_rows = count_nonempty_lines(body)
-    changed_total = len(re.findall(r"(^\t\t\t)country(\t)", body, flags=re.MULTILINE))
+    output_rows = count_nonempty_lines(final_text)
+    changed_total = header_rows + body_rows - output_rows + normalized_rows
     write_step_log(
         log_path=log_path,
         command=f"msspack pipeline render-final-annotation --body {body_path} --output {output_path}",
@@ -740,11 +866,12 @@ def render_final_annotation_with_log(
         count_unit="annotation rows",
         input_total=header_rows + body_rows,
         changed_total=changed_total,
-        output_total=count_nonempty_lines(final_text),
+        output_total=output_rows,
         details=[
             f"Header rows: {header_rows:,}",
             f"Body rows: {body_rows:,}",
-            f"Normalized geo_loc_name rows: {changed_total:,}",
+            f"Normalized geo_loc_name rows: {normalized_rows:,}",
+            f"Redundant mRNA features omitted: {omitted:,}",
         ],
     )
     if metrics_path is not None:
@@ -754,10 +881,11 @@ def render_final_annotation_with_log(
             count_unit="annotation rows",
             input_total=header_rows + body_rows,
             changed_total=changed_total,
-            output_total=count_nonempty_lines(final_text),
+            output_total=output_rows,
             details={
                 "header_rows": header_rows,
                 "body_rows": body_rows,
-                "normalized_geo_loc_name_rows": changed_total,
+                "normalized_geo_loc_name_rows": normalized_rows,
+                "omitted_redundant_mrna_features": omitted,
             },
         )

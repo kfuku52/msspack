@@ -6,7 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 
 HYPOTHETICAL_PRODUCT = "hypothetical protein"
-
+_SPACE_BEFORE_WORD_HYPHEN = re.compile(r"(?<=[A-Za-z])[ \t]+-(?=[a-z])")
 _UNINFORMATIVE_PRODUCTS = {
     "hypothetical protein",
     "uncharacterized protein",
@@ -558,6 +558,11 @@ def audit_product_name(
     return tuple(dict.fromkeys(warnings))
 
 
+def normalize_product_spacing(value: str) -> str:
+    """Join split hyphenated words while preserving suspended hyphens and minus signs."""
+    return _SPACE_BEFORE_WORD_HYPHEN.sub("-", value)
+
+
 def standardize_product_name(
     product: str,
     *,
@@ -588,6 +593,7 @@ def standardize_product_name(
     )
     value = value.replace("\\", "/").replace('"', "")
     value = re.sub(r"[\x00-\x20\x7f]+", " ", value).strip().strip(".;")
+    value = _replace(value, _SPACE_BEFORE_WORD_HYPHEN, "-", "joined_split_hyphen", actions)
     value = _strip_cog_categories(value, actions)
     value = _remove_subject_organism(value, subject_organism, actions)
     value = _simplify_domain_description(value, actions)

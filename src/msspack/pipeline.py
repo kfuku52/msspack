@@ -55,6 +55,7 @@ from .pipeline_actions import (
     write_submission_fasta,
 )
 from .submission_render import render_header
+from .submission_review import SUBMISSION_REVIEW_NAME, write_submission_review
 from .utils import (
     MSSPackError,
     ensure_dir,
@@ -122,6 +123,7 @@ class PipelineContext:
         outputs: object,
         dependencies: object,
         action: Callable[[], object],
+        settings: dict[str, object] | None = None,
     ) -> bool:
         output_paths = path_list(outputs)
         dependency_paths = path_list(dependencies)
@@ -132,6 +134,7 @@ class PipelineContext:
             action=action,
             cache_key={
                 "msspack_version": __version__, "step": name,
+                "settings": settings,
                 "commands": [command_fingerprint(command) for command in (
                     self.config.tools.java,
                     self.config.tools.gff3sort or "",
@@ -267,17 +270,21 @@ def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
 
     intermediate = ctx.outputs.intermediate
     logs = ctx.outputs.logs
+    excluded = frozenset(config.inputs.exclude_contigs)
+    exclusion_settings: dict[str, object] = {"exclude_contigs": sorted(excluded)}
     prepared_fasta = intermediate / "00.input.genome.fasta"
     copy_fasta_metrics = logs / "00.copy-input-fasta.metrics.json"
     ctx.run_step(
         name="00.copy-input-fasta",
         outputs=[prepared_fasta, logs / "00.copy-input-fasta.log", copy_fasta_metrics],
         dependencies=[input_fasta, ctx.modules.pipeline_actions],
+        settings=exclusion_settings,
         action=lambda: copy_input_fasta(
             input_path=input_fasta,
             output_path=prepared_fasta,
             log_path=logs / "00.copy-input-fasta.log",
             metrics_path=copy_fasta_metrics,
+            exclude_contigs=excluded,
         ),
     )
 
@@ -287,11 +294,13 @@ def _prepare_inputs(ctx: PipelineContext) -> PreparedInputs:
         name="00.copy-input-gff",
         outputs=[prepared_gff, logs / "00.copy-input-gff.log", copy_gff_metrics],
         dependencies=[input_gff, ctx.modules.pipeline_actions],
+        settings=exclusion_settings,
         action=lambda: copy_input_gff(
             input_path=input_gff,
             output_path=prepared_gff,
             log_path=logs / "00.copy-input-gff.log",
             metrics_path=copy_gff_metrics,
+            exclude_contigs=excluded,
         ),
     )
 
@@ -481,6 +490,7 @@ def _prepare_gff(ctx: PipelineContext, inputs: PreparedInputs) -> PreparedGff:
             config.sample.locus_tag_digits,
             log_path=logs / "08.pad-locus-tags.log",
             metrics_path=locus_tag_metrics,
+            number_prefix=config.sample.locus_tag_number_prefix,
         ),
     )
 
@@ -1182,7 +1192,16 @@ def run_pipeline(config_file: str | Path, *, validate: bool = True) -> PipelineO
                 output_path=outputs.ann_path,
                 log_path=outputs.logs / "17.render-final-annotation.log",
                 metrics_path=outputs.logs / "17.render-final-annotation.metrics.json",
+                omit_redundant_mrna_features=config.pipeline.omit_redundant_mrna,
             ),
+        )
+
+        review_path = outputs.final / SUBMISSION_REVIEW_NAME
+        ctx.run_step(
+            name="18.review-submission",
+            outputs=[review_path],
+            dependencies=[outputs.ann_path],
+            action=lambda: write_submission_review(outputs.ann_path, review_path),
         )
 
         validation_options = ValidationOptions.from_config(config)

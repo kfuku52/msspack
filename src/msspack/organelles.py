@@ -6,15 +6,16 @@ import html
 import json
 import re
 import tempfile
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
-from Bio.SeqFeature import AfterPosition, BeforePosition, ExactPosition, SimpleLocation
+from Bio.SeqFeature import AfterPosition, BeforePosition, ExactPosition, SeqFeature, SimpleLocation
+from Bio.SeqRecord import SeqRecord
 
 from . import __version__
-from .config import MSSPackConfig, load_config
+from .config import MSSPackConfig, OrganelleConfig, load_config
 from .execution import implementation_fingerprint
 from .fasta import write_wrapped_sequence
 from .mss_converter.render import render_source_feature
@@ -22,7 +23,8 @@ from .organelle_assessment import render_assessment_html
 from .organelle_inputs import feature_qualifiers, load_organelle_records
 from .organelle_plots import write_organelle_gene_flows
 from .output_state import locked_output, publish_submission
-from .submission_render import render_header
+from .submission_render import render_header, render_st_comment
+from .submission_review import SUBMISSION_REVIEW_NAME, write_submission_review
 from .utils import MSSPackError, ensure_dir, expand_path, write_text
 from .validation import (
     ValidationArtifacts,
@@ -101,46 +103,64 @@ def _location(feature: Any, length: int) -> str:
     return segments[0] if len(segments) == 1 else f"{operator}({','.join(segments)})"
 
 
-def _gene_for(record: Any, feature: Any, qualifiers: dict[str, list[str]]) -> Any:
-    if feature.type == "gene":
-        return feature
-    name = qualifiers.get("gene", [""])[0]
-    tag = qualifiers.get("locus_tag", [""])[0]
-    if tag:
-        linked = [gene for gene in record.features if gene.type == "gene"
-                  and gene.qualifiers.get("locus_tag") == [tag]]
-        if len(linked) > 1:
-            raise MSSPackError(f"Ambiguous organelle gene locus_tag: {record.id}/{tag}")
+_GENE_CHILD_TYPES = {"CDS", "mRNA", "tRNA", "rRNA", "ncRNA", "misc_RNA"}
+
+
+class _GeneIndex:
+    def __init__(self, record: SeqRecord) -> None:
+        self.record_id = record.id
+        self.genes = [feature for feature in record.features if feature.type == "gene"]
+        self.by_tag: dict[str, list[SeqFeature]] = defaultdict(list)
+        for gene in self.genes:
+            tags = gene.qualifiers.get("locus_tag")
+            if isinstance(tags, list) and len(tags) == 1:
+                self.by_tag[tags[0]].append(gene)
+
+    def parent(self, feature: SeqFeature, qualifiers: dict[str, list[str]]) -> SeqFeature | None:
+        if feature.type == "gene":
+            return feature
+        name = qualifiers.get("gene", [""])[0]
+        tag = qualifiers.get("locus_tag", [""])[0]
+        linked = self.by_tag.get(tag) if tag else None
         if linked:
+            if len(linked) > 1:
+                raise MSSPackError(f"Ambiguous organelle gene locus_tag: {self.record_id}/{tag}")
             if name and linked[0].qualifiers.get("gene", [name]) != [name]:
                 raise MSSPackError(f"Conflicting organelle gene names for locus_tag: {tag}")
             return linked[0]
-    genes = [gene for gene in record.features if gene.type == "gene"
-             and (not name or gene.qualifiers.get("gene", [""])[0] == name)
-             and (not tag or not gene.qualifiers.get("locus_tag")
-                  or gene.qualifiers["locus_tag"] == [tag])
-             and gene.location is not None and feature.location is not None
-             and all(any(g.strand == p.strand and int(g.start) <= int(p.start) and int(p.end) <= int(g.end)
-                         for g in gene.location.parts) for p in feature.location.parts)]
-    if len(genes) > 1:
-        raise MSSPackError(f"Ambiguous organelle gene association: {record.id}/{name}")
-    return genes[0] if genes else None
+        genes = [gene for gene in self.genes
+                 if (not name or gene.qualifiers.get("gene", [""])[0] == name)
+                 and (not tag or not gene.qualifiers.get("locus_tag")
+                      or gene.qualifiers["locus_tag"] == [tag])
+                 and gene.location is not None and feature.location is not None
+                 and all(any(g.strand == p.strand and int(g.start) <= int(p.start) and int(p.end) <= int(g.end)
+                             for g in gene.location.parts) for p in feature.location.parts)]
+        if len(genes) > 1:
+            raise MSSPackError(f"Ambiguous organelle gene association: {self.record_id}/{name}")
+        return genes[0] if genes else None
 
-
-def _gene_identity(record: Any, feature: Any, qualifiers: dict[str, list[str]]) -> str:
-    if str(feature.id) != "<unknown id>":
-        return str(feature.id)
-    gene = _gene_for(record, feature, qualifiers)
-    name = (gene.qualifiers if gene else qualifiers).get("gene", [""])[0]
-    return f"{name}/{gene.location if gene else feature.location}"
+    def identity(self, feature: SeqFeature, qualifiers: dict[str, list[str]]) -> str:
+        if str(feature.id) != "<unknown id>":
+            return str(feature.id)
+        gene = self.parent(feature, qualifiers)
+        name = (gene.qualifiers if gene else qualifiers).get("gene", [""])[0]
+        return f"{name}/{gene.location if gene else feature.location}"
 
 
 def _render_features(
-    record: Any, *, item_name: str, code: str, prefix: str, tags: dict[str, str],
+    record: SeqRecord, *, item: OrganelleConfig, prefix: str, tags: dict[str, str],
     owners: dict[str, str], reserved_tags: set[str], audit: list[dict[str, object]],
     counts: Counter[str], warnings: list[str],
+    omit_features: set[str], applied_trna_overrides: set[str],
 ) -> str:
+    item_name, code = item.name, item.genetic_code
     chunks: list[str] = []
+    gene_index = _GeneIndex(record)
+    parents = {
+        index: gene_index.parent(feature, feature_qualifiers(feature))
+        for index, feature in enumerate(record.features) if feature.type in _GENE_CHILD_TYPES
+    }
+    represented = {id(parent) for parent in parents.values() if parent is not None}
     for index, feature in enumerate(record.features):
         if feature.type == "source":
             continue
@@ -150,11 +170,15 @@ def _render_features(
         location = _location(feature, len(record.seq))
         qualifiers = feature_qualifiers(feature)
         original = {qualifier: list(values) for qualifier, values in qualifiers.items()}
+        if key in omit_features:
+            audit.append({"organelle": item_name, "source_record": str(record.id),
+                          "feature_index": index, "type": key, "location": location,
+                          "input_qualifiers": original, "output_qualifiers": {},
+                          "representation": "omitted by configured feature policy",
+                          "feature_sequence_sha256": _digest(str(feature.extract(record.seq)).encode())})
+            continue
         if key == "gene":
-            related = [child for child in record.features
-                       if child.type in {"CDS", "mRNA", "tRNA", "rRNA", "ncRNA", "misc_RNA"}
-                       and _gene_for(record, child, feature_qualifiers(child)) is feature]
-            if related:
+            if id(feature) in represented:
                 audit.append({"organelle": item_name, "source_record": str(record.id),
                               "feature_index": index, "type": key, "location": location,
                               "input_qualifiers": original, "output_qualifiers": {},
@@ -163,11 +187,12 @@ def _render_features(
                 continue
             key = "misc_feature"
             qualifiers.setdefault("note", []).append("gene annotation without a CDS or RNA feature")
-        elif key in {"CDS", "mRNA", "tRNA", "rRNA", "ncRNA", "misc_RNA"}:
-            gene = _gene_for(record, feature, qualifiers)
+        elif key in _GENE_CHILD_TYPES:
+            gene = parents[index]
             if gene is not None:
+                gene_qualifiers = feature_qualifiers(gene)
                 for qualifier in ("gene", "gene_synonym", "locus_tag", "pseudo", "pseudogene", "note"):
-                    for value in feature_qualifiers(gene).get(qualifier, []):
+                    for value in gene_qualifiers.get(qualifier, []):
                         if value not in qualifiers.setdefault(qualifier, []):
                             qualifiers[qualifier].append(value)
                     if not qualifiers.get(qualifier):
@@ -205,8 +230,9 @@ def _render_features(
                 protein = str(sequence[:len(sequence) // 3 * 3].translate(table=int(table)))
                 if "*" in protein[:-1]:
                     warnings.append(f"{item_name}/{record.id}/{index}: internal stop codon; review annotation")
-        if key in {"CDS", "mRNA", "tRNA", "rRNA", "ncRNA", "misc_RNA"} or feature.type == "gene":
-            identity = _gene_identity(record, feature, qualifiers)
+        input_locus_tags = qualifiers.get("locus_tag", [])
+        if key in _GENE_CHILD_TYPES or feature.type == "gene":
+            identity = gene_index.identity(feature, qualifiers)
             tag_key = f"{item_name}/{record.id}/{identity}"
             # Preserve annotated locus tags; assign new ones consistently within each gene.
             if "locus_tag" not in qualifiers:
@@ -221,6 +247,18 @@ def _render_features(
                 if tag in owners and owners[tag] != tag_key:
                     raise MSSPackError(f"Conflicting organelle locus_tag: {tag}")
                 owners[tag] = tag_key
+        previous_trna_qualifiers = None
+        if key == "tRNA" and item.trna_overrides.keys() & set(input_locus_tags):
+            if len(input_locus_tags) != 1 or input_locus_tags[0] in applied_trna_overrides:
+                raise MSSPackError(
+                    f"Ambiguous organelle {item_name} trna_overrides match: {', '.join(input_locus_tags)}"
+                )
+            tag = input_locus_tags[0]
+            override = item.trna_overrides[tag]
+            previous_trna_qualifiers = {name: qualifiers.get(name, []) for name in ("gene", "product")}
+            qualifiers["gene"] = [override.gene]
+            qualifiers["product"] = [override.product]
+            applied_trna_overrides.add(tag)
         qualifier_rows: list[tuple[str, str]] = []
         for qualifier, values in qualifiers.items():
             qualifier = _text(qualifier)
@@ -235,10 +273,15 @@ def _render_features(
         else:
             chunks.append(f"\t{key}\t{location}\t\t\n")
         counts[key] += 1
-        audit.append({"organelle": item_name, "source_record": str(record.id), "feature_index": index,
-                      "type": key, "location": location, "input_qualifiers": original,
-                      "output_qualifiers": qualifiers,
-                      "feature_sequence_sha256": _digest(str(feature.extract(record.seq)).encode())})
+        entry: dict[str, object] = {
+            "organelle": item_name, "source_record": str(record.id), "feature_index": index,
+            "type": key, "location": location, "input_qualifiers": original,
+            "output_qualifiers": qualifiers,
+            "feature_sequence_sha256": _digest(str(feature.extract(record.seq)).encode()),
+        }
+        if previous_trna_qualifiers is not None:
+            entry["trna_qualifiers_before_override"] = previous_trna_qualifiers
+        audit.append(entry)
     return "".join(chunks)
 
 
@@ -311,8 +354,7 @@ def _prepare(
     ann = work / f"{config.sample.locus_tag}.organelles.ann.txt"
     fasta = work / f"{config.sample.locus_tag}.organelles.fasta"
     misc = replace(config, submission=replace(config.submission, datatype="MISC", keywords=[]))
-    # Nuclear assembly method/coverage/name do not describe the organelle assemblies.
-    header_lines = [line for line in render_header(misc).split("\tST_COMMENT\t", 1)[0].splitlines()
+    header_lines = [line for line in render_header(misc, include_st_comment=False).splitlines()
                     if line.split("\t")[1] != "DATATYPE"]
     first = header_lines[0].split("\t")
     first[0] = "COMMON"
@@ -331,6 +373,8 @@ def _prepare(
     with ann.open("w", encoding="utf-8") as annotation, fasta.open("w", encoding="utf-8") as sequence_file:
         annotation.write(header)
         for item, records in loaded:
+            omit_features = set(item.omit_features)
+            applied_trna_overrides: set[str] = set()
             for source in (item.fasta, item.gff, item.genbank):
                 if source:
                     path = expand_path(source, config.base_dir)
@@ -351,17 +395,20 @@ def _prepare(
                 sequence_file.write(f">{entry}\n")
                 write_wrapped_sequence(sequence_file, sequence)
                 sequence_file.write("//\n")
+                suffix = {"complete": ", complete sequence", "partial": ", partial sequence"}.get(
+                    completeness, "",
+                )
+                definition = item.ff_definition.get(
+                    identifier, f"@@[organism]@@ {item.organelle} DNA, @@[entry]@@{suffix}",
+                )
                 source = render_source_feature(
                     contig_name=entry, length=len(sequence), organism_name=config.sample.scientific_name,
                     strain=config.sample.strain, mol_type="genomic DNA", country=config.sample.geo_loc_name,
                     isolate=config.sample.isolate, collection_date=config.sample.collection_date,
                     sex=config.sample.sex, tissue_type=config.sample.tissue_type,
                     isolation_source=config.sample.isolation_source,
+                    ff_definition=_text(definition),
                 )
-                suffix = ", complete sequence" if completeness == "complete" else ", partial sequence" if completeness == "partial" else ""
-                definition = f"@@[organism]@@ {item.organelle} DNA, @@[submitter_seqid]@@{suffix}"
-                source = re.sub(r"(?<=ff_definition\t)[^\n]*", definition, source)
-                source = source.replace("@@[submitter_seqid]@@", "@@[entry]@@")
                 source = "".join(line + "\n" for line in source.splitlines()
                                  if line.split("\t")[3] != "submitter_seqid")
                 if topology == "circular":
@@ -384,19 +431,31 @@ def _prepare(
                             continue
                         for value in values:
                             annotation.write(f"\t\t\t{_text(qualifier)}\t{_text(value)}\n")
+                if item.st_comment is not None:
+                    annotation.write(render_st_comment(item.st_comment))
                 counts: Counter[str] = Counter()
-                annotation.write(_render_features(record, item_name=item.name, code=item.genetic_code,
-                                                  prefix=config.sample.locus_tag, tags=tags,
+                annotation.write(_render_features(record, item=item, prefix=config.sample.locus_tag, tags=tags,
                                                   owners=seen_locus_tags, reserved_tags=reserved_tags, audit=audit,
-                                                  counts=counts, warnings=warnings))
+                                                  counts=counts, warnings=warnings,
+                                                  omit_features=omit_features,
+                                                  applied_trna_overrides=applied_trna_overrides))
                 if not counts:
                     warnings.append(f"{entry}: source-only candidate; biological annotation is missing")
+                input_counts = Counter(feature.type for feature in record.features if feature.type != "source")
                 records_summary.append({"entry": entry, "input_id": identifier, "organelle": item.organelle,
                                         "length": len(sequence), "topology": topology,
                                         "completeness": completeness, "sequence_sha256": _digest(sequence.encode()),
-                                        "input_feature_counts": dict(Counter(feature.type for feature in record.features
-                                                                              if feature.type != "source")),
+                                        "input_feature_counts": dict(input_counts),
+                                        "omitted_feature_counts": {
+                                            key: input_counts[key] for key in sorted(omit_features) if input_counts[key]
+                                        },
                                         "feature_counts": dict(counts)})
+            missing = item.trna_overrides.keys() - applied_trna_overrides
+            if missing:
+                raise MSSPackError(
+                    f"No input tRNA locus_tag in organelle {item.name} for trna_overrides: "
+                    f"{', '.join(sorted(missing))}"
+                )
     nuclear_check: dict[str, str] | None = None
     if nuclear_annotation is not None:
         nuclear_annotation = nuclear_annotation.expanduser().resolve()
@@ -406,6 +465,9 @@ def _prepare(
         if collisions:
             raise MSSPackError("Nuclear/organelle locus_tag collision: " + ", ".join(sorted(collisions)[:10]))
         nuclear_check = {"annotation": str(nuclear_annotation), "sha256": _digest(nuclear_annotation.read_bytes())}
+    review_count = write_submission_review(ann, work / SUBMISSION_REVIEW_NAME)
+    if review_count:
+        warnings.append(f"{review_count} submission review warnings; see {SUBMISSION_REVIEW_NAME}")
     validation = ValidationArtifacts(ann, fasta, ensure_dir(root / "logs" / work.name), work)
     if validate:
         run_validation(options=replace(ValidationOptions.from_config(config),
@@ -423,6 +485,7 @@ def _prepare(
                "msspack_version": __version__, "implementation_fingerprint": implementation_fingerprint(),
                "inputs": inputs, "records": records_summary, "warnings": warnings,
                "feature_audit_count": len(audit), "sequence_bases_modified": False,
+               "submission_review_warning_count": review_count,
                "review_required": bool(warnings),
                "nuclear_locus_tag_check": nuclear_check,
                "nuclear_analysis_executed": False, "submission_performed": False,

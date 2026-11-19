@@ -32,14 +32,25 @@ genbank = "mitochondrion.gb"
 # Per-record values override GenBank topology. Do not infer circularity from a name.
 topology = { ctg1 = "circular", ctg2 = "linear" }
 completeness = { ctg1 = "complete", ctg2 = "partial" }
+# Use original record IDs for optional, curator-approved title overrides.
+ff_definition = { ctg2 = "@@[organism]@@ mitochondrial DNA region" }
+omit_features = ["exon"]
 # Optional externally calculated functional classes and reference-gene assessment.
 # assessment_json = "mitochondrion.assessment.json"
+
+[organelles.st_comment]
+assembly_method = "Organelle Assembler v. 1.0"
+assembly_name = "MyAssembly_1.0"
+genome_coverage = "Unknown"
+sequencing_technology = "Sequencer"
 
 [[organelles]]
 name = "pt"
 organelle = "plastid:chloroplast"
 genbank = "plastid.gb"
 completeness = { ctg1 = "complete" }
+ff_definition = { ctg1 = "@@[organism]@@ chloroplast DNA, complete sequence" }
+omit_features = ["intron"]
 ```
 
 Alternatively use `fasta` and `gff` instead of `genbank`, with an explicit
@@ -57,6 +68,29 @@ translation table. A configured code must agree with each supplied CDS table.
 Missing completeness is reported as unconfirmed; it is never promoted to a
 complete genome. `complete` describes the individual sequence, including one
 component of a multipart assembly, and produces “complete sequence” in its title.
+
+With `[organelles.st_comment]` under an organelle input, all four assembly
+metadata fields are required and are emitted on each entry of that input.
+Use `Unknown` if the coverage is unavailable. The separate nuclear metadata
+is not copied to the MISC file. `ff_definition` overrides titles by original
+record ID, leaving the configured topology and completeness independent.
+The opt-in `omit_features` list supports `exon` and `intron` for cases where
+the curator approves their removal. CDS joins and other features are retained,
+and omitted features are recorded in the audit.
+
+Set `trna_overrides` under an individual `[[organelles]]` input to apply reviewed
+`gene` and `product` values to selected tRNAs. Each key must be an existing
+`locus_tag` on exactly one tRNA in that input or on its associated gene.
+
+```toml
+[organelles.trna_overrides]
+Demo_mt000001 = { gene = "trnI-CAU", product = "tRNA-Ile" }
+```
+
+Both values must name the same amino acid. The override changes only these
+qualifiers in the MSS output. The audit records the values before and after
+the override, including any inherited gene name. Other mismatches remain
+visible in `submission-review.tsv` for review.
 
 ## Commands and outputs
 
@@ -84,6 +118,7 @@ can be omitted. Under the configured output directory, `organelles/final/` conta
 | `summary.json` | Input hashes, per-entry sequence hashes, lengths, topology, completeness, counts and warnings |
 | `feature-audit.json` | Input/output qualifiers, locations and extracted feature sequence hashes |
 | `ddbj-validation-summary.json` | Actual Parser/transChecker status |
+| `submission-review.tsv` | Advisory warnings, including tRNA gene/product mismatches |
 | `index.html`, `sequences.svg`, `sequences.pdf` | Self-contained review and sequence-length plot |
 | `organelle-<name>-gene-flow.sankey.svg` / `.pdf`, `.tsv` | Supplied CDS/RNA features retained in MSS, one flow per organelle input |
 | `organelle-<name>-functions.svg` / `.pdf` | Externally supplied functional classes, counted per CDS feature |

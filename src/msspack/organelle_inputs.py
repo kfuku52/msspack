@@ -147,7 +147,10 @@ def load_organelle_records(item: OrganelleConfig, base: Path) -> list[SeqRecord]
                 values = feature.qualifiers.get("organelle", [])
                 if values and values != [item.organelle]:
                     raise MSSPackError(f"Organelle source conflicts with configuration: {identifier}")
-    for name, metadata in (("topology", item.topology), ("completeness", item.completeness)):
+    for name, metadata in (
+        ("topology", item.topology), ("completeness", item.completeness),
+        ("ff_definition", item.ff_definition),
+    ):
         missing = set(metadata) - seen
         if missing:
             raise MSSPackError(f"Unknown sequence ID in organelle {name}: {', '.join(sorted(missing))}")

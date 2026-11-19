@@ -118,6 +118,40 @@ both modes are disabled; `run --no-busco` also makes them optional for that run.
 Without a config, doctor treats BUSCO as optional. These checks do not execute
 BUSCO or verify the contents of a lineage dataset.
 
+## Submission review
+
+`pack`, `run`, and `organelles` write `submission-review.tsv` beside the
+published ANN/FASTA files. The table reports missing WGS coverage, CDSs under
+93 coding bases (including the terminal codon, when present), one-base CDS
+segments, shared segments on the same strand at distinct loci, and tRNA
+gene/product mismatches. Partial CDSs are flagged for separate review. Warnings
+include locations and locus tags and require a decision from the curator or
+submitter. They do not change models or replace Parser/transChecker.
+
+Review an existing MSS ANN without rebuilding or validating its sequences:
+
+```bash
+msspack review-submission --ann input.ann.txt --output submission-review.tsv
+```
+
+Apply only changes agreed for the submission:
+
+- `inputs.exclude_contigs` accepts exact FASTA IDs, such as
+  `["contig_to_exclude"]`, from an already reviewed contamination screen. It
+  filters both staged inputs before processing and BUSCO. Unknown IDs and
+  removal of every record are errors. The input-copy logs and metrics record
+  the removed IDs, sequence lengths and GFF feature counts.
+- Set `sample.locus_tag_digits = 5` and
+  `sample.locus_tag_number_prefix = "g"` to normalize identifiers such as
+  `g1` and `MyTag_g1` to `MyTag_g00001` in the GFF and its references.
+  Set the prefix option only for identifiers that use that numbering scheme.
+- Set `pipeline.omit_redundant_mrna = true` if DDBJ requests it. The final
+  conversion omits an mRNA only when one same-locus CDS represents its
+  exact ordered, stranded intervals and qualifiers. Numeric coordinates
+  of partial CDS ends may match the mRNA; their partial markers stay on
+  the CDS. Unmatched transcripts, UTRs, and transcript-specific annotations
+  are retained. The default emits coding mRNAs.
+
 ## Outputs and interpretation
 
 Paths below are relative to `project.output_dir`:
@@ -127,6 +161,7 @@ Paths below are relative to `project.output_dir`:
 | `final/<sample.locus_tag>.ann.txt` | Headerless, five-column MSS annotation: entry, feature, location, qualifier, value; blank cells continue the current entry/feature |
 | `final/<sample.locus_tag>.fasta` | MSS nucleotide sequences with `//` after each entry, not plain FASTA for arbitrary downstream tools |
 | `final/ddbj-validation-summary.json` | Structured validation status, including a skipped result when validation was disabled |
+| `final/submission-review.tsv` | Advisory warnings with entry, feature, locus tag and location |
 | `intermediate/` | Numbered prepared FASTA/GFF and annotation tables (`ID`, `Description`, `Locus_tag` for the core annotation tables) |
 | `logs/` | Per-stage logs, metrics JSON, and ID/duplicate audit tables |
 | `build-manifest.json` | Latest build status, stage execution/cache decisions, timings, and optional orchestration/plot/report metadata |

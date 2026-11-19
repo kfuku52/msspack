@@ -7,9 +7,67 @@ from pathlib import Path
 
 from msspack.pipeline import run_pipeline
 from msspack.pipeline_plots import run_pipeline_plots
+from msspack.utils import MSSPackError
 
 
 class IntegrationPackTests(unittest.TestCase):
+    def test_curator_options_apply_to_the_published_pair_and_invalidate_cached_inputs(self) -> None:
+        fixture = Path(__file__).resolve().parent / "fixtures" / "minimal_pack"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir) / "input"
+            shutil.copytree(fixture, base)
+            config_path = base / "config.toml"
+            original_config = config_path.read_text()
+            config = (
+                original_config.replace('gff = "input.gff3"', 'gff = "input.gff3"\nexclude_contigs = ["foreign"]')
+                .replace("locus_tag_digits = 6", 'locus_tag_digits = 5\nlocus_tag_number_prefix = "g"')
+                .replace("[pipeline]", "[pipeline]\nomit_redundant_mrna = true")
+                .replace('genome_coverage = "10x"', 'genome_coverage = "Unknown"')
+            )
+            fasta_path = base / "input.fa"
+            gff_path = base / "input.gff3"
+            fasta = fasta_path.read_text() + ">foreign\nATGCCCTAA\n"
+            gff = (
+                gff_path.read_text().replace("gene1", "g1").replace("tx1", "g1.t1")
+                .replace("test protein", "DNA -binding protein")
+                + "##sequence-region foreign 1 9\n"
+                + "foreign\tsrc\tgene\t1\t9\t.\t+\t.\tID=g2\n"
+                + "##FASTA\n>ctg1\nATGAAATAA\n>foreign\nATGCCCTAA\n"
+            )
+            fasta_path.write_text(fasta)
+            gff_path.write_text(gff)
+            original = run_pipeline(config_path, validate=False)
+            self.assertIn(">foreign", original.fasta_path.read_text())
+            self.assertIn("\tmRNA\t", original.ann_path.read_text())
+
+            config_path.write_text(config)
+            updated = run_pipeline(config_path, validate=False)
+            self.assertEqual(updated.fasta_path.read_text(), (base / "expected.fasta").read_text())
+            ann = updated.ann_path.read_text()
+            self.assertIn("\tGenome Coverage\tUnknown\n", ann)
+            self.assertIn("\tCDS\t1..9\tlocus_tag\tFix_g00001\n", ann)
+            self.assertIn("transcript_id:Fix_g00001.t1", ann)
+            self.assertIn("\tproduct\tDNA-binding protein\n", ann)
+            self.assertNotIn("\tmRNA\t", ann)
+            self.assertNotIn("foreign", ann)
+            self.assertEqual(fasta_path.read_text(), fasta)
+            self.assertEqual(gff_path.read_text(), gff)
+            copied_gff = (updated.intermediate / "00.input.annotations.gff").read_text()
+            self.assertNotIn("foreign", copied_gff)
+            self.assertIn("##FASTA\n>ctg1\nATGAAATAA\n", copied_gff)
+            counts = json.loads((updated.logs / "00.copy-input-fasta.metrics.json").read_text())
+            self.assertEqual(counts["details"]["excluded_contigs"], {"foreign": 9})
+            counts = json.loads((updated.logs / "00.copy-input-gff.metrics.json").read_text())
+            self.assertEqual(counts["details"]["excluded_gff_features"], {"foreign": 1})
+            review = (updated.final / "submission-review.tsv").read_text()
+            self.assertIn("short_cds\tctg1\tCDS\tFix_g00001", review)
+            self.assertNotIn("missing_genome_coverage", review)
+
+            config_path.write_text(config.replace('["foreign"]', '["missing"]'))
+            with self.assertRaisesRegex(MSSPackError, "absent from FASTA: missing"):
+                run_pipeline(config_path, validate=False)
+            self.assertEqual(updated.ann_path.read_text(), ann)
+
     def test_functional_annotation_updates_ann_with_local_reference(self) -> None:
         fixture_dir = Path(__file__).resolve().parent / "fixtures" / "minimal_pack"
         with tempfile.TemporaryDirectory() as tmp_dir:

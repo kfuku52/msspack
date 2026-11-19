@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from ..product_names import normalize_product_spacing
+
 
 def render_source_feature(
     *,
@@ -16,12 +18,12 @@ def render_source_feature(
     sex: str,
     tissue_type: str = "",
     isolation_source: str = "",
+    ff_definition: str | None = None,
 ) -> str:
-    out = f"{contig_name}\tsource\t1..{length}"
-    if isolate:
-        out += "\tff_definition\t@@[organism]@@ @@[isolate]@@ DNA, @@[submitter_seqid]@@\n"
-    else:
-        out += "\tff_definition\t@@[organism]@@ DNA, @@[submitter_seqid]@@\n"
+    if ff_definition is None:
+        sample = "@@[organism]@@ @@[isolate]@@" if isolate else "@@[organism]@@"
+        ff_definition = f"{sample} DNA, @@[submitter_seqid]@@"
+    out = f"{contig_name}\tsource\t1..{length}\tff_definition\t{ff_definition}\n"
     out += f"\t\t\tmol_type\t{mol_type}\n"
     out += f"\t\t\torganism\t{organism_name}\n"
     if strain:
@@ -59,7 +61,7 @@ def render_cds_feature(
     else:
         out = f"\tCDS\t{joined_location}\tlocus_tag\t{custom_locus_tag}\n"
     out += f"\t\t\tnote\ttranscript_id:{mrna_id}\n"
-    out += f"\t\t\tproduct\t{product_name}\n"
+    out += f"\t\t\tproduct\t{normalize_product_spacing(product_name)}\n"
     out += f"\t\t\ttransl_table\t{transl_table}\n"
     out += f"\t\t\tcodon_start\t{codon_start}\n"
     return out
@@ -128,7 +130,10 @@ def render_generic_feature(
     position: str,
     qualifiers: Iterable[tuple[str, str]],
 ) -> str:
-    qualifier_rows = [(key, value) for key, value in qualifiers if key]
+    qualifier_rows = [
+        (key, normalize_product_spacing(value) if key == "product" else value)
+        for key, value in qualifiers if key
+    ]
     out = f"\t{feature_key}\t{position}"
     if not qualifier_rows:
         return out + "\n"

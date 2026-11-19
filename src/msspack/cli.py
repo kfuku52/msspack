@@ -17,6 +17,7 @@ from .organelles import prepare_organelles
 from .pipeline import run_pipeline
 from .pipeline_plots import run_pipeline_plots, summarize_pipeline_plots
 from .report import run_html_report
+from .submission_review import write_submission_review
 from .submission_update import prepare_update
 from .utils import MSSPackError, write_text
 from .validation import validate_existing
@@ -210,6 +211,12 @@ def _build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("--ann", required=True, help="annotation file")
     validate_parser.add_argument("--fasta", required=True, help="sequence file")
 
+    review_parser = subparsers.add_parser(
+        "review-submission", help="write advisory warnings for an existing MSS annotation",
+    )
+    review_parser.add_argument("--ann", required=True, type=Path)
+    review_parser.add_argument("--output", required=True, type=Path, help="warning TSV")
+
     update_parser = subparsers.add_parser(
         "prepare-update", help="prepare existing MSS files for an annotation-only update"
     )
@@ -397,6 +404,13 @@ def _handle_prepare_update(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_review_submission(args: argparse.Namespace) -> int:
+    output = args.output.expanduser()
+    count = write_submission_review(args.ann.expanduser(), output)
+    print(f"{output}\t{count} warnings")
+    return 0
+
+
 def _dispatch(args: argparse.Namespace) -> int:
     handlers = {
         "init": _handle_init,
@@ -411,6 +425,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "report": _handle_report,
         "busco": _handle_busco,
         "validate": _handle_validate,
+        "review-submission": _handle_review_submission,
         "prepare-update": _handle_prepare_update,
         "internal": handle_internal,
     }

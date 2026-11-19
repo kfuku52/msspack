@@ -4,7 +4,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-from .config import MSSPackConfig
+from .config import MSSPackConfig, StCommentConfig
 from .config_validation import normalize_genome_coverage
 from .utils import write_text
 
@@ -45,7 +45,22 @@ def _append_block(
     lines.extend(_rows_for_repeated_qualifiers(feature, qualifier, values))
 
 
-def render_header(config: MSSPackConfig) -> str:
+def render_st_comment(config: StCommentConfig, *, entry: str = "") -> str:
+    lines = [_row(entry, "ST_COMMENT", "", "tagset_id", config.tagset_id)]
+    lines.extend(
+        _row("", "", "", qualifier, value)
+        for qualifier, value in (
+            ("Assembly Method", config.assembly_method),
+            ("Assembly Name", config.assembly_name),
+            ("Genome Coverage", normalize_genome_coverage(config.genome_coverage)),
+            ("Sequencing Technology", config.sequencing_technology),
+        )
+        if value
+    )
+    return "\n".join(lines) + "\n"
+
+
+def render_header(config: MSSPackConfig, *, include_st_comment: bool = True) -> str:
     lines: list[str] = []
 
     common_entry = "COMMON"
@@ -88,27 +103,10 @@ def render_header(config: MSSPackConfig) -> str:
         ]
     )
 
-    lines.append(_row("", "ST_COMMENT", "", "tagset_id", config.st_comment.tagset_id))
-    if config.st_comment.assembly_method:
-        lines.append(_row("", "", "", "Assembly Method", config.st_comment.assembly_method))
-    if config.st_comment.assembly_name:
-        lines.append(_row("", "", "", "Assembly Name", config.st_comment.assembly_name))
-    if config.st_comment.genome_coverage:
-        lines.append(
-            _row(
-                "",
-                "",
-                "",
-                "Genome Coverage",
-                normalize_genome_coverage(config.st_comment.genome_coverage),
-            )
-        )
-    if config.st_comment.sequencing_technology:
-        lines.append(
-            _row("", "", "", "Sequencing Technology", config.st_comment.sequencing_technology)
-        )
-
-    return "\n".join(lines) + "\n"
+    header = "\n".join(lines) + "\n"
+    if include_st_comment:
+        header += render_st_comment(config.st_comment)
+    return header
 
 
 def normalize_annotation_body(body: str) -> str:
